@@ -1,0 +1,32 @@
+# =====================================================================
+# Este repositorio existe para PUBLICAR LA APP, no para versionar el
+# proyecto entero.
+#
+# La carpeta pesa ~1.1 GB y trae archivos que GitHub no acepta
+# (output/LIQUIDACION_CONST.xlsx son 243 MB y el limite duro son 100 MB),
+# ademas de los insumos catastrales, que no tienen por que salir de aqui.
+#
+# Por eso se ignora TODO por defecto y solo se vuelve a incluir lo que
+# src/app_vigencias.py necesita para correr en Streamlit Community Cloud.
+# Para agregar algo mas, sumar otra linea con "!".
+# =====================================================================
+
+/*
+
+!/.gitignore
+!/requirements.txt
+!/.streamlit
+!/src
+
+# Del output entra UN SOLO archivo: el recorte anonimo que lee la app.
+# El detalle completo (COMPARACION_VIGENCIA_DETALLE.parquet) lleva ID_PREDIO y
+# numero predial nacional de 311 mil predios y NO puede salir de aqui: el
+# repositorio es publico. Si algun dia hay que versionarlo, primero el repo
+# tiene que volver a ser privado.
+!/output
+/output/*
+!/output/COMPARACION_VIGENCIA_PUBLICO.parquet
+
+# Basura de Python que vive dentro de src/
+__pycache__/
+*.pyc
