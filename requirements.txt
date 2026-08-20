@@ -1,0 +1,7 @@
+# Lo que necesita src/app_vigencias.py para correr en Streamlit Community Cloud.
+# No es el entorno completo del proyecto: la app solo lee el parquet de detalle,
+# no ejecuta la liquidacion (nada de matplotlib, xlsxwriter ni scikit-learn).
+# altair no se lista porque viene dentro de streamlit.
+streamlit>=1.40
+pandas>=2.0
+pyarrow>=14.0
