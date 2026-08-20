@@ -148,6 +148,27 @@ CONFIG = {
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
     "factor_catastral": 0.7,
 
+    # --- Catastral <-> comercial de la VIGENCIA -------------------------------
+    # El avaluo catastral que trae la base es una fraccion del comercial, y esa
+    # fraccion depende de si la comuna se actualizo en 2024-2025: en las que si,
+    # el catastral quedo al 70% del comercial; en las demas, al 60%. Para leer
+    # la vigencia en comercial hay que dividir por ese factor.
+    #
+    # El TERRENO va siempre por 0.7, en toda la ciudad.
+    #
+    # En el universo comparable solo aparecen 17 comunas urbanas: las 12 de esta
+    # lista mas la 07, 14, 15, 20 y 21, que van por 0.6. Las rurales (51-65) no
+    # entran porque ninguna tiene VM2 de tabla todavia.
+    "comunas_act_2024_2025": [1, 2, 3, 4, 8, 9, 10, 11, 12, 17, 19, 22],
+    "factor_comercial_act": 0.7,      # comunas actualizadas 2024-2025
+    "factor_comercial_resto": 0.6,    # las demas
+    "factor_comercial_terreno": 0.7,  # el terreno no distingue comuna
+
+    # En que base sale el reporte de Excel: "CATASTRAL" o "COMERCIAL". Las dos
+    # se calculan siempre y las dos van al parquet, asi que la app deja cambiar
+    # entre ellas sin volver a correr nada; esto solo decide cual se imprime.
+    "base_valor": "CATASTRAL",
+
     # Las dos vigencias que se comparan. La base trae hoy la vigencia 2026 y la
     # liquidacion daria la 2027. De aqui salen TODOS los nombres del reporte
     # (columnas del Excel, series de los graficos y textos), via
@@ -156,9 +177,13 @@ CONFIG = {
     "vigencia_base": 2026,
     "vigencia_liq": 2027,
 
-    # Familias de tablas que entran al reporte, en orden.
-    "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"), ("T2_EDIFICIOS", "EDIFICIOS"),
-                 ("T3_COMERCIAL", "COMERCIAL"), ("T4_INDUSTRIAL", "INDUSTRIAL")],
+    # Familias de tablas que entran al reporte, en orden. Son las dos que trae
+    # el consolidado V1: residenciales y edificios. T3_COMERCIAL y
+    # T4_INDUSTRIAL existen en TABLA_ORIGEN pero ninguna de sus construcciones
+    # tiene VM2 (la tabla no se ha entregado), asi que aunque se listaran aqui
+    # se caerian enteras; cuando lleguen, se agregan a esta lista.
+    "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"),
+                 ("T2_EDIFICIOS", "EDIFICIOS")],
 
     # Solo entran los predios de UNA SOLA construccion: son los unicos que se
     # pueden comparar de punta a punta (VM2 y avaluo) sin repartir el terreno
@@ -183,6 +208,57 @@ CONFIG = {
     "generar_graficos": True,
     "guardar_detalle": True,
 }
+
+
+# Las cuatro series que se pueden comparar: dos medidas (el VM2 de la
+# construccion y el avaluo del predio) en dos bases (catastral y comercial).
+# Cada entrada es (columna de la vigencia, columna de la liquidacion, prefijo
+# con que se nombran las columnas del reporte).
+SERIES = {
+    ("VM2", "CATASTRAL"): {
+        "vig": "VM2_VIGENCIA", "liq": "VM2_LIQ",
+        "dif": "DIF_ABS", "var": "VARIACION_PCT", "prefijo": "VM2"},
+    ("VM2", "COMERCIAL"): {
+        "vig": "VM2_COM_VIGENCIA", "liq": "VM2_COM_LIQ",
+        "dif": "DIF_COM_ABS", "var": "VARIACION_COM_PCT", "prefijo": "VM2_COM"},
+    ("AVALUO", "CATASTRAL"): {
+        "vig": "AVALUO_VIGENCIA", "liq": "AVALUO_LIQ",
+        "dif": "DIF_AVALUO", "var": "VARIACION_AVALUO_PCT", "prefijo": "AVALÚO"},
+    ("AVALUO", "COMERCIAL"): {
+        "vig": "AVALUO_COM_VIGENCIA", "liq": "AVALUO_COM_LIQ",
+        "dif": "DIF_AVALUO_COM", "var": "VARIACION_AVALUO_COM_PCT",
+        "prefijo": "AVALÚO_COM"},
+}
+
+
+def serie(medida: str) -> dict:
+    """
+    Que columnas usar para una medida en la base configurada.
+
+    medida es "VM2" o "AVALUO"; la base sale de CONFIG["base_valor"]. Devuelve
+    las llaves vig / liq / dif / var / prefijo. Todo el reporte pide las
+    columnas por aqui, asi que cambiar de base no toca ninguna otra funcion.
+    """
+    return SERIES[(medida, CONFIG["base_valor"])]
+
+
+def factor_comercial(d: pd.DataFrame) -> pd.Series:
+    """
+    Por cuanto hay que dividir el valor CATASTRAL de cada fila para leerlo en
+    comercial: 0.7 en las comunas actualizadas en 2024-2025 y 0.6 en el resto.
+
+    La comuna viene como texto con cero a la izquierda ('07'), asi que se pasa a
+    numero antes de comparar contra la lista. Una comuna que no se pueda leer
+    como numero cae en el factor del resto, que es el mas conservador: deja el
+    valor comercial mas alto y por lo tanto la comparacion menos favorable.
+    """
+    act = CONFIG["comunas_act_2024_2025"]
+    if "COMUNA" not in d.columns:
+        return pd.Series(CONFIG["factor_comercial_act"], index=d.index)
+    numero = pd.to_numeric(d["COMUNA"], errors="coerce")
+    return pd.Series(np.where(numero.isin(act),
+                              CONFIG["factor_comercial_act"],
+                              CONFIG["factor_comercial_resto"]), index=d.index)
 
 
 def nombres_series(prefijo: str) -> tuple[str, str, str]:
@@ -210,7 +286,8 @@ def nombres_series(prefijo: str) -> tuple[str, str, str]:
 COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM",
             "TABLA_ORIGEN", "TIPOLOGIA_ZHF", "ZHF", "COMUNA", "PUNTCONS",
             "ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
-            "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "AVALPRED",
+            "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "VANEXO",
+            "AVALPRED",
             # Marcas de como se valoro la construccion a cada lado. Son las que
             # dejan fuera lo que no sale de la tabla (ver preparar()).
             "ESPECIAL", "INTEGRAL", "METODO_LIQUIDACION"]
@@ -319,7 +396,8 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         return d
 
     for c in ["ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
-              "VM2_ESP_2026", "VTER", "VALOANEX", "AVALPRED", "PUNTCONS"]:
+              "VM2_ESP_2026", "VTER", "VALOANEX", "VANEXO", "AVALPRED",
+              "PUNTCONS"]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
@@ -328,13 +406,24 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     # esta revisando. Sin esto, una tabla que todavia no existe (el consolidado
     # V1 solo trae T1_RESIDENCIAL y T2_EDIFICIOS) aparecia igual en el reporte,
     # armada con el puñado de especiales que si tenian valor.
-    d["VM2_COM"] = d["VM2"]
     solo_esp = (int(((d["VM2"] <= 0) & (d["VM2_ESP_2026"] > 0)).sum())
                 if "VM2_ESP_2026" in d.columns else 0)
 
+    # --- Las dos bases, calculadas siempre ----------------------------------
+    # El VM2 del parquet ya es COMERCIAL (asi lo deja Liquidacion_tablas.py),
+    # asi que la liquidacion en comercial es el VM2 tal cual, y en catastral es
+    # ese mismo VM2 por 0.7. La vigencia va al reves: VALORCONS es catastral, y
+    # para leerlo en comercial hay que dividir por el factor de la comuna.
     factor = CONFIG["factor_catastral"]
-    d["VM2_LIQ"] = d["VM2_COM"] * factor                 # catastral, comparable
-    d["VM2_VIGENCIA"] = d["VALORCONS"] / d["ACONCONS"]   # catastral, lo de hoy
+    d["F_COMERCIAL"] = factor_comercial(d)
+    d["ACTUALIZACION"] = np.where(
+        d["F_COMERCIAL"] == CONFIG["factor_comercial_act"],
+        "ACT 2024-2025", "SIN ACTUALIZAR")
+
+    d["VM2_COM_LIQ"] = d["VM2"]                             # comercial, 2027
+    d["VM2_LIQ"] = d["VM2_COM_LIQ"] * factor                # catastral, 2027
+    d["VM2_VIGENCIA"] = d["VALORCONS"] / d["ACONCONS"]      # catastral, hoy
+    d["VM2_COM_VIGENCIA"] = d["VM2_VIGENCIA"] / d["F_COMERCIAL"]   # comercial, hoy
 
     # Cuantas se caen por familia por no tener VM2 de tabla. Es la forma de ver
     # que tablas no llegaron todavia: T3_COMERCIAL y T4_INDUSTRIAL se caen
@@ -362,21 +451,33 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     if d.empty:
         return d
 
-    d["DIF_ABS"] = d["VM2_LIQ"] - d["VM2_VIGENCIA"]
-    d["VARIACION_PCT"] = d["DIF_ABS"] / d["VM2_VIGENCIA"] * 100
-    d["VARIACION_PCT_ABS"] = d["VARIACION_PCT"].abs()
+    # La variacion se calcula en las DOS bases y con nombres distintos, para que
+    # el parquet las lleve las dos y la app pueda cambiar de una a otra sin
+    # volver a correr esto. Ojo: en comercial la variacion NO es la misma que en
+    # catastral, porque el factor de la vigencia (0.7 o 0.6) no es el mismo 0.7
+    # con que se baja la liquidacion.
+    for base in ("", "_COM"):
+        vig, liq = f"VM2{base}_VIGENCIA", f"VM2{base}_LIQ"
+        d[f"DIF{base}_ABS"] = d[liq] - d[vig]
+        d[f"VARIACION{base}_PCT"] = d[f"DIF{base}_ABS"] / d[vig] * 100
+
+    # Sentido, tolerancia y rangos van sobre la base que se este reportando.
+    activa = serie("VM2")
+    d["VARIACION_PCT_ABS"] = d[activa["var"]].abs()
     d["SENTIDO"] = np.select(
-        [d["DIF_ABS"] > 0, d["DIF_ABS"] < 0],
+        [d[activa["dif"]] > 0, d[activa["dif"]] < 0],
         ["SUBE con la liquidacion", "BAJA con la liquidacion"], default="IGUAL")
     d["FUERA_TOLERANCIA"] = d["VARIACION_PCT_ABS"] > CONFIG["tolerancia_pct"]
     d["RANGO_VARIACION"] = pd.cut(
-        d["VARIACION_PCT"],
+        d[activa["var"]],
         bins=[-np.inf, -50, -25, -10, 10, 25, 50, np.inf],
         labels=["baja mas de 50%", "baja 25-50%", "baja 10-25%",
                 "estable (±10%)", "sube 10-25%", "sube 25-50%", "sube mas de 50%"])
 
-    # Valor de construccion (para dimensionar el impacto, no solo el VM2)
-    d["VALORCONS_LIQ"] = d["AREA_CONST"] * d["VM2_COM"] * factor
+    # Valor de construccion (para dimensionar el impacto, no solo el VM2).
+    # El comercial es el area por el VM2 tal cual, sin bajarlo con el 0.7.
+    d["VALORCONS_COM_LIQ"] = d["AREA_CONST"] * d["VM2_COM_LIQ"]
+    d["VALORCONS_LIQ"] = d["VALORCONS_COM_LIQ"] * factor
     d["DIF_VALORCONS"] = d["VALORCONS_LIQ"] - d["VALORCONS"]
 
     # Llave de los bloques del reporte: tabla + actividad economica de la ZHF.
@@ -520,9 +621,16 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     una sola construccion. Se deja porque es la garantia de que el avaluo nunca
     se lea sobre predios de varias, aunque se apague aquel filtro.
 
-    En los de varias, VTER y VALOANEX vienen repetidos por fila y el avaluo no
+    En los de varias, VTER y el anexo vienen repetidos por fila y el avaluo no
     se puede atribuir a una tabla sin inventar un reparto. Se devuelve vacio si
     faltan las columnas de terreno o anexo.
+
+    El anexo se toma de VANEXO, no de VALOANEX. VALOANEX es el valor de UNA
+    fila de anexo y en la fila de la construccion viene en cero: con el, 41.824
+    predios entraban al reporte sin su anexo -uno de ~3.8 millones en la
+    mediana- y el avaluo reconstruido solo cuadraba con el AVALPRED de la base
+    en el 89.1% de los casos. Con VANEXO, que es el total del predio, cuadra en
+    el 99.99%. Si algun dia hay que volver a VALOANEX, es esta linea.
 
     "Una sola construccion" se cuenta sobre el PREDIO COMPLETO
     (N_CONST_PREDIO, armada en preparar()), no sobre las filas que sobrevivieron
@@ -531,7 +639,8 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     reconstruido coincidia con el AVALPRED de la base en el 0.1% de los casos,
     contra el 89.1% de los que de verdad tienen una sola.
     """
-    faltan = [c for c in ("VTER", "VALOANEX") if c not in d.columns]
+    col_anexo = "VANEXO" if "VANEXO" in d.columns else "VALOANEX"
+    faltan = [c for c in ("VTER", col_anexo) if c not in d.columns]
     if faltan or d.empty:
         if faltan:
             print(f"   (sin columnas {faltan}: no se compara avaluo)")
@@ -550,13 +659,28 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
         return uni
 
     uni["VTER"] = uni["VTER"].fillna(0)
-    uni["VALOANEX"] = uni["VALOANEX"].fillna(0)
-    uni["AVALUO_VIGENCIA"] = uni["VTER"] + uni["VALORCONS"] + uni["VALOANEX"]
-    uni["AVALUO_LIQ"] = uni["VTER"] + uni["VALORCONS_LIQ"] + uni["VALOANEX"]
-    uni["DIF_AVALUO"] = uni["AVALUO_LIQ"] - uni["AVALUO_VIGENCIA"]
-    uni["VARIACION_AVALUO_PCT"] = np.where(
-        uni["AVALUO_VIGENCIA"] > 0,
-        uni["DIF_AVALUO"] / uni["AVALUO_VIGENCIA"] * 100, np.nan)
+    anexo = uni[col_anexo].fillna(0)
+
+    # --- Catastral: los tres componentes tal como los trae la base ----------
+    uni["AVALUO_VIGENCIA"] = uni["VTER"] + uni["VALORCONS"] + anexo
+    uni["AVALUO_LIQ"] = uni["VTER"] + uni["VALORCONS_LIQ"] + anexo
+
+    # --- Comercial: cada componente dividido por su factor -------------------
+    # El terreno va siempre por 0.7; la construccion y el anexo, por el factor
+    # de la comuna (0.7 si se actualizo en 2024-2025, 0.6 si no). La liquidacion
+    # solo cambia la construccion: terreno y anexo son los mismos a los dos
+    # lados, igual que en la version catastral.
+    f_ter = CONFIG["factor_comercial_terreno"]
+    f_com = uni["F_COMERCIAL"]
+    terreno_anexo_com = uni["VTER"] / f_ter + anexo / f_com
+    uni["AVALUO_COM_VIGENCIA"] = terreno_anexo_com + uni["VALORCONS"] / f_com
+    uni["AVALUO_COM_LIQ"] = terreno_anexo_com + uni["VALORCONS_COM_LIQ"]
+
+    for base in ("", "_COM"):
+        vig, liq = f"AVALUO{base}_VIGENCIA", f"AVALUO{base}_LIQ"
+        uni[f"DIF_AVALUO{base}"] = uni[liq] - uni[vig]
+        uni[f"VARIACION_AVALUO{base}_PCT"] = np.where(
+            uni[vig] > 0, uni[f"DIF_AVALUO{base}"] / uni[vig] * 100, np.nan)
 
     # Control: el avaluo reconstruido deberia parecerse al AVALPRED de la base.
     # Si no se parece, la base trae componentes que aqui no se estan sumando.
@@ -578,16 +702,17 @@ def resumen_por_tabla(d: pd.DataFrame) -> pd.DataFrame:
     """Una fila por tabla de liquidacion: cuanto se mueve y cuanto se sale."""
     if d.empty:
         return pd.DataFrame()
+    s = serie("VM2")
     g = d.groupby("TABLA_ORIGEN")
     out = pd.DataFrame({
         "CONSTRUCCIONES": g.size(),
         "PREDIOS": g["ID_PREDIO"].nunique(),
-        "VM2_VIGENCIA_P50": g["VM2_VIGENCIA"].median(),
-        "VM2_LIQ_P50": g["VM2_LIQ"].median(),
-        "VAR_PCT_P50": g["VARIACION_PCT"].median(),
-        "VAR_PCT_PROM": g["VARIACION_PCT"].mean(),
-        "PCT_SUBEN": g["DIF_ABS"].apply(lambda s: (s > 0).mean() * 100),
-        "PCT_BAJAN": g["DIF_ABS"].apply(lambda s: (s < 0).mean() * 100),
+        "VM2_VIGENCIA_P50": g[s["vig"]].median(),
+        "VM2_LIQ_P50": g[s["liq"]].median(),
+        "VAR_PCT_P50": g[s["var"]].median(),
+        "VAR_PCT_PROM": g[s["var"]].mean(),
+        "PCT_SUBEN": g[s["dif"]].apply(lambda x: (x > 0).mean() * 100),
+        "PCT_BAJAN": g[s["dif"]].apply(lambda x: (x < 0).mean() * 100),
         "FUERA_TOLERANCIA": g["FUERA_TOLERANCIA"].sum(),
         "IMPACTO_TOTAL": g["DIF_VALORCONS"].sum(),
     })
@@ -656,13 +781,14 @@ def resumen_general(d: pd.DataFrame, aval: pd.DataFrame) -> pd.DataFrame:
     if d.empty:
         return pd.DataFrame()
 
+    s_vm2, s_aval = serie("VM2"), serie("AVALUO")
     g = d.groupby(["TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA"])
     out = pd.DataFrame({
         "TOTAL": g.size(),
         "PREDIOS": g["ID_PREDIO"].nunique(),
-        "BAJARON": g["DIF_ABS"].apply(lambda s: int((s < 0).sum())),
-        "SUBIERON": g["DIF_ABS"].apply(lambda s: int((s > 0).sum())),
-        "VARIACION_VM2_P50": g["VARIACION_PCT"].median().round(1),
+        "BAJARON": g[s_vm2["dif"]].apply(lambda x: int((x < 0).sum())),
+        "SUBIERON": g[s_vm2["dif"]].apply(lambda x: int((x > 0).sum())),
+        "VARIACION_VM2_P50": g[s_vm2["var"]].median().round(1),
     })
     out["%_BAJARON"] = (out["BAJARON"] / out["TOTAL"] * 100).round(1)
     out["%_SUBIERON"] = (out["SUBIERON"] / out["TOTAL"] * 100).round(1)
@@ -670,8 +796,9 @@ def resumen_general(d: pd.DataFrame, aval: pd.DataFrame) -> pd.DataFrame:
     if aval is not None and not aval.empty:
         ga = aval.groupby(["TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA"])
         out["PREDIOS_AVALUO"] = ga.size()
-        out["BAJARON_AVALUO"] = ga["DIF_AVALUO"].apply(lambda s: int((s < 0).sum()))
-        out["VARIACION_AVALUO_P50"] = ga["VARIACION_AVALUO_PCT"].median().round(1)
+        out["BAJARON_AVALUO"] = ga[s_aval["dif"]].apply(
+            lambda x: int((x < 0).sum()))
+        out["VARIACION_AVALUO_P50"] = ga[s_aval["var"]].median().round(1)
         out["%_BAJARON_AVALUO"] = (out["BAJARON_AVALUO"]
                                    / out["PREDIOS_AVALUO"] * 100).round(1)
 
@@ -723,8 +850,10 @@ def conclusiones(d: pd.DataFrame, aval: pd.DataFrame) -> list[tuple[str, str]]:
         sub = d[d["TABLA_ORIGEN"].str.startswith(prefijo)]
         if sub.empty:
             continue
-        filas.append((familia, _lectura(sub, "VARIACION_PCT", "construcciones")))
-    filas.append(("TOTAL", _lectura(d, "VARIACION_PCT", "construcciones")))
+        filas.append((familia,
+                      _lectura(sub, serie("VM2")["var"], "construcciones")))
+    filas.append(("TOTAL",
+                  _lectura(d, serie("VM2")["var"], "construcciones")))
 
     if aval is not None and not aval.empty:
         filas.append(("AVALUO CATASTRAL", ""))
@@ -733,12 +862,44 @@ def conclusiones(d: pd.DataFrame, aval: pd.DataFrame) -> list[tuple[str, str]]:
             if sub.empty:
                 continue
             filas.append((familia,
-                          _lectura(sub, "VARIACION_AVALUO_PCT", "predios")))
-        filas.append(("TOTAL", _lectura(aval, "VARIACION_AVALUO_PCT", "predios")))
+                          _lectura(sub, serie("AVALUO")["var"], "predios")))
+        filas.append(("TOTAL",
+                      _lectura(aval, serie("AVALUO")["var"], "predios")))
         filas.append(("NOTA", "*El avaluo solo se lee en predios de una sola "
                               "construccion: en los de varias, el terreno y el "
                               "anexo no se pueden repartir por tabla."))
     return filas
+
+
+def seleccion_por_comuna(d: pd.DataFrame) -> pd.DataFrame:
+    """
+    Que quedo seleccionado y donde esta: una fila por comuna.
+
+    Responde "sobre que predios se armo este reporte", que es lo primero que
+    pregunta quien lo recibe. Trae el factor con que se paso a comercial, para
+    que se vea de una que las comunas actualizadas y las que no se convierten
+    distinto.
+    """
+    if d.empty or "COMUNA" not in d.columns:
+        return pd.DataFrame()
+    s = serie("VM2")
+    g = d.groupby("COMUNA")
+    out = pd.DataFrame({
+        "CONSTRUCCIONES": g.size(),
+        "PREDIOS": g["ID_PREDIO"].nunique(),
+        "ACTUALIZACION": g["ACTUALIZACION"].first(),
+        "FACTOR_COMERCIAL": g["F_COMERCIAL"].first(),
+        "T1_RESIDENCIAL": g["TABLA_ORIGEN"].apply(
+            lambda x: int(x.str.startswith("T1_RESIDENCIAL").sum())),
+        "T2_EDIFICIOS": g["TABLA_ORIGEN"].apply(
+            lambda x: int(x.str.startswith("T2_EDIFICIOS").sum())),
+        "VM2_VIGENCIA_P50": g[s["vig"]].median().round(0),
+        "VM2_LIQ_P50": g[s["liq"]].median().round(0),
+        "VAR_PCT_P50": g[s["var"]].median().round(2),
+        "PCT_BAJAN": g[s["dif"]].apply(lambda x: round((x < 0).mean() * 100, 1)),
+    })
+    out["%_DEL_TOTAL"] = (out["CONSTRUCCIONES"] / len(d) * 100).round(2)
+    return out.reset_index().sort_values("CONSTRUCCIONES", ascending=False)
 
 
 def rangos_variacion(d: pd.DataFrame) -> pd.DataFrame:
@@ -1018,25 +1179,30 @@ def graficos_vigencia(bloques_vm2: dict, bloques_aval: dict,
     para que la hoja de Excel pueda armar las dos secciones.
     """
     v_base, v_liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
+    base = CONFIG["base_valor"]              # CATASTRAL o COMERCIAL
+    etiqueta = base.lower()
     salida = {}
     # Los nombres de las columnas y los de las curvas salen del mismo sitio que
-    # los del Excel, para que la leyenda del grafico diga lo mismo que el
-    # encabezado de la tabla que tiene al lado.
-    cb, cl, cvar = nombres_series("VM2")
-    vm2 = _tanda_graficos(bloques_vm2, cb, cl, cvar, "Comparación VM2",
+    # los del Excel -serie() y nombres_series()-, para que la leyenda del
+    # grafico diga lo mismo que el encabezado de la tabla que tiene al lado y
+    # para que los dos cambien juntos al cambiar de base.
+    cb, cl, cvar = nombres_series(serie("VM2")["prefijo"])
+    vm2 = _tanda_graficos(bloques_vm2, cb, cl, cvar,
+                          f"Comparación VM2 {etiqueta}",
                           f"VM2 vigencia {v_base}", f"VM2 vigencia {v_liq}",
-                          "Valor por m² (millones de pesos)", "VM2",
+                          f"Valor por m² {etiqueta} (millones de pesos)", "VM2",
                           os.path.join(carpeta_base, "VM2"), fecha)
     if vm2:
-        salida["VM2 CATASTRAL"] = vm2
-    cb, cl, cvar = nombres_series("AVALÚO")
-    aval = _tanda_graficos(bloques_aval, cb, cl, cvar, "Comparación Avalúo",
+        salida[f"VM2 {base}"] = vm2
+    cb, cl, cvar = nombres_series(serie("AVALUO")["prefijo"])
+    aval = _tanda_graficos(bloques_aval, cb, cl, cvar,
+                           f"Comparación Avalúo {etiqueta}",
                            f"Avalúo vigencia {v_base}",
                            f"Avalúo vigencia {v_liq}",
-                           "Avalúo catastral (millones de pesos)", "AVALUO",
+                           f"Avalúo {etiqueta} (millones de pesos)", "AVALUO",
                            os.path.join(carpeta_base, "AVALUO"), fecha)
     if aval:
-        salida["AVALÚO CATASTRAL"] = aval
+        salida[f"AVALÚO {base}"] = aval
     return salida
 
 
@@ -1123,6 +1289,7 @@ def _tanda_graficos(bloques: dict, col_base: str, col_liq: str, col_var: str,
 def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                          tolerancia_pct: float | None = None,
                          familias: list | None = None,
+                         base_valor: str | None = None,
                          solo_una_construccion: bool | None = None,
                          solo_valor_de_tabla: bool | None = None,
                          exportar: bool = True) -> pd.DataFrame:
@@ -1135,6 +1302,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     ./output/LIQUIDACION_TABLAS.parquet
     tolerancia_pct: % de variacion aceptada (default CONFIG)
     familias      : lista de prefijos de tabla, p.ej. ["T1_RESIDENCIAL"]
+    base_valor    : "CATASTRAL" (default) o "COMERCIAL". Las dos se calculan
+                    siempre; esto decide cual se imprime en el Excel
     solo_una_construccion: False deja entrar tambien los predios de varias
                     construcciones (el avaluo los sigue dejando fuera)
     solo_valor_de_tabla: False deja entrar tambien los especiales e integrales,
@@ -1150,6 +1319,11 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         CONFIG["tolerancia_pct"] = float(tolerancia_pct)
     if familias:
         CONFIG["familias"] = [(p, p.split("_", 1)[-1]) for p in familias]
+    if base_valor is not None:
+        if base_valor.upper() not in ("CATASTRAL", "COMERCIAL"):
+            raise ValueError("base_valor debe ser CATASTRAL o COMERCIAL, "
+                             f"no {base_valor!r}")
+        CONFIG["base_valor"] = base_valor.upper()
     if solo_una_construccion is not None:
         CONFIG["solo_una_construccion"] = bool(solo_una_construccion)
     if solo_valor_de_tabla is not None:
@@ -1173,13 +1347,15 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
 
     tol = CONFIG["tolerancia_pct"]
     fuera = int(d["FUERA_TOLERANCIA"].sum())
-    print(f"\n-- PASO 2: variaciones")
-    print(f"   VM2 vigencia mediano   : {d['VM2_VIGENCIA'].median():,.0f}")
-    print(f"   VM2 liquidacion mediano: {d['VM2_LIQ'].median():,.0f}")
-    print(f"   Variacion mediana      : {d['VARIACION_PCT'].median():+.2f}%")
-    print(f"   Variacion promedio     : {d['VARIACION_PCT'].mean():+.2f}%")
-    print(f"   Suben / bajan          : {(d['DIF_ABS'] > 0).mean() * 100:.1f}% / "
-          f"{(d['DIF_ABS'] < 0).mean() * 100:.1f}%")
+    s_vm2 = serie("VM2")
+    print(f"\n-- PASO 2: variaciones (base {CONFIG['base_valor']})")
+    print(f"   VM2 vigencia mediano   : {d[s_vm2['vig']].median():,.0f}")
+    print(f"   VM2 liquidacion mediano: {d[s_vm2['liq']].median():,.0f}")
+    print(f"   Variacion mediana      : {d[s_vm2['var']].median():+.2f}%")
+    print(f"   Variacion promedio     : {d[s_vm2['var']].mean():+.2f}%")
+    print(f"   Suben / bajan          : "
+          f"{(d[s_vm2['dif']] > 0).mean() * 100:.1f}% / "
+          f"{(d[s_vm2['dif']] < 0).mean() * 100:.1f}%")
     print(f"   Fuera de tolerancia (±{tol:.1f}%): {fuera:,} "
           f"({fuera / len(d) * 100:.2f}%)")
     print(f"   Impacto en valor de construccion: "
@@ -1194,40 +1370,71 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     # --- Tablas del reporte -------------------------------------------------
     print("\n-- PASO 3: tablas del reporte")
     por_tabla = resumen_por_tabla(d)
-    bloques_vm2 = bloques_percentiles(d, "VM2_VIGENCIA", "VM2_LIQ",
-                                      nombres_series("VM2"))
-    bloques_aval = (bloques_percentiles(aval, "AVALUO_VIGENCIA", "AVALUO_LIQ",
-                                        nombres_series("AVALÚO"))
+    s_vm2, s_aval = serie("VM2"), serie("AVALUO")
+    bloques_vm2 = bloques_percentiles(d, s_vm2["vig"], s_vm2["liq"],
+                                      nombres_series(s_vm2["prefijo"]))
+    bloques_aval = (bloques_percentiles(aval, s_aval["vig"], s_aval["liq"],
+                                        nombres_series(s_aval["prefijo"]))
                     if not aval.empty else {})
     general = resumen_general(d, aval)
     rangos = rangos_variacion(d)
+    seleccion = seleccion_por_comuna(d)
     concl = conclusiones(d, aval)
     print(f"   Bloques de percentiles: {len(bloques_vm2)} de VM2, "
           f"{len(bloques_aval)} de avaluo")
 
     fecha = datetime.now().strftime("%Y%m%d")
+    # Las salidas de la base comercial llevan sufijo para que las dos
+    # corridas puedan convivir en la carpeta sin pisarse.
+    sufijo = "" if CONFIG["base_valor"] == "CATASTRAL" else "_COMERCIAL"
     os.makedirs(CONFIG["carpeta_results"], exist_ok=True)
 
     v_base, v_liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
-    vm2_base, vm2_liq, _ = nombres_series("VM2")
-    av_base, av_liq, _ = nombres_series("AVALÚO")
+    comercial = CONFIG["base_valor"] == "COMERCIAL"
+    f_act, f_resto = CONFIG["factor_comercial_act"], CONFIG["factor_comercial_resto"]
+    vm2_base, vm2_liq, _ = nombres_series(s_vm2["prefijo"])
+    av_base, av_liq, _ = nombres_series(s_aval["prefijo"])
     filas_resumen = [
         ("Fecha de ejecucion", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("Fuente", CONFIG["parquet_liquidacion"]),
+        ("Base de valor", CONFIG["base_valor"]),
         ("Que se compara",
          f"lo que daria la liquidacion para la vigencia {v_liq} contra lo que "
-         f"trae hoy la base, que es la vigencia {v_base}; los dos en catastral"),
+         f"trae hoy la base, que es la vigencia {v_base}; los dos en "
+         f"{CONFIG['base_valor'].lower()}"),
         ("Nombres de las series",
          f"el numero es LA VIGENCIA, no el ano de la corrida: _VIG_{v_base} es "
          f"lo que cobra hoy la base y _VIG_{v_liq} lo que quedaria con la "
          f"liquidacion (el ejercicio anterior los llamaba VM2_2025 / VM2_2026)"),
-        (f"{vm2_base} (base)", "VALORCONS / ACONCONS"),
+        (f"{vm2_base} (base)",
+         f"VALORCONS / ACONCONS / factor de la comuna" if comercial
+         else "VALORCONS / ACONCONS"),
         (f"{vm2_liq} (liquidacion)",
-         f"VM2 de tabla x {CONFIG['factor_catastral']} (no entran especiales "
-         f"ni modelo: no salen de la tabla que se esta revisando)"),
-        (f"{av_base} (base)", "VTER + VALORCONS + VALOANEX"),
-        (f"{av_liq} (liquidacion)", "VTER + (AREA_CONST x VM2 x "
-                                    f"{CONFIG['factor_catastral']}) + VALOANEX"),
+         "VM2 de tabla, que ya viene comercial" if comercial else
+         f"VM2 de tabla x {CONFIG['factor_catastral']}"),
+        (f"{av_base} (base)",
+         f"VTER/{CONFIG['factor_comercial_terreno']} + (VALORCONS + VANEXO) / "
+         f"factor de la comuna" if comercial
+         else "VTER + VALORCONS + VANEXO"),
+        (f"{av_liq} (liquidacion)",
+         f"VTER/{CONFIG['factor_comercial_terreno']} + (AREA_CONST x VM2) + "
+         f"VANEXO / factor de la comuna" if comercial
+         else f"VTER + (AREA_CONST x VM2 x {CONFIG['factor_catastral']}) + VANEXO"),
+        ("Factor catastral -> comercial de la vigencia",
+         f"{f_act} en las comunas actualizadas 2024-2025 "
+         f"({', '.join(f'{c:02d}' for c in CONFIG['comunas_act_2024_2025'])}) y "
+         f"{f_resto} en las demas; el TERRENO va siempre por "
+         f"{CONFIG['factor_comercial_terreno']}"),
+        ("Predios por factor comercial",
+         "; ".join(f"{k}: {v:,}" for k, v in
+                   d["ACTUALIZACION"].value_counts().items())
+         if "ACTUALIZACION" in d.columns else "n/d"),
+        ("NOTA anexo",
+         "el avaluo suma VANEXO (el total de anexos del predio) y no VALOANEX "
+         "(el valor de UNA fila de anexo, que en la fila de la construccion "
+         "viene en cero): con VALOANEX, 41.824 predios entraban sin su anexo y "
+         "el avaluo reconstruido solo cuadraba con el AVALPRED de la base en el "
+         "89.1% de los casos, contra el 99.99% con VANEXO"),
         ("Familias", ", ".join(p for p, _ in CONFIG["familias"])),
         ("Que predios entran",
          "predios de UNA SOLA construccion (contada sobre el predio completo, "
@@ -1265,12 +1472,14 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
          or "ninguna"),
         ("Tablas presentes en el reporte",
          ", ".join(sorted(d["TABLA_ORIGEN"].unique()))),
-        ("VM2 vigencia mediano", round(d["VM2_VIGENCIA"].median())),
-        ("VM2 liquidacion mediano", round(d["VM2_LIQ"].median())),
-        ("Variacion mediana (%)", round(d["VARIACION_PCT"].median(), 2)),
-        ("Variacion promedio (%)", round(d["VARIACION_PCT"].mean(), 2)),
-        ("Construcciones que suben (%)", round((d["DIF_ABS"] > 0).mean() * 100, 2)),
-        ("Construcciones que bajan (%)", round((d["DIF_ABS"] < 0).mean() * 100, 2)),
+        ("VM2 vigencia mediano", round(d[s_vm2["vig"]].median())),
+        ("VM2 liquidacion mediano", round(d[s_vm2["liq"]].median())),
+        ("Variacion mediana (%)", round(d[s_vm2["var"]].median(), 2)),
+        ("Variacion promedio (%)", round(d[s_vm2["var"]].mean(), 2)),
+        ("Construcciones que suben (%)",
+         round((d[s_vm2["dif"]] > 0).mean() * 100, 2)),
+        ("Construcciones que bajan (%)",
+         round((d[s_vm2["dif"]] < 0).mean() * 100, 2)),
         ("Fuera de tolerancia", fuera),
         ("Fuera de tolerancia (%)", round(fuera / len(d) * 100, 2)),
         ("Impacto en valor de construccion", round(d["DIF_VALORCONS"].sum())),
@@ -1292,9 +1501,12 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     graficos = {}
     if CONFIG["generar_graficos"]:
         print("\n-- PASO 4: graficos")
+        # Carpeta propia por base: cada tanda borra los PNG que encuentra, asi
+        # que compartirla dejaria en disco los de la ultima corrida y no los
+        # que correspondan al libro que se este mirando.
         graficos = graficos_vigencia(
             bloques_vm2, bloques_aval,
-            os.path.join(CONFIG["carpeta_results"], "GRAFICOS"), fecha)
+            os.path.join(CONFIG["carpeta_results"], f"GRAFICOS{sufijo}"), fecha)
     crono.marca("VIGENCIA: graficos")
 
     # --- Detalle fila a fila: a parquet, no a Excel -------------------------
@@ -1302,19 +1514,27 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     # de todos los predios comparados. Lo que sale a la app publica es el
     # recorte anonimo que se escribe justo despues.
     if CONFIG["guardar_detalle"]:
+        # El avaluo se calcula aparte (solo predios de una construccion), asi
+        # que sus columnas -las dos bases- se traen de vuelta al detalle.
         for c in ("AVALUO_VIGENCIA", "AVALUO_LIQ", "DIF_AVALUO",
-                  "VARIACION_AVALUO_PCT"):
+                  "VARIACION_AVALUO_PCT", "AVALUO_COM_VIGENCIA",
+                  "AVALUO_COM_LIQ", "DIF_AVALUO_COM", "VARIACION_AVALUO_COM_PCT"):
             if not aval.empty and c in aval.columns:
                 d[c] = aval[c]      # el indice de aval es un subconjunto del de d
         cols = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
-                "N_CONST_PREDIO", "COMUNA", "USO_LADM", "TABLA_ORIGEN",
-                "ACTIVIDAD_ECONOMICA", "CLAVE",
+                "N_CONST_PREDIO", "COMUNA", "ACTUALIZACION", "F_COMERCIAL",
+                "USO_LADM", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE",
                 "PUNTCONS", "ACONCONS", "AREA_CONST",
-                "VALORCONS", "VALORCONS_LIQ", "DIF_VALORCONS", "VM2_COM",
+                "VALORCONS", "VALORCONS_LIQ", "VALORCONS_COM_LIQ",
+                "DIF_VALORCONS",
                 "VM2_VIGENCIA", "VM2_LIQ", "DIF_ABS", "VARIACION_PCT",
+                "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS",
+                "VARIACION_COM_PCT",
                 "SENTIDO", "RANGO_VARIACION", "FUERA_TOLERANCIA",
                 "AVALPRED", "AVALUO_VIGENCIA", "AVALUO_LIQ", "DIF_AVALUO",
-                "VARIACION_AVALUO_PCT"]
+                "VARIACION_AVALUO_PCT",
+                "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "DIF_AVALUO_COM",
+                "VARIACION_AVALUO_COM_PCT"]
         det = d[[c for c in cols if c in d.columns]].copy()
         det["RANGO_VARIACION"] = det["RANGO_VARIACION"].astype(str)
         det.to_parquet(CONFIG["parquet_detalle"], index=False)
@@ -1334,9 +1554,13 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # Se ordena por valor a proposito: asi se pierde el orden original del
         # parquet, que corre en paralelo al del ID_PREDIO y permitiria volver a
         # pegar las filas contra la base fila por fila.
-        publicas = ["COMUNA", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE",
+        publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
+                    "ACTIVIDAD_ECONOMICA", "CLAVE",
                     "VM2_VIGENCIA", "VM2_LIQ", "VARIACION_PCT",
-                    "AVALUO_VIGENCIA", "AVALUO_LIQ", "VARIACION_AVALUO_PCT"]
+                    "AVALUO_VIGENCIA", "AVALUO_LIQ", "VARIACION_AVALUO_PCT",
+                    "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT",
+                    "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+                    "VARIACION_AVALUO_COM_PCT"]
         pub = det[[c for c in publicas if c in det.columns]].copy()
 
         # Quitar el ID no basta: el valor exacto es una llave igual de buena.
@@ -1346,8 +1570,11 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # queda sola -del 49.7% al 1.2% en el avaluo, del 13.0% al 1.5% en el
         # VM2- y los percentiles no se corren mas de 0.07%, que sobre una
         # mediana de 146 millones no se ve.
-        for col, paso in (("VM2_VIGENCIA", 100), ("VM2_LIQ", 100),
-                          ("AVALUO_VIGENCIA", 100_000), ("AVALUO_LIQ", 100_000)):
+        redondeo = {"VM2_VIGENCIA": 100, "VM2_LIQ": 100,
+                    "VM2_COM_VIGENCIA": 100, "VM2_COM_LIQ": 100,
+                    "AVALUO_VIGENCIA": 100_000, "AVALUO_LIQ": 100_000,
+                    "AVALUO_COM_VIGENCIA": 100_000, "AVALUO_COM_LIQ": 100_000}
+        for col, paso in redondeo.items():
             if col in pub.columns:
                 pub[col] = (pub[col] / paso).round() * paso
         # Las variaciones se rehacen sobre los valores ya redondeados: si se
@@ -1355,13 +1582,15 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # dos que tiene al lado. Y se cortan a dos decimales, que es como se
         # muestran de todos modos: con el decimal largo la variacion volvia a
         # ser unica en el 25% de las filas, o sea otra llave.
-        if {"VM2_VIGENCIA", "VM2_LIQ"} <= set(pub.columns):
-            pub["VARIACION_PCT"] = ((pub["VM2_LIQ"] / pub["VM2_VIGENCIA"] - 1)
-                                    * 100).round(2)
-        if {"AVALUO_VIGENCIA", "AVALUO_LIQ"} <= set(pub.columns):
-            pub["VARIACION_AVALUO_PCT"] = ((pub["AVALUO_LIQ"]
-                                            / pub["AVALUO_VIGENCIA"] - 1)
-                                           * 100).round(2)
+        for vig, liq, var in (("VM2_VIGENCIA", "VM2_LIQ", "VARIACION_PCT"),
+                              ("VM2_COM_VIGENCIA", "VM2_COM_LIQ",
+                               "VARIACION_COM_PCT"),
+                              ("AVALUO_VIGENCIA", "AVALUO_LIQ",
+                               "VARIACION_AVALUO_PCT"),
+                              ("AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+                               "VARIACION_AVALUO_COM_PCT")):
+            if {vig, liq} <= set(pub.columns):
+                pub[var] = ((pub[liq] / pub[vig] - 1) * 100).round(2)
 
         # Y se reordena por valor para perder el orden original del parquet,
         # que corre en paralelo al del ID_PREDIO: sin esto se podrian pegar las
@@ -1375,11 +1604,12 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
 
     # --- Excel --------------------------------------------------------------
     ruta = os.path.join(CONFIG["carpeta_results"],
-                        f"COMPARACION_VIGENCIA_{fecha}.xlsx")
+                        f"COMPARACION_VIGENCIA{sufijo}_{fecha}.xlsx")
     # Anexos: van despues de Conclusiones para no romper el orden de hojas del
     # ejercicio anterior, pero se siguen escribiendo porque son los unicos que
     # traen la variacion PAREADA (construccion contra si misma).
     anexos = {
+        "Seleccion por comuna": seleccion,
         "Comparacion tablas": por_tabla,
         "Rangos variacion": rangos,
     }
@@ -1393,6 +1623,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
           f"{sum(len(v) for v in graficos.values()):>7,} imagenes")
     print(f"     Reglas                 {len(resumen):>7,} parametros")
     print(f"     Conclusiones           {len(concl):>7,} filas")
+    print(f"     Seleccion por comuna   {len(seleccion):>7,} filas")
     print(f"     Comparacion tablas     {len(por_tabla):>7,} filas")
     print(f"     Rangos variacion       {len(rangos):>7,} filas")
     crono.marca("VIGENCIA: exportar excel")
@@ -1410,6 +1641,8 @@ def _cli():
                    help="%% de variacion aceptada (default 10)")
     p.add_argument("--familias", default=None,
                    help="prefijos separados por coma, p.ej. T1_RESIDENCIAL,T2_EDIFICIOS")
+    p.add_argument("--base", default=None, choices=["catastral", "comercial"],
+                   help="en que base sale el reporte (default catastral)")
     p.add_argument("--sin-graficos", action="store_true")
     p.add_argument("--sin-filtro-tablas", action="store_true",
                    help="deja entrar tambien los especiales e integrales, cuyo "
@@ -1426,7 +1659,8 @@ def _cli():
     if a.con_varias_construcciones:
         CONFIG["solo_una_construccion"] = False
     fam = [s.strip() for s in a.familias.split(",")] if a.familias else None
-    comparacion_vigencia(tolerancia_pct=a.tolerancia, familias=fam)
+    comparacion_vigencia(tolerancia_pct=a.tolerancia, familias=fam,
+                         base_valor=a.base)
 
 
 if __name__ == "__main__":
