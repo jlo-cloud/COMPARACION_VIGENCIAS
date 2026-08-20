@@ -19,8 +19,18 @@ Dos hojas, con los mismos filtros al lado en las dos:
     Graficos        las mismas dos curvas del reporte, dibujadas sobre lo
                     filtrado, mas el reparto de la variacion.
 
-La medida se elige arriba: VALOR POR M2 (la construccion) o AVALUO (el predio
-completo). Todo el resto de la pantalla responde a esa eleccion.
+Arriba se eligen dos cosas y toda la pantalla responde a ellas:
+
+    MEDIDA   VALOR POR M2 (la construccion) o AVALUO (el predio completo)
+    BASE     CATASTRAL, que es sobre lo que se cobra, o COMERCIAL, que es lo
+             que se estima que vale el inmueble
+
+El comercial de la VIGENCIA sale de dividir el catastral por el factor de la
+comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en las demas (el terreno va
+siempre por 0.7). El de la LIQUIDACION no necesita conversion: el VM2 de las
+tablas ya viene comercial. Por eso la variacion comercial no es igual a la
+catastral -la vigencia se convierte con dos factores distintos segun la comuna
+y la liquidacion con uno solo-, y por eso vale la pena mirar las dos.
 
 SOLO SALEN AGREGADOS. No hay hoja de predio a predio ni descarga fila a fila:
 la app esta hecha para publicarse abierta, asi que aqui no entran ID_PREDIO,
@@ -73,26 +83,34 @@ PERCENTILES = [10, 25, 50, 75, 90, 100]
 # azul = liquidacion, naranja = el valor contra el que se compara.
 AZUL, NARANJA = "#2a78d6", "#eb6834"
 
-# Las dos medidas que se pueden leer. Cada una dice de que columnas sale y con
-# que unidad se rotula; el resto de la app trabaja contra este diccionario y no
-# contra nombres de columna sueltos.
+# Que se lee: dos MEDIDAS (el VM2 de la construccion o el avaluo del predio) en
+# dos BASES (catastral, que es lo que se cobra, o comercial, que es lo que se
+# estima que vale). Son cuatro combinaciones y el parquet trae las cuatro, asi
+# que cambiar de una a otra no vuelve a calcular nada pesado.
+#
+# El comercial de la vigencia sale de dividir el catastral por el factor de la
+# comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en el resto. Por eso la
+# variacion comercial NO es igual a la catastral: la liquidacion se baja con un
+# 0.7 parejo y la vigencia no.
 MEDIDAS = {
-    "Valor por m² (construcción)": {
-        "base": "VM2_VIGENCIA",
-        "liq": "VM2_LIQ",
-        "var": "VARIACION_PCT",
-        "prefijo": "VM2",
-        "eje": "Valor por m² (millones de pesos)",
-        "unidad": "por m²",
-    },
-    "Avalúo (predio completo)": {
-        "base": "AVALUO_VIGENCIA",
-        "liq": "AVALUO_LIQ",
-        "var": "VARIACION_AVALUO_PCT",
-        "prefijo": "AVALÚO",
-        "eje": "Avalúo catastral (millones de pesos)",
-        "unidad": "del predio",
-    },
+    "Valor por m² (construcción)": ("VM2", "Valor por m²"),
+    "Avalúo (predio completo)": ("AVALUO", "Avalúo"),
+}
+BASES = {"Catastral": "CATASTRAL", "Comercial": "COMERCIAL"}
+
+SERIES = {
+    ("VM2", "CATASTRAL"): {
+        "vig": "VM2_VIGENCIA", "liq": "VM2_LIQ",
+        "var": "VARIACION_PCT", "prefijo": "VM2"},
+    ("VM2", "COMERCIAL"): {
+        "vig": "VM2_COM_VIGENCIA", "liq": "VM2_COM_LIQ",
+        "var": "VARIACION_COM_PCT", "prefijo": "VM2_COM"},
+    ("AVALUO", "CATASTRAL"): {
+        "vig": "AVALUO_VIGENCIA", "liq": "AVALUO_LIQ",
+        "var": "VARIACION_AVALUO_PCT", "prefijo": "AVALÚO"},
+    ("AVALUO", "COMERCIAL"): {
+        "vig": "AVALUO_COM_VIGENCIA", "liq": "AVALUO_COM_LIQ",
+        "var": "VARIACION_AVALUO_COM_PCT", "prefijo": "AVALÚO_COM"},
 }
 
 # Por que columna se abren los percentiles y los graficos.
@@ -100,14 +118,18 @@ APERTURAS = {
     "Tabla de valor": "TABLA_ORIGEN",
     "Comuna": "COMUNA",
     "Actividad económica de la ZHF": "ACTIVIDAD_ECONOMICA",
+    "Actualización 2024-2025": "ACTUALIZACION",
     "Tabla x actividad (bloques del reporte)": "CLAVE",
 }
 
 # Todo lo que trae el parquet publico. Si alguna vez hay que sumar una columna,
 # revisar primero que no permita senalar a un predio en concreto.
-COLUMNAS = ["COMUNA", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE",
+COLUMNAS = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA",
+            "CLAVE",
             "VM2_VIGENCIA", "VM2_LIQ", "VARIACION_PCT",
-            "AVALUO_VIGENCIA", "AVALUO_LIQ", "VARIACION_AVALUO_PCT"]
+            "AVALUO_VIGENCIA", "AVALUO_LIQ", "VARIACION_AVALUO_PCT",
+            "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT",
+            "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"]
 
 
 st.set_page_config(page_title=f"Comparación de vigencias {V_BASE} → {V_LIQ}",
@@ -192,7 +214,14 @@ with st.sidebar:
     st.caption("Se aplican a las tres hojas. Vacío = todo.")
 
     etiqueta_medida = st.radio("Medida", list(MEDIDAS), index=0)
-    medida = MEDIDAS[etiqueta_medida]
+    etiqueta_base = st.radio(
+        "Base de valor", list(BASES), index=0, horizontal=True,
+        help="Catastral es lo que se cobra. Comercial es lo que se estima que "
+             "vale: el catastral de la vigencia dividido por 0,7 en las comunas "
+             "actualizadas en 2024-2025 y por 0,6 en las demás.")
+    clave_medida, titulo_medida = MEDIDAS[etiqueta_medida]
+    medida = SERIES[(clave_medida, BASES[etiqueta_base])]
+    unidad_eje = f"{titulo_medida} {etiqueta_base.lower()} (millones de pesos)"
 
     familias = sorted({t.split("_")[0] + "_" + t.split("_")[1]
                        for t in df["TABLA_ORIGEN"].unique() if "_" in t})
@@ -208,6 +237,10 @@ with st.sidebar:
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
     sel_actividad = st.multiselect("Actividad económica de la ZHF",
                                    sorted(df["ACTIVIDAD_ECONOMICA"].unique()))
+    sel_act = st.multiselect("Actualización 2024-2025",
+                             sorted(df["ACTUALIZACION"].unique()),
+                             help="Separa las comunas cuyo catastral quedó al "
+                                  "70% del comercial de las que quedaron al 60%.")
 
     st.divider()
     etiqueta_apertura = st.selectbox("Abrir percentiles y gráficos por",
@@ -227,10 +260,12 @@ if sel_comuna:
     dff = dff[dff["COMUNA"].isin(sel_comuna)]
 if sel_actividad:
     dff = dff[dff["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
+if sel_act:
+    dff = dff[dff["ACTUALIZACION"].isin(sel_act)]
 
 # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
 # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
-dff = dff[dff[medida["base"]].notna() & dff[medida["liq"]].notna()]
+dff = dff[dff[medida["vig"]].notna() & dff[medida["liq"]].notna()]
 
 if dff.empty:
     st.warning("Ningún predio cumple los filtros elegidos. Quite alguno en la "
@@ -244,7 +279,7 @@ c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Predios", f"{len(dff):,}",
           f"{len(dff) / len(df) * 100:.1f}% del total")
-k2.metric(f"Mediana vigencia {V_BASE}", f"$ {dff[medida['base']].median():,.0f}")
+k2.metric(f"Mediana vigencia {V_BASE}", f"$ {dff[medida['vig']].median():,.0f}")
 k3.metric(f"Mediana vigencia {V_LIQ}", f"$ {dff[medida['liq']].median():,.0f}")
 k4.metric("Variación mediana", f"{dff[medida['var']].median():+.2f}%")
 k5.metric("Bajan", f"{(dff[medida['var']] < 0).mean() * 100:.1f}%")
@@ -264,7 +299,7 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
     distribuciones, no casos. La variacion pareada -predio contra si mismo- es
     la que sale en los KPI de arriba y en la hoja de graficos.
     """
-    v = pd.to_numeric(s[medida["base"]], errors="coerce").dropna()
+    v = pd.to_numeric(s[medida["vig"]], errors="coerce").dropna()
     l = pd.to_numeric(s[medida["liq"]], errors="coerce").dropna()
     if v.empty or l.empty:
         return pd.DataFrame()
@@ -313,7 +348,7 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     g = d.groupby(col, sort=True)
     t = pd.DataFrame({
         "PREDIOS": g.size(),
-        c_base: g[medida["base"]].median(),
+        c_base: g[medida["vig"]].median(),
         c_liq: g[medida["liq"]].median(),
         "VAR_MEDIANA_%": g[medida["var"]].median(),
         "BAJAN_%": g[medida["var"]].apply(lambda s: (s < 0).mean() * 100),
@@ -330,9 +365,14 @@ hoja_tablas, hoja_graf = st.tabs(["📊 Tablas", "📈 Gráficos"])
 # HOJA 1 - TABLAS
 # ---------------------------------------------------------------------
 with hoja_tablas:
-    st.subheader(f"Tablas · {etiqueta_medida}")
+    st.subheader(f"Tablas · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
+    st.caption("Las dos medianas son de distribuciones separadas; "
+               "VAR_MEDIANA_% es predio contra sí mismo. Por eso pueden "
+               "apuntar a lados distintos: si en un grupo conviven comunas que "
+               "suben mucho y comunas que caen mucho, la mediana de los valores "
+               "se va con las más pesadas y la de las variaciones no.")
     res = resumen(dff, col_apertura)
     if res.empty:
         st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
@@ -390,7 +430,7 @@ with hoja_tablas:
 # HOJA 3 - GRAFICOS
 # ---------------------------------------------------------------------
 with hoja_graf:
-    st.subheader(f"Gráficos · {etiqueta_medida}")
+    st.subheader(f"Gráficos · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
     def curvas(t: pd.DataFrame, titulo: str) -> alt.Chart:
         """Las dos curvas de percentiles, en millones y con los mismos colores
@@ -404,7 +444,7 @@ with hoja_graf:
             .encode(
                 x=alt.X("PERCENTIL:N", title="Percentil",
                         sort=[f"{p}%" for p in PERCENTILES]),
-                y=alt.Y("Millones:Q", title=medida["eje"]),
+                y=alt.Y("Millones:Q", title=unidad_eje),
                 color=alt.Color("Serie:N", title=None,
                                 scale=alt.Scale(domain=[c_base, c_liq],
                                                 range=[NARANJA, AZUL]),
