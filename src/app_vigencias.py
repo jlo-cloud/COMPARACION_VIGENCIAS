@@ -80,6 +80,47 @@ except Exception:                                            # pragma: no cover
 # Los mismos seis cortes del reporte y del ejercicio 2025.
 PERCENTILES = [10, 25, 50, 75, 90, 100]
 
+# --- Formato de numeros -----------------------------------------------------
+# Todo se muestra a la colombiana: miles con PUNTO y decimales con COMA. No se
+# usa el formato "localized" de Streamlit ni el de los graficos porque esos
+# siguen el idioma del NAVEGADOR de quien abre la app: el mismo numero le
+# saldria 476.900 a uno y 476,900 a otro, que aqui son cosas distintas.
+#
+# En las tablas el formato se aplica con un Styler y no con column_config, para
+# que la columna siga siendo numerica y se pueda seguir ordenando al hacer clic
+# en el encabezado; column_config manda sobre el Styler, asi que donde se usa
+# este no se le pone 'format' a aquel.
+LOCALE_VEGA = {"number": {"decimal": ",", "thousands": ".", "grouping": [3],
+                          "currency": ["$ ", ""]}}
+
+
+def pesos(v, decimales: int = 0) -> str:
+    """1234567.8 -> '$ 1.234.568'"""
+    return "" if v is None or pd.isna(v) else f"$ {_miles(v, decimales)}"
+
+
+def pct(v, decimales: int = 2, signo: bool = False) -> str:
+    """6.9123 -> '6,91 %'  (con signo=True, '+6,91 %')"""
+    if v is None or pd.isna(v):
+        return ""
+    texto = _miles(v, decimales)
+    return f"+{texto} %" if signo and v > 0 else f"{texto} %"
+
+
+def entero(v) -> str:
+    """206875 -> '206.875'"""
+    return "" if v is None or pd.isna(v) else _miles(v, 0)
+
+
+def _miles(v: float, decimales: int) -> str:
+    """
+    El truco de siempre: Python solo sabe agrupar con coma, asi que se formatea
+    a la inglesa y despues se intercambian los dos separadores. El paso por el
+    espacio duro evita que el segundo replace deshaga el primero.
+    """
+    return (f"{v:,.{decimales}f}"
+            .replace(",", " ").replace(".", ",").replace(" ", "."))
+
 # La misma paleta de los PNG del reporte (VIZ en comparacion_ofertas.py):
 # azul = liquidacion, naranja = el valor contra el que se compara.
 AZUL, NARANJA = "#2a78d6", "#eb6834"
@@ -99,9 +140,9 @@ AZUL, NARANJA = "#2a78d6", "#eb6834"
 # variacion comercial NO es igual a la catastral: la liquidacion se baja con un
 # 0.7 parejo y la vigencia no.
 MEDIDAS = {
-    "Valor por m² (construcción)": ("VM2", "Valor por m²"),
+    "Valor por m²": ("VM2", "Valor por m²"),
     "Valor total construido": ("VALORCONS", "Valor total construido"),
-    "Avalúo (predio completo)": ("AVALUO", "Avalúo"),
+    "Avalúo": ("AVALUO", "Avalúo"),
 }
 BASES = {"Catastral": "CATASTRAL", "Comercial": "COMERCIAL"}
 
@@ -216,7 +257,7 @@ st.markdown(
         <h1>🏙️ Comparación de vigencias · {V_BASE} → {V_LIQ}</h1>
         <p>Lo que quedaría con la liquidación (vigencia {V_LIQ}) contra lo que
         cobra hoy la base (vigencia {V_BASE}), sobre
-        <b>{len(df):,} predios</b> de una sola construcción y con valor de tabla
+        <b>{entero(len(df))} predios</b> de una sola construcción y con valor de tabla
         en las dos vigencias.</p>
     </div>
     """,
@@ -295,12 +336,12 @@ c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
                         f"VARIACIÓN_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}")
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Predios", f"{len(dff):,}",
-          f"{len(dff) / len(df) * 100:.1f}% del total")
-k2.metric(f"Mediana vigencia {V_BASE}", f"$ {dff[medida['vig']].median():,.0f}")
-k3.metric(f"Mediana vigencia {V_LIQ}", f"$ {dff[medida['liq']].median():,.0f}")
-k4.metric("Variación mediana", f"{dff[medida['var']].median():+.2f}%")
-k5.metric("Bajan", f"{(dff[medida['var']] < 0).mean() * 100:.1f}%")
+k1.metric("Predios", entero(len(dff)),
+          f"{pct(len(dff) / len(df) * 100, 1)} del total")
+k2.metric(f"Mediana vigencia {V_BASE}", pesos(dff[medida["vig"]].median()))
+k3.metric(f"Mediana vigencia {V_LIQ}", pesos(dff[medida["liq"]].median()))
+k4.metric("Variación mediana", pct(dff[medida["var"]].median(), 2, signo=True))
+k5.metric("Bajan", pct((dff[medida["var"]] < 0).mean() * 100, 1))
 
 st.divider()
 
@@ -344,15 +385,27 @@ def por_grupo(d: pd.DataFrame, col: str) -> pd.DataFrame:
     return pd.concat(salida, ignore_index=True) if salida else pd.DataFrame()
 
 
-def formato_tabla() -> dict:
-    """Pesos en las series, porcentaje en la variacion, entero en los predios."""
-    return {
-        c_base: st.column_config.NumberColumn(c_base, format="$ %d"),
-        c_liq: st.column_config.NumberColumn(c_liq, format="$ %d"),
-        c_var: st.column_config.NumberColumn(c_var, format="percent"),
-        "NUM_PREDIOS": st.column_config.NumberColumn("NUM_PREDIOS",
-                                                     format="%d"),
-    }
+def con_formato(t: pd.DataFrame):
+    """
+    La tabla lista para mostrar: pesos en las series, porcentaje en las
+    variaciones y miles en los conteos, todo a la colombiana.
+
+    Devuelve un Styler, no un DataFrame: asi la columna sigue siendo numerica
+    -se puede ordenar haciendo clic en el encabezado- y lo unico que cambia es
+    como se dibuja. La variacion de los percentiles viene en FRACCION (0.0691)
+    y la de los resumenes en PUNTOS (6.91), por eso el x100.
+    """
+    reglas = {}
+    for col in t.columns:
+        if col in (c_base, c_liq):
+            reglas[col] = pesos
+        elif col == c_var:                       # fraccion
+            reglas[col] = lambda v: pct(v * 100 if pd.notna(v) else v, 2)
+        elif col.endswith("_%"):                 # puntos porcentuales
+            reglas[col] = lambda v: pct(v, 2)
+        elif col in ("NUM_PREDIOS", "PREDIOS"):
+            reglas[col] = entero
+    return t.style.format(reglas)
 
 
 def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
@@ -395,20 +448,7 @@ with hoja_tablas:
     if res.empty:
         st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
     else:
-        st.dataframe(
-            res, width="stretch", hide_index=True,
-            column_config={
-                "PREDIOS": st.column_config.NumberColumn("PREDIOS", format="%d"),
-                c_base: st.column_config.NumberColumn(c_base, format="$ %d"),
-                c_liq: st.column_config.NumberColumn(c_liq, format="$ %d"),
-                "VAR_MEDIANA_%": st.column_config.NumberColumn(
-                    "VAR_MEDIANA_%", format="%.2f%%"),
-                "BAJAN_%": st.column_config.NumberColumn("BAJAN_%",
-                                                         format="%.1f%%"),
-                "SUBEN_%": st.column_config.NumberColumn("SUBEN_%",
-                                                         format="%.1f%%"),
-            },
-        )
+        st.dataframe(con_formato(res), width="stretch", hide_index=True)
         st.download_button(
             "⬇️ Descargar el resumen (CSV)",
             data=res.to_csv(index=False).encode("utf-8-sig"),
@@ -417,10 +457,10 @@ with hoja_tablas:
         )
 
     st.divider()
-    st.markdown(f"**Percentiles del total de la selección** · {len(dff):,} predios")
+    st.markdown("**Percentiles del total de la selección** · "
+                f"{entero(len(dff))} predios")
     total = percentiles(dff)
-    st.dataframe(total, width="stretch", hide_index=True,
-                 column_config=formato_tabla())
+    st.dataframe(con_formato(total), width="stretch", hide_index=True)
 
     st.divider()
     st.markdown(f"**Percentiles abiertos por {etiqueta_apertura.lower()}**")
@@ -433,9 +473,8 @@ with hoja_tablas:
         n_fuera = dff[col_apertura].nunique() - n_grupos
         st.caption(f"{n_grupos} grupos"
                    + (f" · {n_fuera} quedaron fuera por tener menos de "
-                      f"{min_predios} predios" if n_fuera else ""))
-        st.dataframe(abierto, width="stretch", hide_index=True,
-                     column_config=formato_tabla())
+                      f"{entero(min_predios)} predios" if n_fuera else ""))
+        st.dataframe(con_formato(abierto), width="stretch", hide_index=True)
         st.download_button(
             "⬇️ Descargar los percentiles (CSV)",
             data=abierto.to_csv(index=False).encode("utf-8-sig"),
@@ -456,6 +495,7 @@ with hoja_graf:
         largo = t.melt(id_vars="PERCENTIL", value_vars=[c_base, c_liq],
                        var_name="Serie", value_name="Valor")
         largo["Millones"] = largo["Valor"] / 1e6
+        largo["Etiqueta"] = largo["Valor"].map(pesos)
         return (
             alt.Chart(largo, title=titulo)
             .mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=2.5)
@@ -467,14 +507,17 @@ with hoja_graf:
                                 scale=alt.Scale(domain=[c_base, c_liq],
                                                 range=[NARANJA, AZUL]),
                                 legend=alt.Legend(orient="top")),
-                tooltip=["PERCENTIL", "Serie",
-                         alt.Tooltip("Valor:Q", format="$,.0f")],
+                tooltip=[alt.Tooltip("PERCENTIL:N", title="Percentil"),
+                         alt.Tooltip("Serie:N", title="Serie"),
+                         alt.Tooltip("Etiqueta:N", title="Valor")],
             )
             .properties(height=340)
+            .configure(locale=LOCALE_VEGA)      # ejes en formato colombiano
         )
 
     st.altair_chart(
-        curvas(percentiles(dff), f"Total de la selección · {len(dff):,} predios"),
+        curvas(percentiles(dff),
+               f"Total de la selección · {entero(len(dff))} predios"),
         width="stretch")
 
     st.divider()
@@ -497,9 +540,10 @@ with hoja_graf:
                 predios = int(t["NUM_PREDIOS"].iloc[-1])
                 mediana = t.loc[t["PERCENTIL"] == "50%", c_var]
                 pie = ("" if mediana.empty or pd.isna(mediana.iloc[0])
-                       else f" · en la mediana {mediana.iloc[0] * 100:+.1f}%")
+                       else " · en la mediana "
+                            + pct(mediana.iloc[0] * 100, 1, signo=True))
                 col.altair_chart(
-                    curvas(t, f"{nombre} · {predios:,} predios{pie}"),
+                    curvas(t, f"{nombre} · {entero(predios)} predios{pie}"),
                     width="stretch")
 
     st.divider()
@@ -519,8 +563,10 @@ with hoja_graf:
         alt.Chart(reparto).mark_bar(color=AZUL, cornerRadiusEnd=3).encode(
             x=alt.X("RANGO:N", title=None, sort=list(reparto["RANGO"])),
             y=alt.Y("PREDIOS:Q", title="Predios"),
-            tooltip=["RANGO", "PREDIOS", alt.Tooltip("%:Q", format=".1f")],
-        ).properties(height=300),
+            tooltip=[alt.Tooltip("RANGO:N", title="Rango"),
+                     alt.Tooltip("PREDIOS:Q", title="Predios", format=",.0f"),
+                     alt.Tooltip("%:Q", title="% del total", format=",.1f")],
+        ).properties(height=300).configure(locale=LOCALE_VEGA),
         width="stretch")
 
 
