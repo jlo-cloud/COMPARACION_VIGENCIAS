@@ -1,6 +1,19 @@
 import pandas as pd
 import numpy as np
 import re
+
+# ---------------------------------------------------------------------------
+# Interruptor global: la liquidacion va SOLO POR TABLA.
+# En False el archivo de especiales no cambia ningun valor:
+#   - no pisa el VM2 que salio de la tabla (Liquidacion_final.py)
+#   - no saca a los parqueaderos T12 de LIQ_PARQUEADERO (Liquidacion_final.py)
+#   - no fuerza la rama 2.1 del avaluo (aqui abajo)
+# La marca ESPECIAL_2026 se sigue calculando para trazabilidad y para los
+# reportes de comparacion. Poner en True para volver a liquidar con especiales.
+# ---------------------------------------------------------------------------
+LIQUIDAR_CON_ESPECIALES = False
+
+
 def calcular_avaluo_2026(df_predio_total):
     """
     Calcula el avalúo comercial 2026 según el método de liquidación
@@ -62,8 +75,12 @@ def calcular_avaluo_2026(df_predio_total):
         (df_predio_total['ACONANEXT'] > 0) &
         (df_predio_total['AREAPRED'] > 0)
     ),
-    ##2.1
-    ((df_predio_total['ESPECIAL_2026']==1) & (df_predio_total['INTEGRAL_ESP_2026']== 0)),
+    ##2.1  Especiales no integrales.
+    # Apagada mientras LIQUIDAR_CON_ESPECIALES = False: sin ella estos predios
+    # caen en la rama que les corresponda por su metodo (MIXTO / INTEGRAL /
+    # INFORMALIDAD / TERRENO_MAS_CONST), como cualquier predio de tabla.
+    (LIQUIDAR_CON_ESPECIALES &
+     (df_predio_total['ESPECIAL_2026']==1) & (df_predio_total['INTEGRAL_ESP_2026']== 0)),
     ##3
     (df_predio_total['MIXTO'] == 1),
 

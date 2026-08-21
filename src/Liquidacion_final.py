@@ -8,7 +8,7 @@ import gc
 from datetime import datetime
 
 from tabla_construccion import convertir_a_cero, convertir_a_float, convertir_a_string, convertir_a_int
-from liquidar_avaluo_2026 import calcular_avaluo_2026
+from liquidar_avaluo_2026 import calcular_avaluo_2026, LIQUIDAR_CON_ESPECIALES
 from post_inconsistencias import validar_vm2_cero
 from uso_principal import uso_principal
 from uso_principal_terr import uso_principal_terr
@@ -328,9 +328,15 @@ def liquidacion_completa(df_const_liq, base_path='./input/',generar_excel=0):
     #     0
     # )
 
-    df_const_liq['VM2_2026_COM'] = np.where(df_const_liq['VM2_ESP_2026'] >0, 
-                                            df_const_liq['VM2_ESP_2026'],
-                                            df_const_liq['VM2_2026_COM_PRE'])
+    # Solo tabla: con LIQUIDAR_CON_ESPECIALES = False el valor del archivo de
+    # especiales NO pisa el VM2 que salio de la tabla. VM2_ESP_2026 se conserva
+    # en la salida como referencia, pero no entra al avaluo.
+    if LIQUIDAR_CON_ESPECIALES:
+        df_const_liq['VM2_2026_COM'] = np.where(df_const_liq['VM2_ESP_2026'] > 0,
+                                                df_const_liq['VM2_ESP_2026'],
+                                                df_const_liq['VM2_2026_COM_PRE'])
+    else:
+        df_const_liq['VM2_2026_COM'] = df_const_liq['VM2_2026_COM_PRE']
 
 
     df_const_liq['SIN_VALOR_CONST'] = np.where(
@@ -445,9 +451,13 @@ def liquidacion_completa(df_const_liq, base_path='./input/',generar_excel=0):
 # 1️⃣ Parqueaderos afectados (NO especiales)
     mask_parq_afect = (
     (df_const_liq['TABLA_ORIGEN'] == 'T12_PARQUEADEROS') &
-    (df_const_liq['DESTINOCONS'].isin(codigos_afectados)) &
-    (df_const_liq['ESPECIAL_2026'] != 1)
+    (df_const_liq['DESTINOCONS'].isin(codigos_afectados))
     )
+
+    # Solo tabla: con LIQUIDAR_CON_ESPECIALES = False los parqueaderos marcados
+    # como especiales siguen liquidandose con LIQ_PARQUEADERO, como el resto.
+    if LIQUIDAR_CON_ESPECIALES:
+        mask_parq_afect = mask_parq_afect & (df_const_liq['ESPECIAL_2026'] != 1)
 
     df_const_liq.loc[mask_parq_afect, 'VALORCONS_2026_COM'] = \
         df_const_liq.loc[mask_parq_afect, 'LIQ_PARQUEADERO']
