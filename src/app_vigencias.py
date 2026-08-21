@@ -190,7 +190,7 @@ USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
 # (uso, grupo, condicion juridica, patron de la columna). El patron lleva
 # {t} donde va la tipologia de la ZHF.
 REGLAS_TABLA = [
-    (USOS_T1, "10C", "9 (propiedad horizontal)",
+    (USOS_T1, "10C", "9",
      "T1_RESIDENCIAL_10C_COND_9_{t}"),
     (USOS_T1, "10C", "Diferente de 9", "T1_RESIDENCIAL_10C_COND_0_{t}"),
     (USOS_T1, "7C", "Todas", "T1_RESIDENCIAL_7C_{t}"),
