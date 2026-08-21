@@ -58,8 +58,10 @@ motivo:
 4. Lo que no tiene con que compararse: sin area, sin valor de construccion en
    la base, sin puntaje o sin VM2 de tabla en 2026.
 
-Con CONFIG["solo_una_construccion"] = False (o --con-varias-construcciones)
-vuelven los predios de varias; con CONFIG["solo_valor_de_tabla"] = False (o
+Con CONFIG["solo_predios_completos"] = False (o --con-predios-incompletos)
+entran tambien los predios a los que les falta liquidar alguna construccion
+-su valor total queda corto, solo sirve para diagnosticar-; con
+CONFIG["solo_valor_de_tabla"] = False (o
 --sin-filtro-tablas) se deja de mirar como quedo valorada la vigencia; y con
 CONFIG["usos_por_modelo"] = {} vuelven los que van por modelo.
 
@@ -162,6 +164,12 @@ CONFIG = {
     # El mismo detalle sin identificadores, que es lo que lee app_vigencias.py
     # y lo unico de output/ que se versiona (ver .gitignore).
     "parquet_publico": str(RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"),
+    # El segundo grano: una fila por PREDIO, con el valor construido total y el
+    # avaluo. Va aparte y no como columnas del anterior porque un predio de tres
+    # construcciones ocupa tres filas alla, y su avaluo contaria tres veces en
+    # cualquier percentil. Tambien se versiona (ver .gitignore).
+    "parquet_publico_predio": str(RAIZ / "output" /
+                                  "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"),
 
     # Comercial -> catastral. Es el mismo 0.7 que aplica Liquidacion_final.py
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
@@ -183,7 +191,7 @@ CONFIG = {
     # los dos grupos de comunas son los mismos de alla: si cambian, cambian en
     # los dos sitios. Si el archivo no esta, TABLA_VALOR sale vacia.
     "excel_tablas_valor": str(RAIZ / "input" /
-                              "Tablas_Valor_Consolidado_V1_20260805.xlsx"),
+                              "Tablas_Valor_Consolidado_V1_20260821.xlsx"),
     "comunas_7": ["02", "03", "04", "08", "17", "19", "22"],
     "comunas_10": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
 
@@ -205,13 +213,14 @@ CONFIG = {
     "vigencia_base": 2026,
     "vigencia_liq": 2027,
 
-    # Familias de tablas que entran al reporte, en orden. Son las dos que trae
-    # el consolidado V1: residenciales y edificios. T3_COMERCIAL y
-    # T4_INDUSTRIAL existen en TABLA_ORIGEN pero ninguna de sus construcciones
-    # tiene VM2 (la tabla no se ha entregado), asi que aunque se listaran aqui
-    # se caerian enteras; cuando lleguen, se agregan a esta lista.
+    # Familias de tablas que entran al reporte, en orden. Son las que trae el
+    # consolidado: residenciales, edificios y -desde el 20260821- comerciales.
+    # T4_INDUSTRIAL y las demas existen en TABLA_ORIGEN pero ninguna de sus
+    # construcciones tiene VM2 (la tabla no se ha entregado), asi que aunque se
+    # listaran aqui se caerian enteras; cuando lleguen, se agregan a esta lista.
     "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"),
-                 ("T2_EDIFICIOS", "EDIFICIOS")],
+                 ("T2_EDIFICIOS", "EDIFICIOS"),
+                 ("T3_COMERCIAL", "COMERCIAL")],
 
     # Usos que NO se liquidan por tabla sino por MODELO, con la CONDICION que
     # sí entra por tabla como excepcion. Apartamentos_4_y_mas_pisos_en_PH va
@@ -221,10 +230,38 @@ CONFIG = {
     # les corresponde. Poner {} para no aplicar ninguna.
     "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8},
 
-    # Solo entran los predios de UNA SOLA construccion: son los unicos que se
-    # pueden comparar de punta a punta (VM2 y avaluo) sin repartir el terreno
-    # ni el anexo entre construcciones. Ver filtrar_comparables().
-    "solo_una_construccion": True,
+    # Regla de admision del predio.
+    #
+    # Antes era "solo predios de UNA SOLA construccion". No era un capricho: el
+    # avaluo se armaba fila a fila, y el VTER y el VANEXO vienen repetidos en
+    # cada fila del predio, asi que con dos construcciones el terreno se sumaba
+    # dos veces. Con una sola construccion el problema no existia.
+    #
+    # Ahora el avaluo se arma AGREGANDO POR PREDIO (ver preparar_avaluo): el
+    # valor de construccion se suma y el terreno y el anexo se toman una sola
+    # vez. Con eso la restriccion sobra, y en su lugar se exige que el predio
+    # este COMPLETO: TODAS sus construcciones -no solo las que sobrevivan al
+    # filtro- tienen que estar en las familias de arriba y traer VM2 de tabla.
+    # Si una sola queda sin liquidar, el valor de construccion del predio sale
+    # corto y su avaluo tambien, y no habria como notarlo mirando el resultado.
+    "solo_predios_completos": True,
+
+    # ¿Se liquida tambien el ANEXO? Hoy NO: la tabla T10 no esta aprobada.
+    #
+    # El anexo NO desaparece de la formula por eso -el 22.7% de los predios del
+    # reporte tiene uno, de $2.9 millones en la mediana, y sacarlo bajaria la
+    # coincidencia con el AVALPRED de la base del 99.9% al 83.2%-. Lo que se
+    # hace es entrarlo con el MISMO valor de la base a las dos vigencias, asi
+    # que se cancela solo al restar y no mueve la comparacion.
+    #
+    # Cuando llegue la tabla de anexos, encender esto y hacer tres cosas:
+    #   1. que la liquidacion deje un VANEXO_LIQ por predio (area del anexo por
+    #      su VM2 de tabla), como ya deja VALORCONS_CAT_LIQ;
+    #   2. sumar "T10_ANEXOS" a familias, para que los anexos sin valor tumben
+    #      el PREDIO_COMPLETO igual que hoy lo hace una construccion sin tabla;
+    #   3. nada mas: preparar_avaluo() ya lee este interruptor y cambia solo el
+    #      lado de la liquidacion.
+    "liquidar_anexos": False,
 
     # Solo entran las construcciones cuyo valor sale de la tabla EN LAS DOS
     # vigencias. Ver preparar(): sin esto se cuelan los especiales/integrales,
@@ -500,12 +537,29 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     # cualquier filtro, porque despues ya no se ve: si se cuenta sobre las filas
     # que quedaron, un predio con una casa y un parqueadero pasa por predio de
     # una sola construccion. Los anexos no son construccion, no cuentan.
+    prefijos = tuple(p for p, _ in CONFIG["familias"])
+
     if "CONSTRUCCION_ID" in d.columns:
         es_const = d["TABLA_ORIGEN"] != "T10_ANEXOS"
         n_const = d.loc[es_const].groupby("ID_PREDIO")["CONSTRUCCION_ID"].nunique()
         d["N_CONST_PREDIO"] = d["ID_PREDIO"].map(n_const).fillna(0).astype(int)
 
-    prefijos = tuple(p for p, _ in CONFIG["familias"])
+        # Cuantas de esas construcciones SI se liquidan por una de las tablas
+        # activas. Se cuenta aqui por lo mismo que N_CONST_PREDIO: dos lineas
+        # mas abajo el df se recorta a las familias y las que se cayeron dejan
+        # de verse, asi que un predio con una casa y una bodega industrial
+        # pasaria por completo cuando no lo esta.
+        #
+        # Se mira el VM2 crudo del parquet y no VM2_CAT_LIQ, que todavia no
+        # existe; son el mismo numero por 0.7, asi que "> 0" da igual en los dos.
+        vm2 = pd.to_numeric(d["VM2"], errors="coerce").fillna(0) if "VM2" in d.columns             else pd.Series(0, index=d.index)
+        con_tabla = es_const & d["TABLA_ORIGEN"].str.startswith(prefijos) & (vm2 > 0)
+        n_ok = (d.loc[con_tabla].groupby("ID_PREDIO")["CONSTRUCCION_ID"].nunique())
+        d["N_CONST_CON_TABLA"] = d["ID_PREDIO"].map(n_ok).fillna(0).astype(int)
+        d["PREDIO_COMPLETO"] = (
+            (d["N_CONST_PREDIO"] > 0)
+            & (d["N_CONST_CON_TABLA"] == d["N_CONST_PREDIO"])).astype(int)
+
     total = len(d)
     d = d[d["TABLA_ORIGEN"].str.startswith(prefijos)].copy()
     print(f"   Construcciones en {', '.join(prefijos)}: {len(d):,} "
@@ -558,8 +612,8 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     d, descartes = filtrar_comparables(d)
     d.attrs["excluidas_sin_vm2"] = por_familia
     d.attrs["descartes"] = descartes
-    print(f"   Comparables (predio de una construccion, con valor de tabla en "
-          f"las dos vigencias): {len(d):,} de {antes:,}")
+    print(f"   Comparables (predio con TODAS sus construcciones valoradas por "
+          f"tabla en las dos vigencias): {len(d):,} de {antes:,}")
     for motivo, n in descartes.items():
         if n:
             print(f"      - {motivo}: {n:,}")
@@ -626,15 +680,18 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     Tres condiciones, y las tres hacen falta:
 
-    1) El predio tiene UNA SOLA construccion (N_CONST_PREDIO == 1, contada
-       sobre el predio completo en preparar()). Es el unico caso que se puede
-       comparar entero: en un predio con varias, el VTER y el VALOANEX vienen
-       repetidos en cada fila y no hay forma de repartirlos por tabla sin
-       inventar un criterio, y el VALORCONS de la base tampoco se puede leer
-       contra un solo VM2 de tabla. Antes esto solo se aplicaba al avaluo y el
-       VM2 se comparaba sobre todas; ahora el reporte completo sale del mismo
-       universo, asi que la hoja de VM2 y la de avaluo hablan de los mismos
-       predios.
+    1) El predio esta COMPLETO: todas sus construcciones se liquidan por alguna
+       de las tablas activas (PREDIO_COMPLETO == 1, calculado en preparar()
+       sobre el predio entero, no sobre las filas que sobreviven). Con eso el
+       valor de construccion del predio se puede sumar sin que falte un pedazo,
+       y el avaluo se arma agregando por predio: el terreno y el anexo entran
+       una sola vez y no repetidos por construccion.
+
+       Antes la condicion era mas dura -UNA SOLA construccion- porque el avaluo
+       se calculaba fila a fila y el terreno se contaba tantas veces como
+       construcciones tuviera el predio. Al agregar por predio esa razon
+       desaparecio; lo que no desaparece es la exigencia de que no falte
+       ninguna construccion por liquidar.
 
     2) Ese predio TIENE una construccion valorada: area, valor de construccion
        y puntaje. Sin cualquiera de los tres no hay VM2 de vigencia que sacar
@@ -668,8 +725,9 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     numero inflado por los solapes (un especial suele fallar tres condiciones
     a la vez).
 
-    Con CONFIG["solo_una_construccion"] = False vuelven los predios de varias
-    construcciones (el avaluo los sigue dejando fuera por su cuenta), y con
+    Con CONFIG["solo_predios_completos"] = False entran tambien los predios a
+    los que les falta liquidar alguna construccion -su valor total quedara
+    corto, asi que es solo para diagnosticar-, y con
     CONFIG["solo_valor_de_tabla"] = False se salta la condicion 3 sobre la
     vigencia.
     """
@@ -686,9 +744,10 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         return ~(pd.to_numeric(d[col], errors="coerce") > 0)
 
     reglas = []
-    if CONFIG["solo_una_construccion"] and "N_CONST_PREDIO" in d.columns:
-        reglas.append(("el predio tiene mas de una construccion (no se puede "
-                       "repartir terreno ni anexo)", d["N_CONST_PREDIO"] != 1))
+    if CONFIG["solo_predios_completos"] and "PREDIO_COMPLETO" in d.columns:
+        reglas.append(("el predio tiene construcciones sin valor de tabla "
+                       "(su valor total saldria incompleto)",
+                       d["PREDIO_COMPLETO"] != 1))
     # Lo que se liquida por modelo no dice nada de la tabla que se revisa.
     if CONFIG["usos_por_modelo"] and "USO_LADM" in d.columns:
         cond = (pd.to_numeric(d["CONDICION"], errors="coerce")
@@ -766,16 +825,26 @@ def actividad_economica(d: pd.DataFrame) -> pd.Series:
 
 def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     """
-    Avaluo por predio, SOLO en predios de una sola construccion.
+    Avaluo POR PREDIO: una fila por predio, no una por construccion.
 
-    Con CONFIG["solo_una_construccion"] activo esto ya no quita nada: el filtro
-    corre antes, en filtrar_comparables(), y todo el reporte sale de predios de
-    una sola construccion. Se deja porque es la garantia de que el avaluo nunca
-    se lea sobre predios de varias, aunque se apague aquel filtro.
+    Es el segundo grano del reporte. El VM2 es de la construccion y ahi el
+    ID_PREDIO se repite; el avaluo y el valor construido son del predio y aqui
+    aparecen una sola vez. Mezclarlos en una sola tabla haria que un predio de
+    tres construcciones pesara el triple en cualquier percentil de avaluo.
 
-    En los de varias, VTER y el anexo vienen repetidos por fila y el avaluo no
-    se puede atribuir a una tabla sin inventar un reparto. Se devuelve vacio si
-    faltan las columnas de terreno o anexo.
+    Como se agrega cada cosa:
+
+        VALORCONS, VALORCONS_CAT_LIQ, VALORCONS_COM_LIQ   se SUMAN
+            son de la construccion; el total del predio es la suma de las suyas
+        VTER, VANEXO, AVALPRED, F_COMERCIAL, COMUNA, ...  se toman UNA vez
+            ya vienen del predio y estan repetidos identicos en cada fila.
+            Sumarlos los contaria tantas veces como construcciones haya: es
+            exactamente el error que la vieja regla de "una sola construccion"
+            estaba evitando.
+
+    El predio entra completo o no entra: filtrar_comparables() ya dejo fuera a
+    los que tienen alguna construccion sin liquidar (PREDIO_COMPLETO), asi que
+    la suma de aqui nunca es parcial.
 
     El anexo se toma de VANEXO, no de VALOANEX. VALOANEX es el valor de UNA
     fila de anexo y en la fila de la construccion viene en cero: con el, 41.824
@@ -784,12 +853,15 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     en el 89.1% de los casos. Con VANEXO, que es el total del predio, cuadra en
     el 99.99%. Si algun dia hay que volver a VALOANEX, es esta linea.
 
-    "Una sola construccion" se cuenta sobre el PREDIO COMPLETO
-    (N_CONST_PREDIO, armada en preparar()), no sobre las filas que sobrevivieron
-    al filtro. Contandolo sobre las filas filtradas entraban 27.658 predios que
-    si tienen otras construcciones -parqueaderos, sobre todo-: su avaluo
-    reconstruido coincidia con el AVALPRED de la base en el 0.1% de los casos,
-    contra el 89.1% de los que de verdad tienen una sola.
+    El anexo NO se liquida -la tabla T10 todavia no esta aprobada-, asi que
+    entra con el mismo valor de la base a las dos vigencias y se cancela solo
+    al restar. Lo mismo el terreno.
+
+    Para poder abrir el reporte por tabla a nivel predio se guarda la tabla de
+    la construccion de MAYOR AREA (TABLA_ORIGEN_PRINCIPAL). En un predio de
+    varias construcciones no hay "una" tabla, y elegir la mas grande es lo que
+    mas se parece a decir de que es el predio; N_TABLAS_PREDIO avisa cuando esa
+    simplificacion aplica.
     """
     col_anexo = "VANEXO" if "VANEXO" in d.columns else "VALOANEX"
     faltan = [c for c in ("VTER", col_anexo) if c not in d.columns]
@@ -798,35 +870,99 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
             print(f"   (sin columnas {faltan}: no se compara avaluo)")
         return pd.DataFrame()
 
-    if "N_CONST_PREDIO" in d.columns:
-        una_sola = d["N_CONST_PREDIO"] == 1
-    else:   # sin CONSTRUCCION_ID no se puede contar el predio completo
-        una_sola = d.groupby("ID_PREDIO")["ID_PREDIO"].transform("size") == 1
-    uni = d[una_sola].copy()
-    fuera = d["ID_PREDIO"].nunique() - uni["ID_PREDIO"].nunique()
-    print(f"   Avaluo: {len(uni):,} predios de una sola construccion"
-          + (f" ({fuera:,} con varias quedan fuera)" if fuera else
-             " (los mismos de la comparacion de VM2)"))
+    d = d.copy()
+    d["VTER"] = pd.to_numeric(d["VTER"], errors="coerce").fillna(0)
+    d[col_anexo] = pd.to_numeric(d[col_anexo], errors="coerce").fillna(0)
+
+    # --- La tabla dominante del predio: la de la construccion mas grande -----
+    area = (pd.to_numeric(d["AREA_CONST"], errors="coerce").fillna(0)
+            if "AREA_CONST" in d.columns else pd.Series(0, index=d.index))
+    principal = (d.assign(_A=area)
+                  .sort_values("_A", ascending=False)
+                  .drop_duplicates("ID_PREDIO")
+                  .set_index("ID_PREDIO"))
+
+    # --- Lo que se suma y lo que se toma una sola vez ------------------------
+    suma = ["VALORCONS", "VALORCONS_CAT_LIQ", "VALORCONS_COM_LIQ"]
+    if "AREA_CONST" in d.columns:
+        suma.append("AREA_CONST")
+    una_vez = [c for c in ("VTER", col_anexo, "AVALPRED", "F_COMERCIAL",
+                           "COMUNA", "GRUPO_COMUNAS", "ACTUALIZACION",
+                           "ESTRPRED", "NUMERO_PREDIAL_NACIONAL",
+                           "N_CONST_PREDIO", "METODO_LIQUIDACION")
+               if c in d.columns]
+
+    g = d.groupby("ID_PREDIO", sort=False)
+    uni = pd.concat(
+        [g[suma].sum(),
+         g[una_vez].first(),
+         g["TABLA_ORIGEN"].nunique().rename("N_TABLAS_PREDIO")],
+        axis=1)
+    # Se conservan los MISMOS nombres que a nivel construccion -TABLA_ORIGEN,
+    # ACTIVIDAD_ECONOMICA, CLAVE- pero aqui significan "los de la construccion
+    # dominante del predio". Asi el resto del reporte (resumen general,
+    # conclusiones, bloques de percentiles) agrupa igual sin saber que cambio
+    # el grano. N_TABLAS_PREDIO avisa en cuantos predios esa simplificacion
+    # esta tapando mas de una tabla.
+    for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM"):
+        if c in principal.columns:
+            uni[c] = principal[c]
+    uni = uni.reset_index()
+
+    varias = int((uni["N_CONST_PREDIO"] > 1).sum()) if "N_CONST_PREDIO" in uni else 0
+    mixtos = int((uni["N_TABLAS_PREDIO"] > 1).sum())
+    print(f"   Avaluo: {len(uni):,} predios"
+          + (f" ({varias:,} con mas de una construccion, sumadas)" if varias
+             else " (todos de una sola construccion)"))
+    if mixtos:
+        print(f"      (de esos, {mixtos:,} mezclan mas de una tabla; se "
+              f"clasifican por la construccion de mayor area)")
     if uni.empty:
         return uni
 
-    uni["VTER"] = uni["VTER"].fillna(0)
-    anexo = uni[col_anexo].fillna(0)
+    anexo = uni[col_anexo]
+
+    # --- El anexo, a los dos lados -------------------------------------------
+    # Mientras CONFIG["liquidar_anexos"] este en False, el anexo de la
+    # liquidacion es el MISMO de la base: entra en las dos vigencias y se
+    # cancela al restar. El termino se queda en la formula igual, porque sin el
+    # el avaluo no cuadra con el de la base (99.9% -> 83.2%).
+    #
+    # Este es el punto exacto donde engancha la tabla de anexos cuando llegue:
+    # basta con que la liquidacion traiga VANEXO_LIQ y aqui no hay nada mas que
+    # tocar. Ver el comentario de "liquidar_anexos" en CONFIG.
+    if CONFIG["liquidar_anexos"] and "VANEXO_LIQ" in uni.columns:
+        anexo_liq = pd.to_numeric(uni["VANEXO_LIQ"], errors="coerce").fillna(0)
+        anexo_liq_com = anexo_liq                    # ya viene comercial
+    else:
+        anexo_liq = anexo
+        anexo_liq_com = anexo / uni["F_COMERCIAL"]
 
     # --- Catastral: los tres componentes tal como los trae la base ----------
     uni["AVALUO_CAT_VIGENCIA"] = uni["VTER"] + uni["VALORCONS"] + anexo
-    uni["AVALUO_CAT_LIQ"] = uni["VTER"] + uni["VALORCONS_CAT_LIQ"] + anexo
+    uni["AVALUO_CAT_LIQ"] = uni["VTER"] + uni["VALORCONS_CAT_LIQ"] + anexo_liq
 
     # --- Comercial: cada componente dividido por su factor -------------------
-    # El terreno va siempre por 0.7; la construccion y el anexo, por el factor
-    # de la comuna (0.7 si se actualizo en 2024-2025, 0.6 si no). La liquidacion
-    # solo cambia la construccion: terreno y anexo son los mismos a los dos
-    # lados, igual que en la version catastral.
+    # El terreno va siempre por 0.7; la construccion y el anexo de la vigencia,
+    # por el factor de la comuna (0.7 si se actualizo en 2024-2025, 0.6 si no).
     f_ter = CONFIG["factor_comercial_terreno"]
     f_com = uni["F_COMERCIAL"]
-    terreno_anexo_com = uni["VTER"] / f_ter + anexo / f_com
-    uni["AVALUO_COM_VIGENCIA"] = terreno_anexo_com + uni["VALORCONS"] / f_com
-    uni["AVALUO_COM_LIQ"] = terreno_anexo_com + uni["VALORCONS_COM_LIQ"]
+    terreno_com = uni["VTER"] / f_ter
+    uni["AVALUO_COM_VIGENCIA"] = (terreno_com + anexo / f_com
+                                  + uni["VALORCONS"] / f_com)
+    uni["AVALUO_COM_LIQ"] = (terreno_com + anexo_liq_com
+                             + uni["VALORCONS_COM_LIQ"])
+
+    # --- Valor construido del predio, en las dos bases -----------------------
+    # Mismo nombre que a nivel construccion para que la app lea las dos con el
+    # mismo codigo; aqui es la suma de todas las construcciones del predio.
+    uni["VALORCONS_CAT_VIGENCIA"] = uni["VALORCONS"]
+    uni["VALORCONS_COM_VIGENCIA"] = uni["VALORCONS"] / f_com
+    for base in ("_CAT", "_COM"):
+        vig, liq = f"VALORCONS{base}_VIGENCIA", f"VALORCONS{base}_LIQ"
+        uni[f"DIF_VALORCONS{base}"] = uni[liq] - uni[vig]
+        uni[f"VARIACION_VALORCONS{base}_PCT"] = np.where(
+            uni[vig] > 0, uni[f"DIF_VALORCONS{base}"] / uni[vig] * 100, np.nan)
 
     for base in ("_CAT", "_COM"):
         vig, liq = f"AVALUO{base}_VIGENCIA", f"AVALUO{base}_LIQ"
@@ -1263,7 +1399,9 @@ DICCIONARIO_DETALLE = [
     ("NUMERO_PREDIAL_NACIONAL", "Numero predial nacional", ""),
     ("CONSTRUCCION_ID", "Identificador de la construccion", ""),
     ("N_CONST_PREDIO", "Construcciones del predio completo (sin anexos)",
-     "siempre 1: solo entran predios de una sola construccion"),
+     "puede ser mayor que 1: entran los predios con TODAS sus construcciones "
+     "liquidadas. El avaluo de la fila es el del PREDIO y viene repetido en "
+     "cada una de sus construcciones"),
     ("COMUNA", "Comuna", "de la base"),
     ("ESTRPRED", "Estrato del predio", "de la base; 0 donde no viene"),
     ("ACTUALIZACION", "Si la comuna se actualizo en 2024-2025", ""),
@@ -1642,7 +1780,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                          base_valor: str | None = None,
                          excel_detalle: bool | None = None,
                          muestra: int | None = None,
-                         solo_una_construccion: bool | None = None,
+                         solo_predios_completos: bool | None = None,
                          solo_valor_de_tabla: bool | None = None,
                          exportar: bool = True) -> pd.DataFrame:
     """
@@ -1660,8 +1798,10 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     identificadores, para revisar casos a mano
     muestra       : filas del Excel de detalle (None = todas); implica
                     excel_detalle=True
-    solo_una_construccion: False deja entrar tambien los predios de varias
-                    construcciones (el avaluo los sigue dejando fuera)
+    solo_predios_completos: False deja entrar tambien los predios a los que
+                    les falta liquidar alguna construccion; su valor de
+                    construccion y su avaluo quedan cortos, asi que es solo
+                    para diagnosticar
     solo_valor_de_tabla: False deja entrar tambien los especiales e integrales,
                     cuyo valor de base no sale de la tabla (ver
                     filtrar_comparables)
@@ -1685,8 +1825,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             raise ValueError("base_valor debe ser CATASTRAL o COMERCIAL, "
                              f"no {base_valor!r}")
         CONFIG["base_valor"] = base_valor.upper()
-    if solo_una_construccion is not None:
-        CONFIG["solo_una_construccion"] = bool(solo_una_construccion)
+    if solo_predios_completos is not None:
+        CONFIG["solo_predios_completos"] = bool(solo_predios_completos)
     if solo_valor_de_tabla is not None:
         CONFIG["solo_valor_de_tabla"] = bool(solo_valor_de_tabla)
 
@@ -1798,17 +1938,18 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
          "89.1% de los casos, contra el 99.99% con VANEXO"),
         ("Familias", ", ".join(p for p, _ in CONFIG["familias"])),
         ("Que predios entran",
-         "predios de UNA SOLA construccion (contada sobre el predio completo, "
-         "sin anexos), con esa construccion valorada (ACONCONS, VALORCONS y "
-         "PUNTCONS > 0) y saliendo de la tabla de valor EN LAS DOS VIGENCIAS"
-         + ("" if CONFIG["solo_una_construccion"]
-            else " -- FILTRO DE UNA CONSTRUCCION DESACTIVADO en esta corrida")
+         "predios con TODAS sus construcciones liquidadas por alguna de las "
+         "tablas de arriba (contadas sobre el predio completo, sin anexos), "
+         "cada una valorada (ACONCONS, VALORCONS y PUNTCONS > 0) y saliendo "
+         "de la tabla de valor EN LAS DOS VIGENCIAS"
+         + ("" if CONFIG["solo_predios_completos"]
+            else " -- FILTRO DE PREDIO COMPLETO DESACTIVADO en esta corrida")
          + ("" if CONFIG["solo_valor_de_tabla"]
             else " -- FILTRO DE TABLA DESACTIVADO en esta corrida")),
         ("Que predios NO entran",
-         "todo lo que no se liquida con la tabla residencial o la de "
-         "edificios: los predios de varias construcciones (el terreno y el "
-         "anexo no se pueden repartir por tabla), lo que va por MODELO "
+         "todo lo que no se liquida con las tablas de arriba: los predios a "
+         "los que les falta liquidar alguna construccion (su valor total "
+         "saldria corto), lo que va por MODELO "
          + ", ".join(f"({u}, salvo CONDICION {c})"
                      for u, c in CONFIG["usos_por_modelo"].items())
          + ", y lo valorado por fuera de tabla: ESPECIAL = 1 en la base "
@@ -1856,10 +1997,10 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
          "conteo acumulado de predios del bloque (percentil x total de predios); "
          "el VM2 se ordena sobre construcciones, el avaluo sobre predios"),
         ("NOTA avaluo",
-         "sale de los mismos predios que el VM2: todo el reporte es de predios "
-         "de una sola construccion, contada sobre el predio completo y no sobre "
-         "las filas que pasaron el filtro, asi que un predio con casa y "
-         "parqueadero no entra"),
+         "sale de los mismos predios que el VM2, pero AGREGADO POR PREDIO: el "
+         "valor de construccion se suma y el terreno y el anexo se toman una "
+         "sola vez. Un predio de tres construcciones ocupa tres filas en la "
+         "comparacion de VM2 y UNA en la de avaluo"),
     ]
     resumen = pd.DataFrame(filas_resumen, columns=["CONCEPTO", "VALOR"])
 
@@ -1880,13 +2021,26 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     # de todos los predios comparados. Lo que sale a la app publica es el
     # recorte anonimo que se escribe justo despues.
     if CONFIG["guardar_detalle"]:
-        # El avaluo se calcula aparte (solo predios de una construccion), asi
-        # que sus columnas -las dos bases- se traen de vuelta al detalle.
-        for c in ("AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ", "DIF_AVALUO_CAT",
-                  "VARIACION_AVALUO_CAT_PCT", "AVALUO_COM_VIGENCIA",
-                  "AVALUO_COM_LIQ", "DIF_AVALUO_COM", "VARIACION_AVALUO_COM_PCT"):
-            if not aval.empty and c in aval.columns:
-                d[c] = aval[c]      # el indice de aval es un subconjunto del de d
+        # El avaluo se calcula aparte y POR PREDIO, asi que se trae de vuelta
+        # al detalle cruzando por ID_PREDIO.
+        #
+        # OJO: antes esto era 'd[c] = aval[c]', que funcionaba solo porque
+        # 'aval' tenia el mismo indice que 'd' -un predio, una construccion,
+        # una fila-. Al agregar por predio ese indice dejo de coincidir y la
+        # asignacion por posicion habria repartido avaluos entre predios que no
+        # son, sin fallar ni avisar. Por eso va merge y no asignacion.
+        #
+        # En el detalle el avaluo queda REPETIDO en cada construccion del
+        # predio, que es lo correcto para revisar un caso a mano pero no para
+        # contar: para eso esta el parquet por predio que se escribe abajo.
+        cols_aval = [c for c in ("AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
+                                 "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
+                                 "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+                                 "DIF_AVALUO_COM", "VARIACION_AVALUO_COM_PCT")
+                     if not aval.empty and c in aval.columns]
+        if cols_aval:
+            d = d.merge(aval[["ID_PREDIO"] + cols_aval], on="ID_PREDIO",
+                        how="left", validate="many_to_one")
         cols = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
                 "N_CONST_PREDIO", "COMUNA", "ESTRPRED", "ACTUALIZACION",
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
@@ -1940,6 +2094,18 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # hoja de reglas: con el uso, la comuna y el nombre de la columna de
         # la tabla se reconstruye la asignacion completa. Son categorias
         # gruesas -6 usos, 26 tablas-, no senalan a ningun predio.
+        # Dos granos, dos archivos:
+        #
+        #   PUBLICO         una fila por CONSTRUCCION, con el VM2 y el valor de
+        #                   esa construccion. El ID_PREDIO se repite tantas
+        #                   veces como construcciones tenga el predio.
+        #   PUBLICO_PREDIO  una fila por PREDIO, con el valor construido TOTAL
+        #                   y el avaluo.
+        #
+        # El avaluo NO va en el primero. Repetido en cada construccion, un
+        # predio de tres pesaria el triple en cualquier percentil de avaluo, y
+        # nada en la app avisaria de eso. Mientras el reporte solo admitia
+        # predios de una construccion daba igual; ahora no.
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
@@ -1948,12 +2114,23 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
                     "VARIACION_VALORCONS_COM_PCT",
                     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT",
-                    "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
-                    "VARIACION_AVALUO_CAT_PCT",
-                    "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT",
-                    "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
-                    "VARIACION_AVALUO_COM_PCT"]
-        pub = det[[c for c in publicas if c in det.columns]].copy()
+                    "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"]
+
+        # A nivel predio la tabla y la actividad son las de la construccion de
+        # mayor area (ver preparar_avaluo). N_CONST_PREDIO y N_TABLAS_PREDIO
+        # entran para poder separar los predios simples de los que mezclan
+        # varias construcciones o varias tablas.
+        publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
+                           "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
+                           "N_CONST_PREDIO", "N_TABLAS_PREDIO",
+                           "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
+                           "VARIACION_VALORCONS_CAT_PCT",
+                           "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
+                           "VARIACION_VALORCONS_COM_PCT",
+                           "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
+                           "VARIACION_AVALUO_CAT_PCT",
+                           "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+                           "VARIACION_AVALUO_COM_PCT"]
 
         # Quitar el ID no basta: el valor exacto es una llave igual de buena.
         # La mitad de los avaluos (49.7%) es un numero que aparece una sola vez
@@ -1962,7 +2139,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # queda sola -del 49.7% al 1.2% en el avaluo, del 13.0% al 1.5% en el
         # VM2- y los percentiles no se corren mas de 0.07%, que sobre una
         # mediana de 146 millones no se ve.
-        redondeo = {"VALORCONS_CAT_VIGENCIA": 100_000,
+        REDONDEO = {"VALORCONS_CAT_VIGENCIA": 100_000,
                     "VALORCONS_CAT_LIQ": 100_000,
                     "VALORCONS_COM_VIGENCIA": 100_000,
                     "VALORCONS_COM_LIQ": 100_000,
@@ -1970,38 +2147,55 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     "VM2_COM_VIGENCIA": 100, "VM2_COM_LIQ": 100,
                     "AVALUO_CAT_VIGENCIA": 100_000, "AVALUO_CAT_LIQ": 100_000,
                     "AVALUO_COM_VIGENCIA": 100_000, "AVALUO_COM_LIQ": 100_000}
-        for col, paso in redondeo.items():
-            if col in pub.columns:
-                pub[col] = (pub[col] / paso).round() * paso
-        # Las variaciones se rehacen sobre los valores ya redondeados: si se
-        # copiaran del detalle, la columna no cuadraria con la division de las
-        # dos que tiene al lado. Y se cortan a dos decimales, que es como se
-        # muestran de todos modos: con el decimal largo la variacion volvia a
-        # ser unica en el 25% de las filas, o sea otra llave.
-        for vig, liq, var in (("VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
-                               "VARIACION_VALORCONS_CAT_PCT"),
-                              ("VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
-                               "VARIACION_VALORCONS_COM_PCT"),
-                              ("VM2_CAT_VIGENCIA", "VM2_CAT_LIQ",
-                               "VARIACION_CAT_PCT"),
-                              ("VM2_COM_VIGENCIA", "VM2_COM_LIQ",
-                               "VARIACION_COM_PCT"),
-                              ("AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
-                               "VARIACION_AVALUO_CAT_PCT"),
-                              ("AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
-                               "VARIACION_AVALUO_COM_PCT")):
-            if {vig, liq} <= set(pub.columns):
-                pub[var] = ((pub[liq] / pub[vig] - 1) * 100).round(2)
+        TRIOS = (("VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
+                  "VARIACION_VALORCONS_CAT_PCT"),
+                 ("VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
+                  "VARIACION_VALORCONS_COM_PCT"),
+                 ("VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT"),
+                 ("VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"),
+                 ("AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
+                  "VARIACION_AVALUO_CAT_PCT"),
+                 ("AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+                  "VARIACION_AVALUO_COM_PCT"))
 
-        # Y se reordena por valor para perder el orden original del parquet,
-        # que corre en paralelo al del ID_PREDIO: sin esto se podrian pegar las
-        # dos tablas fila por fila sin necesidad de cruzar por valor.
-        pub = pub.sort_values(["COMUNA", "TABLA_ORIGEN", "VM2_CAT_VIGENCIA"],
-                              kind="stable", ignore_index=True)
+        def anonimizar(origen, columnas, orden):
+            """
+            El recorte que sale a la app: sin identificadores, redondeado y
+            reordenado. Es una sola funcion para los dos granos, para que no
+            terminen con criterios de anonimizacion distintos.
+            """
+            t = origen[[c for c in columnas if c in origen.columns]].copy()
+            for col, paso in REDONDEO.items():
+                if col in t.columns:
+                    t[col] = (t[col] / paso).round() * paso
+            # Las variaciones se rehacen sobre los valores ya redondeados: si se
+            # copiaran del detalle, la columna no cuadraria con la division de
+            # las dos que tiene al lado. Y se cortan a dos decimales, que es
+            # como se muestran de todos modos: con el decimal largo la variacion
+            # volvia a ser unica en el 25% de las filas, o sea otra llave.
+            for vig, liq, var in TRIOS:
+                if {vig, liq} <= set(t.columns):
+                    t[var] = ((t[liq] / t[vig] - 1) * 100).round(2)
+            # Y se reordena por valor para perder el orden original del parquet,
+            # que corre en paralelo al del ID_PREDIO: sin esto se podrian pegar
+            # las dos tablas fila por fila sin necesidad de cruzar por valor.
+            hay = [c for c in orden if c in t.columns]
+            return t.sort_values(hay, kind="stable", ignore_index=True)
+
+        pub = anonimizar(det, publicas,
+                         ["COMUNA", "TABLA_ORIGEN", "VM2_CAT_VIGENCIA"])
         pub.to_parquet(CONFIG["parquet_publico"], index=False)
-        print(f"   Recorte publico (sin identificadores): "
+        print(f"   Recorte publico por CONSTRUCCION: "
               f"{CONFIG['parquet_publico']} ({len(pub):,} filas, "
               f"{len(pub.columns)} columnas)")
+
+        if aval is not None and not aval.empty:
+            pub_p = anonimizar(aval, publicas_predio,
+                               ["COMUNA", "TABLA_ORIGEN", "AVALUO_CAT_VIGENCIA"])
+            pub_p.to_parquet(CONFIG["parquet_publico_predio"], index=False)
+            print(f"   Recorte publico por PREDIO:       "
+                  f"{CONFIG['parquet_publico_predio']} ({len(pub_p):,} filas, "
+                  f"{len(pub_p.columns)} columnas)")
 
     # --- Excel --------------------------------------------------------------
     ruta = os.path.join(CONFIG["carpeta_results"],
@@ -2071,17 +2265,17 @@ def _cli():
     p.add_argument("--sin-filtro-tablas", action="store_true",
                    help="deja entrar tambien los especiales e integrales, cuyo "
                         "valor de base no sale de la tabla (no recomendado)")
-    p.add_argument("--con-varias-construcciones", action="store_true",
-                   help="deja entrar tambien los predios de varias "
-                        "construcciones, donde el terreno y el anexo no se "
-                        "pueden repartir por tabla (no recomendado)")
+    p.add_argument("--con-predios-incompletos", action="store_true",
+                   help="deja entrar tambien los predios con construcciones "
+                        "sin liquidar, cuyo valor total queda corto (solo "
+                        "para diagnosticar)")
     a = p.parse_args()
     if a.sin_graficos:
         CONFIG["generar_graficos"] = False
     if a.sin_filtro_tablas:
         CONFIG["solo_valor_de_tabla"] = False
-    if a.con_varias_construcciones:
-        CONFIG["solo_una_construccion"] = False
+    if a.con_predios_incompletos:
+        CONFIG["solo_predios_completos"] = False
     fam = [s.strip() for s in a.familias.split(",")] if a.familias else None
     comparacion_vigencia(tolerancia_pct=a.tolerancia, familias=fam,
                          base_valor=a.base,

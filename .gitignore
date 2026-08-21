@@ -26,6 +26,9 @@
 !/output
 /output/*
 !/output/COMPARACION_VIGENCIA_PUBLICO.parquet
+# El segundo grano del recorte anonimo: una fila por PREDIO, con el valor
+# construido total y el avaluo. Tampoco lleva identificadores.
+!/output/COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet
 
 # El libro del reporte, que la hoja Detalle de la app entrega tal cual con el
 # boton "Ver el detalle de la liquidacion". Son ~47 KB y ocho hojas AGREGADAS
