@@ -1936,7 +1936,12 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # Se ordena por valor a proposito: asi se pierde el orden original del
         # parquet, que corre en paralelo al del ID_PREDIO y permitiria volver a
         # pegar las filas contra la base fila por fila.
+        # USO_LADM y TABLA_VALOR entran para que la app pueda armar sola la
+        # hoja de reglas: con el uso, la comuna y el nombre de la columna de
+        # la tabla se reconstruye la asignacion completa. Son categorias
+        # gruesas -6 usos, 26 tablas-, no senalan a ningun predio.
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
+                    "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",

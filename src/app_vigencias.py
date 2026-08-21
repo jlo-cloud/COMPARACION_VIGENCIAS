@@ -178,8 +178,8 @@ APERTURAS = {
 
 # Todo lo que trae el parquet publico. Si alguna vez hay que sumar una columna,
 # revisar primero que no permita senalar a un predio en concreto.
-COLUMNAS = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA",
-            "CLAVE",
+COLUMNAS = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "TABLA_VALOR",
+            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
             "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
             "VARIACION_VALORCONS_CAT_PCT",
             "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -235,7 +235,8 @@ def cargar(ruta: str, marca_tiempo: float) -> pd.DataFrame:
         d = pd.read_parquet(ruta)
         d = d[[c for c in COLUMNAS if c in d.columns]]
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
-    for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE"):
+    for c in ("TABLA_ORIGEN", "TABLA_VALOR", "USO_LADM",
+              "ACTIVIDAD_ECONOMICA", "CLAVE"):
         if c in d.columns:
             d[c] = d[c].astype(str)
     return d
@@ -429,7 +430,8 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     return t.reset_index().rename(columns={col: etiqueta_apertura})
 
 
-hoja_tablas, hoja_graf = st.tabs(["📊 Tablas", "📈 Gráficos"])
+hoja_tablas, hoja_graf, hoja_reglas = st.tabs(
+    ["📊 Tablas", "📈 Gráficos", "📋 Reglas"])
 
 
 # ---------------------------------------------------------------------
@@ -568,6 +570,110 @@ with hoja_graf:
                      alt.Tooltip("%:Q", title="% del total", format=",.1f")],
         ).properties(height=300).configure(locale=LOCALE_VEGA),
         width="stretch")
+
+
+# ---------------------------------------------------------------------
+# HOJA 3 - REGLAS
+# ---------------------------------------------------------------------
+with hoja_reglas:
+    st.subheader("Cómo se asigna la tabla de valor")
+    st.caption("Esta hoja NO responde a los filtros de la izquierda: describe "
+               "la asignación completa, sobre los "
+               f"{entero(len(df))} predios del reporte.")
+
+    def reglas_asignacion(d: pd.DataFrame) -> pd.DataFrame:
+        """
+        La tabla de reglas, LEIDA DE LOS DATOS y no escrita a mano.
+
+        Cada fila sale de agrupar por uso y por columna de tabla, y de listar
+        las comunas que efectivamente la usaron. La condicion juridica y la
+        tipologia de ZHF no hay que buscarlas: van dentro del nombre de la
+        columna (T1_RESIDENCIAL_10C_COND_9_013 es condicion 9, tipologia 013).
+
+        Se arma asi a proposito. El documento de reglas se escribio cuando el
+        grupo de 10 tenia diez comunas; hoy tiene quince. Una tabla escrita a
+        mano nace desactualizada el dia que alguien mueve un grupo, y esta no.
+        """
+        g = (d.groupby(["USO_LADM", "TABLA_VALOR"])
+               .agg(PREDIOS=("COMUNA", "size"),
+                    COMUNAS=("COMUNA", lambda s: ", ".join(sorted(s.unique()))))
+               .reset_index())
+
+        def _condicion(t: str) -> str:
+            if "_COND_9_" in t:
+                return "9 (propiedad horizontal)"
+            if "_COND_0_" in t:
+                return "Diferente de 9"
+            return "Todas"
+
+        g["GRUPO"] = g["TABLA_VALOR"].str.extract(r"_(\d+C)_")[0]
+        g["CONDICIÓN JURÍDICA"] = g["TABLA_VALOR"].map(_condicion)
+        g["TIPOLOGÍA ZHF"] = g["TABLA_VALOR"].str[-3:]
+        g = g.rename(columns={"USO_LADM": "USO DE CONSTRUCCIÓN",
+                              "TABLA_VALOR": "REFERENCIA TABLA"})
+        return g.sort_values(["USO DE CONSTRUCCIÓN", "REFERENCIA TABLA"])[
+            ["USO DE CONSTRUCCIÓN", "GRUPO", "COMUNAS", "CONDICIÓN JURÍDICA",
+             "TIPOLOGÍA ZHF", "REFERENCIA TABLA", "PREDIOS"]]
+
+    reglas = reglas_asignacion(df)
+    st.dataframe(
+        reglas.style.format({"PREDIOS": entero}),
+        width="stretch", hide_index=True,
+        column_config={"COMUNAS": st.column_config.TextColumn(width="medium")},
+    )
+    st.download_button("⬇️ Descargar las reglas (CSV)",
+                       data=reglas.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="reglas_asignacion_tablas.csv",
+                       mime="text/csv", key="csv_reglas")
+
+    st.caption("El grupo lo decide la comuna: 7C y 10C son los dos juegos de "
+               "columnas del Excel de tablas de valor. La condición jurídica y "
+               "la tipología van dentro del nombre de la columna.")
+
+    st.divider()
+    st.markdown("**Excepción**")
+    st.info("Si las tres últimas posiciones de la ZHF son diferentes a 011, "
+            "012, 013, 014, 015 y 016, se emplea el **estrato socioeconómico "
+            "del predio (ESTRPRED)** y se asigna la tabla correspondiente "
+            "según la comuna y la condición jurídica.")
+
+    st.divider()
+    st.markdown("**Qué predios entran al reporte**")
+    st.markdown(
+        f"""
+Solo lo que se liquida **con la tabla residencial o la de edificios**. Todo lo
+demás se ignora, porque no dice nada sobre las dos tablas que se están
+revisando y mezclarlo mueve el resultado hacia donde no corresponde.
+
+| Queda fuera | Por qué |
+|---|---|
+| Predios de **varias construcciones** | El terreno y el anexo vienen repetidos en cada fila y no se pueden repartir por tabla |
+| `Apartamentos_4_y_mas_pisos_en_PH` salvo condición 8 | Se resuelven **por modelo**, no por tabla |
+| `ESPECIAL = 1` en la base · `ESPECIAL_2026 = 1` | Su valor no salió de una tabla, así que restarlo contra un VM2 de tabla no mide la tabla |
+| Predios con `METODO_LIQUIDACION` INTEGRAL o MIXTO | El valor de base trae el terreno adentro |
+| Sin área, sin valor, sin puntaje o sin VM2 de tabla | No hay con qué comparar |
+
+Por eso el avalúo se lee **por predio**: cada uno tiene una sola construcción.
+        """)
+
+    st.divider()
+    st.markdown("**Cómo se calcula cada medida**")
+    st.markdown(
+        f"""
+| | Vigencia {V_BASE} (lo que se cobra hoy) | Vigencia {V_LIQ} (lo que daría la liquidación) |
+|---|---|---|
+| **Valor por m² catastral** | `VALORCONS / ACONCONS` | `VM2 de tabla × 0,7` |
+| **Valor por m² comercial** | `VALORCONS / ACONCONS / f` | `VM2 de tabla` (ya viene comercial) |
+| **Valor total construido** | el m² × `AREA_CONST` | el m² × `AREA_CONST` |
+| **Avalúo catastral** | `VTER + VALORCONS + VANEXO` | `VTER + valor construido + VANEXO` |
+| **Avalúo comercial** | `VTER/0,7 + (VALORCONS + VANEXO)/f` | `VTER/0,7 + valor construido + VANEXO/f` |
+
+`f` es el factor de la comuna para pasar de catastral a comercial: **0,7** en
+las comunas actualizadas en 2024-2025 y **0,6** en las demás. El terreno va
+siempre por 0,7. Por eso la variación comercial no coincide con la catastral:
+la vigencia se convierte con dos factores según la comuna y la liquidación con
+uno solo.
+        """)
 
 
 st.caption(
