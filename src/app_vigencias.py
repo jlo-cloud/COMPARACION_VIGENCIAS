@@ -21,7 +21,8 @@ Dos hojas, con los mismos filtros al lado en las dos:
 
 Arriba se eligen dos cosas y toda la pantalla responde a ellas:
 
-    MEDIDA   VALOR POR M2 (la construccion) o AVALUO (el predio completo)
+    MEDIDA   VALOR POR M2 de la construccion, VALOR TOTAL CONSTRUIDO (ese m2
+             por el area) o AVALUO del predio completo
     BASE     CATASTRAL, que es sobre lo que se cobra, o COMERCIAL, que es lo
              que se estima que vale el inmueble
 
@@ -83,10 +84,15 @@ PERCENTILES = [10, 25, 50, 75, 90, 100]
 # azul = liquidacion, naranja = el valor contra el que se compara.
 AZUL, NARANJA = "#2a78d6", "#eb6834"
 
-# Que se lee: dos MEDIDAS (el VM2 de la construccion o el avaluo del predio) en
-# dos BASES (catastral, que es lo que se cobra, o comercial, que es lo que se
-# estima que vale). Son cuatro combinaciones y el parquet trae las cuatro, asi
-# que cambiar de una a otra no vuelve a calcular nada pesado.
+# Que se lee: tres MEDIDAS -el VM2 de la construccion, el valor total
+# construido (ese VM2 por el area) y el avaluo del predio- en dos BASES
+# (catastral, que es sobre lo que se cobra, o comercial, que es lo que se
+# estima que vale). Son seis combinaciones y el parquet trae las seis, asi que
+# cambiar de una a otra no vuelve a calcular nada pesado.
+#
+# El VM2 y el total construido se mueven igual en porcentaje -el area es la
+# misma a los dos lados- pero no en pesos: el total dice cuanto vale el
+# cambio, el VM2 solo a que precio quedo el metro.
 #
 # El comercial de la vigencia sale de dividir el catastral por el factor de la
 # comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en el resto. Por eso la
@@ -94,20 +100,27 @@ AZUL, NARANJA = "#2a78d6", "#eb6834"
 # 0.7 parejo y la vigencia no.
 MEDIDAS = {
     "Valor por m² (construcción)": ("VM2", "Valor por m²"),
+    "Valor total construido": ("VALORCONS", "Valor total construido"),
     "Avalúo (predio completo)": ("AVALUO", "Avalúo"),
 }
 BASES = {"Catastral": "CATASTRAL", "Comercial": "COMERCIAL"}
 
 SERIES = {
+    ("VALORCONS", "CATASTRAL"): {
+        "vig": "VALORCONS_CAT_VIGENCIA", "liq": "VALORCONS_CAT_LIQ",
+        "var": "VARIACION_VALORCONS_CAT_PCT", "prefijo": "VALORCONS_CAT"},
+    ("VALORCONS", "COMERCIAL"): {
+        "vig": "VALORCONS_COM_VIGENCIA", "liq": "VALORCONS_COM_LIQ",
+        "var": "VARIACION_VALORCONS_COM_PCT", "prefijo": "VALORCONS_COM"},
     ("VM2", "CATASTRAL"): {
-        "vig": "VM2_VIGENCIA", "liq": "VM2_LIQ",
-        "var": "VARIACION_PCT", "prefijo": "VM2"},
+        "vig": "VM2_CAT_VIGENCIA", "liq": "VM2_CAT_LIQ",
+        "var": "VARIACION_CAT_PCT", "prefijo": "VM2_CAT"},
     ("VM2", "COMERCIAL"): {
         "vig": "VM2_COM_VIGENCIA", "liq": "VM2_COM_LIQ",
         "var": "VARIACION_COM_PCT", "prefijo": "VM2_COM"},
     ("AVALUO", "CATASTRAL"): {
-        "vig": "AVALUO_VIGENCIA", "liq": "AVALUO_LIQ",
-        "var": "VARIACION_AVALUO_PCT", "prefijo": "AVALÚO"},
+        "vig": "AVALUO_CAT_VIGENCIA", "liq": "AVALUO_CAT_LIQ",
+        "var": "VARIACION_AVALUO_CAT_PCT", "prefijo": "AVALÚO_CAT"},
     ("AVALUO", "COMERCIAL"): {
         "vig": "AVALUO_COM_VIGENCIA", "liq": "AVALUO_COM_LIQ",
         "var": "VARIACION_AVALUO_COM_PCT", "prefijo": "AVALÚO_COM"},
@@ -126,8 +139,13 @@ APERTURAS = {
 # revisar primero que no permita senalar a un predio en concreto.
 COLUMNAS = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA",
             "CLAVE",
-            "VM2_VIGENCIA", "VM2_LIQ", "VARIACION_PCT",
-            "AVALUO_VIGENCIA", "AVALUO_LIQ", "VARIACION_AVALUO_PCT",
+            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
+            "VARIACION_VALORCONS_CAT_PCT",
+            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
+            "VARIACION_VALORCONS_COM_PCT",
+            "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT",
+            "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
+            "VARIACION_AVALUO_CAT_PCT",
             "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT",
             "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"]
 
