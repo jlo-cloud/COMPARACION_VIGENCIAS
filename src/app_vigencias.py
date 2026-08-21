@@ -167,6 +167,52 @@ SERIES = {
         "var": "VARIACION_AVALUO_COM_PCT", "prefijo": "AVALÚO_COM"},
 }
 
+# --- Reglas de asignacion de tabla (hoja informativa) -----------------------
+# Esto es la ESPECIFICACION, no un recuento de la corrida: describe como se
+# asigna la tabla en general, sirva o no para los predios que hoy hay en el
+# parquet. Es el recordatorio del metodo.
+#
+# Los dos grupos de comunas tienen que coincidir con COMUNAS_7 y COMUNAS_10 de
+# tabla_construccion.py, que es donde se definen de verdad. Si alla se mueve
+# una comuna de grupo -como paso al incluir 05, 06, 13, 16 y 18-, aqui hay que
+# moverla tambien: son la misma regla escrita en dos sitios porque la app tiene
+# que poder correr sin importar el pipeline.
+GRUPOS_COMUNAS = {
+    "7C": ["02", "03", "04", "08", "17", "19", "22"],
+    "10C": ["01", "05", "06", "07", "09", "10", "11", "12", "13", "14", "15",
+            "16", "18", "20", "21"],
+}
+
+USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
+           "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
+USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
+
+# (uso, grupo, condicion juridica, patron de la columna). El patron lleva
+# {t} donde va la tipologia de la ZHF.
+REGLAS_TABLA = [
+    (USOS_T1, "10C", "9 (propiedad horizontal)",
+     "T1_RESIDENCIAL_10C_COND_9_{t}"),
+    (USOS_T1, "10C", "Diferente de 9", "T1_RESIDENCIAL_10C_COND_0_{t}"),
+    (USOS_T1, "7C", "Todas", "T1_RESIDENCIAL_7C_{t}"),
+    (USOS_T2, "10C", "Diferente de 8 y 9", "T2_EDIFICIOS_10C_{t}"),
+    (USOS_T2, "7C", "Diferente de 8 y 9", "T2_EDIFICIOS_7C_{t}"),
+]
+
+TIPOLOGIAS_ZHF = ["011", "012", "013", "014", "015", "016"]
+
+
+def reglas_asignacion() -> pd.DataFrame:
+    """La especificacion desplegada: una fila por regla y tipologia."""
+    filas = [{"USO DE CONSTRUCCIÓN": uso,
+              "COMUNAS": ", ".join(GRUPOS_COMUNAS[grupo]),
+              "CONDICIÓN JURÍDICA": condicion,
+              "TIPOLOGÍA ZHF": t,
+              "REFERENCIA TABLA": patron.format(t=t)}
+             for uso, grupo, condicion, patron in REGLAS_TABLA
+             for t in TIPOLOGIAS_ZHF]
+    return pd.DataFrame(filas)
+
+
 # Por que columna se abren los percentiles y los graficos.
 APERTURAS = {
     "Tabla de valor": "TABLA_ORIGEN",
@@ -577,65 +623,38 @@ with hoja_graf:
 # ---------------------------------------------------------------------
 with hoja_reglas:
     st.subheader("Cómo se asigna la tabla de valor")
-    st.caption("Esta hoja NO responde a los filtros de la izquierda: describe "
-               "la asignación completa, sobre los "
-               f"{entero(len(df))} predios del reporte.")
+    st.caption("Hoja informativa: es la regla **general**, no un recuento de "
+               "los predios de esta corrida. No responde a los filtros de la "
+               "izquierda.")
 
-    def reglas_asignacion(d: pd.DataFrame) -> pd.DataFrame:
-        """
-        La tabla de reglas, LEIDA DE LOS DATOS y no escrita a mano.
-
-        Cada fila sale de agrupar por uso y por columna de tabla, y de listar
-        las comunas que efectivamente la usaron. La condicion juridica y la
-        tipologia de ZHF no hay que buscarlas: van dentro del nombre de la
-        columna (T1_RESIDENCIAL_10C_COND_9_013 es condicion 9, tipologia 013).
-
-        Se arma asi a proposito. El documento de reglas se escribio cuando el
-        grupo de 10 tenia diez comunas; hoy tiene quince. Una tabla escrita a
-        mano nace desactualizada el dia que alguien mueve un grupo, y esta no.
-        """
-        g = (d.groupby(["USO_LADM", "TABLA_VALOR"])
-               .agg(PREDIOS=("COMUNA", "size"),
-                    COMUNAS=("COMUNA", lambda s: ", ".join(sorted(s.unique()))))
-               .reset_index())
-
-        def _condicion(t: str) -> str:
-            if "_COND_9_" in t:
-                return "9 (propiedad horizontal)"
-            if "_COND_0_" in t:
-                return "Diferente de 9"
-            return "Todas"
-
-        g["GRUPO"] = g["TABLA_VALOR"].str.extract(r"_(\d+C)_")[0]
-        g["CONDICIÓN JURÍDICA"] = g["TABLA_VALOR"].map(_condicion)
-        g["TIPOLOGÍA ZHF"] = g["TABLA_VALOR"].str[-3:]
-        g = g.rename(columns={"USO_LADM": "USO DE CONSTRUCCIÓN",
-                              "TABLA_VALOR": "REFERENCIA TABLA"})
-        return g.sort_values(["USO DE CONSTRUCCIÓN", "REFERENCIA TABLA"])[
-            ["USO DE CONSTRUCCIÓN", "GRUPO", "COMUNAS", "CONDICIÓN JURÍDICA",
-             "TIPOLOGÍA ZHF", "REFERENCIA TABLA", "PREDIOS"]]
-
-    reglas = reglas_asignacion(df)
-    st.dataframe(
-        reglas.style.format({"PREDIOS": entero}),
-        width="stretch", hide_index=True,
-        column_config={"COMUNAS": st.column_config.TextColumn(width="medium")},
-    )
+    reglas = reglas_asignacion()
+    st.dataframe(reglas, width="stretch", hide_index=True,
+                 column_config={"COMUNAS": st.column_config.TextColumn(
+                     width="medium")})
     st.download_button("⬇️ Descargar las reglas (CSV)",
                        data=reglas.to_csv(index=False).encode("utf-8-sig"),
                        file_name="reglas_asignacion_tablas.csv",
                        mime="text/csv", key="csv_reglas")
 
-    st.caption("El grupo lo decide la comuna: 7C y 10C son los dos juegos de "
-               "columnas del Excel de tablas de valor. La condición jurídica y "
-               "la tipología van dentro del nombre de la columna.")
+    st.caption("Se entra por el uso de la construcción, se mira en qué grupo "
+               "cae la comuna, luego la condición jurídica y la tipología de "
+               "la ZHF: eso da la columna del Excel de tablas de valor. Dentro "
+               "de esa columna, el VM2 se lee en la fila del puntaje "
+               "(PUNTCONS), que va de 1 a 100.")
 
     st.divider()
-    st.markdown("**Excepción**")
-    st.info("Si las tres últimas posiciones de la ZHF son diferentes a 011, "
-            "012, 013, 014, 015 y 016, se emplea el **estrato socioeconómico "
-            "del predio (ESTRPRED)** y se asigna la tabla correspondiente "
-            "según la comuna y la condición jurídica.")
+    st.markdown("**Excepciones**")
+    st.info("**ZHF fuera de 011-016.** Si las tres últimas posiciones de la "
+            "ZHF son diferentes a 011, 012, 013, 014, 015 y 016, se emplea el "
+            "**estrato socioeconómico del predio (ESTRPRED)** y se asigna la "
+            "tabla correspondiente según la comuna y la condición jurídica.")
+    st.info("**Apartamentos_4_y_mas_pisos_en_PH (001).** No se liquidan por "
+            "tabla sino **por modelo**. La única excepción es la condición "
+            "jurídica 8, que sí va con la tabla residencial que le "
+            "corresponda.")
+    st.info("**Valores especiales e integrales.** Las construcciones marcadas "
+            "como especiales, y los predios con método de liquidación INTEGRAL "
+            "o MIXTO, se resuelven por fuera de las tablas.")
 
     st.divider()
     st.markdown("**Qué predios entran al reporte**")
