@@ -147,7 +147,14 @@ def pct(v, decimales: int = 2, signo: bool = False) -> str:
 
 
 def pesos_signo(v, decimales: int = 0) -> str:
-    """-1234567.8 -> '-$ 1.234.568'  ·  1234567.8 -> '+$ 1.234.568'"""
+    """
+    Una diferencia SIEMPRE con su signo: '+$ 1.234.568' o '-$ 1.234.568'.
+
+    El signo va delante del de pesos y no detras -'$ -1.234.568', que es lo que
+    sale de formatear a secas-. El '+' de las positivas es a proposito: en una
+    columna de diferencias lo que se busca de un vistazo es hacia donde se
+    mueve cada fila, y sin el hay que fijarse en si la de al lado trae menos.
+    """
     if v is None or pd.isna(v):
         return ""
     return ("+" if v >= 0 else "-") + pesos(abs(v), decimales)
@@ -246,9 +253,6 @@ GRUPOS_FILTRO = {
     "5 comunas (extra)": ["05", "06", "13", "16", "18"],
 }
 
-NOTA_GRUPOS = "  ·  ".join(f"**{g}**: {', '.join(c)}"
-                           for g, c in GRUPOS_FILTRO.items())
-
 # comuna -> grupo, para armar la columna con la que se filtra y se abre.
 COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
 
@@ -282,14 +286,18 @@ def reglas_asignacion() -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
-# Por que columna se abren los percentiles y los graficos.
+# Por que columna se parten el resumen, los percentiles y los graficos: se
+# arma una fila -y un grafico- por cada valor distinto de esa columna.
+#
+# "Actualizacion 2024-2025" salio de aqui: partia las 22 comunas en las mismas
+# dos mitades que "Grupo de comunas" pero con otro nombre, y en pantalla las
+# dos opciones juntas no se distinguian.
 APERTURAS = {
     "Tabla de valor": "TABLA_ORIGEN",
     "Comuna": "COMUNA",
     "Actividad económica de la ZHF": "ACTIVIDAD_ECONOMICA",
     "Grupo de comunas": "GRUPO_COMUNAS",
-    "Actualización 2024-2025": "ACTUALIZACION",
-    "Tabla x actividad (bloques del reporte)": "CLAVE",
+    "Tabla y actividad juntas (como en el reporte)": "CLAVE",
 }
 
 # Todo lo que trae el parquet publico. Si alguna vez hay que sumar una columna,
@@ -461,17 +469,22 @@ with st.sidebar:
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
     sel_actividad = st.multiselect("Actividad económica de la ZHF",
                                    sorted(df["ACTIVIDAD_ECONOMICA"].unique()))
-    sel_grupo = st.multiselect("Grupo de comunas", list(GRUPOS_FILTRO))
-    st.caption(NOTA_GRUPOS)
+    sel_grupo = st.multiselect(
+        "Grupo de comunas", list(GRUPOS_FILTRO),
+        help="Qué comunas trae cada grupo está en la hoja Reglas.")
 
     st.divider()
-    etiqueta_apertura = st.selectbox("Abrir percentiles y gráficos por",
-                                     list(APERTURAS), index=0)
+    etiqueta_apertura = st.selectbox(
+        "Separar los resultados por", list(APERTURAS), index=0,
+        help="Con lo que se elija aquí se parten las tablas y los gráficos: "
+             "una fila del resumen y un gráfico por cada valor de esa "
+             "columna. Con «Comuna», por ejemplo, sale una fila y un gráfico "
+             "por cada comuna.")
     col_apertura = APERTURAS[etiqueta_apertura]
-    min_predios = st.number_input("Mínimo de predios por grupo", 1, 5000, 5,
-                                  help="Los grupos con menos predios no se "
-                                       "abren: con tan pocos casos un percentil "
-                                       "no dice nada.")
+    min_predios = st.number_input(
+        "Mínimo de predios por grupo", 1, 5000, 5,
+        help="Los grupos con menos predios de los que se pidan aquí no se "
+             "muestran: con tan pocos casos una mediana no dice nada.")
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     """
@@ -578,10 +591,13 @@ def con_formato(t: pd.DataFrame):
             reglas[col] = pesos_signo
         elif col in (c_base, c_liq):
             reglas[col] = pesos
-        elif col == c_var:                       # fraccion
-            reglas[col] = lambda v: pct(v * 100 if pd.notna(v) else v, 2)
-        elif col.endswith("_%"):                 # puntos porcentuales
-            reglas[col] = lambda v: pct(v, 2)
+        elif col == c_var:                       # fraccion, con signo
+            reglas[col] = lambda v: pct(v * 100 if pd.notna(v) else v, 2,
+                                        signo=True)
+        elif col == "VAR_MEDIANA_%":             # puntos, con signo
+            reglas[col] = lambda v: pct(v, 2, signo=True)
+        elif col.endswith("_%"):                 # BAJAN_% y SUBEN_% son
+            reglas[col] = lambda v: pct(v, 2)    # proporciones, no variaciones
         elif col in ("NUM_PREDIOS", "PREDIOS"):
             reglas[col] = entero
     return t.style.format(reglas)
@@ -755,19 +771,46 @@ with hoja_tablas:
     # que adivinara cual de los dos archivos es "el bueno".
 
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
-    st.caption("Las dos medianas son de distribuciones separadas; "
-               "VAR_MEDIANA_% es predio contra sí mismo. Por eso pueden "
-               "apuntar a lados distintos: si en un grupo conviven comunas que "
-               "suben mucho y comunas que caen mucho, la mediana de los valores "
-               "se va con las más pesadas y la de las variaciones no.")
+    st.caption(f"Comparación de los valores **medianos** de cada grupo entre "
+               f"las vigencias {V_BASE} y {V_LIQ}.")
     if res.empty:
         st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
     else:
-        st.dataframe(con_formato(res), width="stretch", hide_index=True)
-        st.caption("La fila **TOTAL** es sobre los mismos grupos que se ven "
-                   "arriba: PREDIOS sí es la suma de la columna, pero las "
-                   "medianas y los porcentajes se vuelven a calcular sobre el "
-                   "conjunto -una mediana no se suma-.")
+        # El matiz de por que DIFERENCIA y VAR_MEDIANA_% no siempre concuerdan
+        # -una compara distribuciones y la otra es predio contra si mismo- pasa
+        # a la ayuda de cada encabezado: quien lo necesite lo tiene al pasar el
+        # mouse, y el resto no lee cinco renglones antes de ver la tabla.
+        #
+        # OJO: aqui column_config va SIN 'format'. El formato lo pone el Styler
+        # de con_formato() y column_config le ganaria, dejando los numeros en
+        # crudo.
+        st.dataframe(
+            con_formato(res), width="stretch", hide_index=True,
+            column_config={
+                "PREDIOS": st.column_config.Column(
+                    help="Construcciones del grupo que entran a la comparación."),
+                c_base: st.column_config.Column(
+                    help=f"Valor mediano del grupo en la vigencia {V_BASE}: la "
+                         f"mitad de los predios está por debajo."),
+                c_liq: st.column_config.Column(
+                    help=f"Valor mediano del grupo con la liquidación "
+                         f"({V_LIQ}), calculado igual."),
+                c_dif: st.column_config.Column(
+                    help="La mediana de {} menos la de {}. Compara las dos "
+                         "distribuciones, no predio contra predio: el predio "
+                         "que queda en el medio en una vigencia no tiene por "
+                         "qué ser el mismo de la otra.".format(V_LIQ, V_BASE)),
+                "VAR_MEDIANA_%": st.column_config.Column(
+                    help="La mediana de las variaciones, y esta SÍ es predio "
+                         "contra sí mismo. Por eso no coincide con la "
+                         "diferencia dividida entre el valor base: son dos "
+                         "cuentas distintas, no un error."),
+                "BAJAN_%": st.column_config.Column(
+                    help="Qué proporción del grupo baja de una vigencia a otra."),
+                "SUBEN_%": st.column_config.Column(
+                    help="Qué proporción del grupo sube de una vigencia a otra."),
+            })
+        st.caption("La fila **TOTAL** consolida todos los grupos: *PREDIOS* es la suma, mientras que las medianas y porcentajes se recalculan sobre el conjunto total es sobre los mismos grupos que se ven ")
 
     st.divider()
     st.markdown("**Percentiles, diferencia y variación** · "
@@ -786,25 +829,33 @@ with hoja_graf:
     st.subheader(f"Gráficos · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
     def pie(t: pd.DataFrame) -> list:
-        """
-        Las lineas que van bajo el titulo, dichas en palabras y no en jerga.
-
-        Antes decia "· en la mediana +29,1 %", que obliga a saber que es la
-        mediana y contra que. Ahora dice de cuanto a cuanto va y cuantos pesos
-        son, que es lo que se pregunta al mirar el grafico.
-        """
+        """Bajo el titulo va SOLO el conteo: es corto y nunca se corta."""
         if t.empty:
             return []
-        lineas = [f"{entero(int(t['NUM_PREDIOS'].iloc[-1]))} predios comparados"]
-        fila = t[t["PERCENTIL"] == "50%"]
-        if not fila.empty and pd.notna(fila[c_var].iloc[0]):
-            pv, pl = float(fila[c_base].iloc[0]), float(fila[c_liq].iloc[0])
-            lineas.append(
-                f"El valor del medio (percentil 50) "
-                f"{'sube' if pl >= pv else 'baja'} de {pesos(pv)} en {V_BASE} "
-                f"a {pesos(pl)} en {V_LIQ}: son {pesos_signo(pl - pv)} "
-                f"({pct(float(fila[c_var].iloc[0]) * 100, 1, signo=True)})")
-        return lineas
+        return [f"{entero(int(t['NUM_PREDIOS'].iloc[-1]))} predios comparados"]
+
+    def frase(t: pd.DataFrame) -> str:
+        """
+        La lectura del grafico en una frase, para el caption de DEBAJO.
+
+        Va fuera del titulo a proposito: Vega mide el subtitulo contra el ancho
+        del grafico y lo corta con puntos suspensivos -"son +$ 66.500 (..."-,
+        que es justo donde estaba el dato. Un caption de Streamlit es texto
+        normal, se acomoda en los renglones que necesite y no pierde nada.
+
+        Y dice QUE es el porcentaje. "+29,1 %" a secas no se explica solo:
+        es la diferencia medida contra el valor de la vigencia base.
+        """
+        fila = t[t["PERCENTIL"] == "50%"] if not t.empty else t
+        if fila.empty or pd.isna(fila[c_var].iloc[0]):
+            return ""
+        pv, pl = float(fila[c_base].iloc[0]), float(fila[c_liq].iloc[0])
+        var = float(fila[c_var].iloc[0]) * 100
+        return (f"En el medio de la distribución (percentil 50) el valor "
+                f"{'sube' if pl >= pv else 'baja'} de **{pesos(pv)}** en "
+                f"{V_BASE} a **{pesos(pl)}** en {V_LIQ}. La diferencia es de "
+                f"**{pesos_signo(pl - pv)}**, que sobre el valor de {V_BASE} "
+                f"equivale a **{pct(var, 1, signo=True)}**.")
 
     def curvas(t: pd.DataFrame, titulo: str) -> alt.Chart:
         """
@@ -854,6 +905,7 @@ with hoja_graf:
         )
 
     st.altair_chart(curvas(total, "Total de la selección"), width="stretch")
+    st.caption(frase(total))
 
     st.divider()
     st.markdown(f"**Por {etiqueta_apertura.lower()}**")
@@ -870,10 +922,9 @@ with hoja_graf:
         for i in range(0, len(elegidos), columnas_grilla):
             for col, nombre in zip(st.columns(columnas_grilla),
                                    elegidos[i:i + columnas_grilla]):
-                col.altair_chart(
-                    curvas(abierto[abierto[etiqueta_apertura] == nombre],
-                           nombre),
-                    width="stretch")
+                t = abierto[abierto[etiqueta_apertura] == nombre]
+                col.altair_chart(curvas(t, nombre), width="stretch")
+                col.caption(frase(t))
 
     st.divider()
     st.markdown("**Cómo se reparte la variación**")
@@ -1186,8 +1237,6 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
 st.caption(
     f"Fuente: {RUTA_DATOS.name} · generado por comparacion_vigencia.py el "
     f"{pd.Timestamp(os.path.getmtime(RUTA_DATOS), unit='s'):%Y-%m-%d %H:%M}. "
-    f"Solo predios de una sola construcción con valor de tabla en las dos "
-    f"vigencias. Datos agregados, sin identificador de predio ni número "
     f"predial: el VM2 viene redondeado a $100 y el avalúo a $100.000, así que "
     f"puede haber diferencias de centésimas contra el reporte en Excel, que "
     f"trabaja con el valor exacto y es el documento de referencia."
