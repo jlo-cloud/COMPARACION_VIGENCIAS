@@ -313,18 +313,26 @@ st.set_page_config(page_title=f"Comparación de vigencias {V_BASE} → {V_LIQ}",
 st.markdown(
     """
     <style>
-        .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+        /* Compacto a proposito: el encabezado y las tarjetas se comian media
+           pantalla al abrir, y lo que se viene a ver son las tablas. Todo lo
+           de arriba tiene que caber en una franja y dejar el contenido a la
+           vista sin desplazarse. */
+        .block-container {padding-top: .8rem; padding-bottom: 1.2rem;}
         div[data-testid="stMetric"] {
-            background:#ffffff; border:1px solid #e6e9ef; border-radius:12px;
-            padding:14px 16px; box-shadow:0 1px 3px rgba(16,24,40,.06);
+            background:#ffffff; border:1px solid #e6e9ef; border-radius:9px;
+            padding:7px 11px; box-shadow:0 1px 2px rgba(16,24,40,.05);
         }
-        div[data-testid="stMetricLabel"] p {color:#667085; font-weight:600;}
+        div[data-testid="stMetricLabel"] p {
+            color:#667085; font-weight:600; font-size:12px;
+        }
+        div[data-testid="stMetricValue"] {font-size:20px; line-height:1.2;}
+        div[data-testid="stMetricDelta"] {font-size:11px;}
         .app-hero {
             background:linear-gradient(120deg,#1e3a8a 0%,#2563eb 55%,#0ea5e9 100%);
-            color:#fff; padding:24px 28px; border-radius:16px; margin-bottom:16px;
+            color:#fff; padding:11px 16px; border-radius:10px; margin-bottom:10px;
         }
-        .app-hero h1 {margin:0; font-size:26px;}
-        .app-hero p  {margin:6px 0 0; opacity:.9; font-size:15px;}
+        .app-hero h1 {margin:0; font-size:18px; font-weight:700;}
+        .app-hero p  {margin:2px 0 0; opacity:.88; font-size:12.5px;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -413,10 +421,9 @@ st.markdown(
     f"""
     <div class="app-hero">
         <h1>🏙️ Comparación de vigencias · {V_BASE} → {V_LIQ}</h1>
-        <p>Lo que quedaría con la liquidación (vigencia {V_LIQ}) contra lo que
-        cobra hoy la base (vigencia {V_BASE}), sobre
-        <b>{entero(len(df))} predios</b> de una sola construcción y con valor de tabla
-        en las dos vigencias.</p>
+        <p>La liquidación ({V_LIQ}) contra lo que cobra hoy la base
+        ({V_BASE}) · <b>{entero(len(df))} predios</b> de una sola construcción
+        con valor de tabla en las dos vigencias.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -512,8 +519,6 @@ k2.metric(f"Mediana vigencia {V_BASE}", pesos(dff[medida["vig"]].median()))
 k3.metric(f"Mediana vigencia {V_LIQ}", pesos(dff[medida["liq"]].median()))
 k4.metric("Variación mediana", pct(dff[medida["var"]].median(), 2, signo=True))
 k5.metric("Bajan", pct((dff[medida["var"]] < 0).mean() * 100, 1))
-
-st.divider()
 
 
 # =====================================================================
@@ -669,92 +674,6 @@ def _motor_excel():
 MOTOR_EXCEL = _motor_excel()
 
 
-def _hojas_detalle():
-    """Las seis tablas del detalle, en el orden en que van al archivo."""
-    filtros = pd.DataFrame(
-        [("Medida", etiqueta_medida),
-         ("Base de valor", etiqueta_base),
-         ("Categoría de tabla", ", ".join(sel_familia) or "todas"),
-         ("Tabla de valor", ", ".join(sel_tabla) or "todas"),
-         ("Comuna", ", ".join(sel_comuna) or "todas"),
-         ("Actividad económica", ", ".join(sel_actividad) or "todas"),
-         ("Grupo de comunas", ", ".join(sel_grupo) or "todos"),
-         ("Abierto por", etiqueta_apertura),
-         ("Mínimo de predios por grupo", entero(min_predios)),
-         ("Predios de la selección", entero(len(dff))),
-         ("Vigencias comparadas", f"{V_BASE} → {V_LIQ}"),
-         ("Fuente", RUTA_DATOS.name)],
-        columns=["FILTRO", "VALOR"])
-
-    return [("FILTROS", filtros),
-            ("RESUMEN", res),
-            ("PERCENTILES", total),
-            ("PERCENTILES_POR_GRUPO", abierto),
-            ("REPARTO_VARIACION", reparto),
-            ("REGLAS", reglas)]
-
-
-def excel_detalle() -> bytes:
-    """
-    Un solo libro con todo lo que hay en pantalla, en vez de un CSV por tabla.
-
-    Va con los numeros CRUDOS, no con el texto formateado: en Excel se siguen
-    pudiendo sumar y ordenar, y el separador de miles lo pone el Excel de quien
-    lo abra. La hoja FILTROS deja escrito con que seleccion se saco, que es lo
-    primero que se pregunta cuando el archivo cambia de manos.
-
-    El decorado -encabezado azul, formato de pesos, anchos- es API de
-    xlsxwriter. Con openpyxl se escribe lo mismo pero sin decorar: mejor un
-    libro feo que ningun libro.
-    """
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine=MOTOR_EXCEL) as xw:
-        libro = xw.book if MOTOR_EXCEL == "xlsxwriter" else None
-        if libro is not None:
-            f_tit = libro.add_format({"bold": True, "bg_color": "#1e3a8a",
-                                      "font_color": "#ffffff", "border": 1})
-            f_pesos = libro.add_format({"num_format": "$ #,##0"})
-            f_pct = libro.add_format({"num_format": "0.00 %"})
-            f_ent = libro.add_format({"num_format": "#,##0"})
-        for nombre, t in _hojas_detalle():
-            if t is None or t.empty:
-                continue
-            t.to_excel(xw, sheet_name=nombre, index=False)
-            if libro is None:
-                continue
-            h = xw.sheets[nombre]
-            for i, col in enumerate(t.columns):
-                h.write(0, i, str(col), f_tit)
-                if col in (c_base, c_liq, c_dif):
-                    fmt, ancho = f_pesos, 22
-                elif col == c_var:                       # viene en fraccion
-                    fmt, ancho = f_pct, 16
-                elif str(col).endswith("_%") or col == "%":
-                    fmt, ancho = f_ent, 12
-                elif col in ("PREDIOS", "NUM_PREDIOS"):
-                    fmt, ancho = f_ent, 12
-                else:
-                    fmt, ancho = None, max(14, min(46, int(
-                        t[col].astype(str).str.len().max() or 14) + 2))
-                h.set_column(i, i, ancho, fmt)
-            h.freeze_panes(1, 0)
-    return buf.getvalue()
-
-
-def csv_detalle() -> bytes:
-    """
-    Plan B cuando no hay motor de Excel: las mismas tablas, una debajo de otra
-    en un solo archivo, con su nombre de hoja como separador.
-    """
-    partes = []
-    for nombre, t in _hojas_detalle():
-        if t is None or t.empty:
-            continue
-        partes.append(f"### {nombre}")
-        partes.append(t.to_csv(index=False))
-    return "\n".join(partes).encode("utf-8-sig")
-
-
 def excel_predios(d: pd.DataFrame) -> bytes:
     """
     El detalle fila a fila a Excel, para revisar casos a mano.
@@ -831,43 +750,10 @@ def excel_predios(d: pd.DataFrame) -> bytes:
 with hoja_tablas:
     st.subheader(f"Tablas · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
-    # La descarga NO puede tumbar el reporte. Si falta el motor de Excel o el
-    # libro falla por lo que sea, se baja a CSV y las tres hojas siguen vivas:
-    # a esta app se entra a mirar los numeros, bajarlos es lo secundario.
-    nombre_archivo = (f"comparacion_{V_BASE}_{V_LIQ}_{medida['prefijo']}"
-                      f"_{col_apertura}")
-    ayuda = ("Todo junto: el resumen, los percentiles -del total y abiertos "
-             "por grupo-, el reparto de la variación, las reglas y los "
-             "filtros con que se sacó.")
-    problema = None
-    if MOTOR_EXCEL:
-        try:
-            st.download_button(
-                "⬇️ Descargar el Excel del detalle",
-                data=excel_detalle(),
-                file_name=f"{nombre_archivo}.xlsx",
-                mime=("application/vnd.openxmlformats-officedocument"
-                      ".spreadsheetml.sheet"),
-                type="primary", key="xlsx_detalle", help=ayuda)
-        except Exception as exc:                         # pragma: no cover
-            problema = f"No se pudo armar el Excel ({exc})."
-    else:
-        problema = ("Este entorno no tiene instalado **xlsxwriter**, que es "
-                    "con lo que se arma el Excel.")
+    # Sin boton de descarga aqui: la unica descarga de la app esta en la hoja
+    # Detalle, y es el libro del reporte. Tener dos era pedirle a quien la abre
+    # que adivinara cual de los dos archivos es "el bueno".
 
-    if problema:
-        st.download_button(
-            "⬇️ Descargar el detalle (CSV)",
-            data=csv_detalle(), file_name=f"{nombre_archivo}.csv",
-            mime="text/csv", type="primary", key="csv_detalle", help=ayuda)
-        st.caption(
-            f"{problema} Va el mismo detalle en un CSV, con las tablas una "
-            "debajo de otra. Para recuperar el Excel: `xlsxwriter` tiene que "
-            "estar en `requirements.txt` y hay que reiniciar la app desde "
-            "**Manage app › Reboot app** —cambiar el archivo no basta, el "
-            "entorno no se reinstala solo—.")
-
-    st.divider()
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
     st.caption("Las dos medianas son de distribuciones separadas; "
                "VAR_MEDIANA_% es predio contra sí mismo. Por eso pueden "
@@ -1025,10 +911,34 @@ with hoja_detalle:
     st.subheader("Detalle de la liquidación")
 
     @st.cache_data(show_spinner=False)
-    def leer_reporte(ruta: str, marca_tiempo: float) -> bytes:
-        """El libro del reporte tal cual esta en disco, sin tocarle nada."""
-        with open(ruta, "rb") as f:
-            return f.read()
+    def hoja_general(ruta: str, marca_tiempo: float):
+        """
+        Solo la hoja General del libro del reporte.
+
+        Se abre el libro y se BORRAN las demas hojas, en vez de leer los datos
+        y volver a escribirlos: asi la General llega con el mismo formato que
+        tiene en el archivo original -encabezado, anchos, panel congelado- y no
+        con el que se le ponga aqui. El resto de hojas se quedan afuera porque
+        el proceso las produce para revisar a fondo, y lo que se pide desde la
+        app es la General y nada mas.
+
+        Devuelve (bytes, hojas_quitadas). Si openpyxl no esta o el libro no
+        trae una hoja llamada General, entrega el archivo completo y lo dice.
+        """
+        try:
+            from openpyxl import load_workbook
+            libro_x = load_workbook(ruta)
+            if "General" not in libro_x.sheetnames:
+                raise KeyError("General")
+            quitadas = [h for h in libro_x.sheetnames if h != "General"]
+            for h in quitadas:
+                del libro_x[h]
+            buf = io.BytesIO()
+            libro_x.save(buf)
+            return buf.getvalue(), quitadas
+        except Exception:                                # pragma: no cover
+            with open(ruta, "rb") as f:
+                return f.read(), None
 
     libro = reporte_mas_reciente()
     if libro is None:
@@ -1038,10 +948,12 @@ with hoja_detalle:
             f"`{CARPETA_REPORTE.relative_to(RAIZ)}`. Lo escribe "
             "`python src/comparacion_vigencia.py` al terminar.")
     else:
-        st.markdown("**El libro completo de la liquidación**")
+        datos_general, quitadas = hoja_general(str(libro),
+                                              libro.stat().st_mtime)
+        st.markdown("**La hoja General de la liquidación**")
         st.download_button(
             "📗 Ver el detalle de la liquidación",
-            data=leer_reporte(str(libro), libro.stat().st_mtime),
+            data=datos_general,
             # La copia fija no lleva fecha en el nombre; se la pone la del
             # archivo, para que el que se baja del deploy se pueda identificar
             # igual que el que se saca a mano.
@@ -1052,16 +964,17 @@ with hoja_detalle:
             mime=("application/vnd.openxmlformats-officedocument"
                   ".spreadsheetml.sheet"),
             type="primary", key="dl_reporte",
-            help="Es el mismo archivo que se descarga hoy a mano, entregado "
-                 "tal cual: General, Resumen VM2, Resumen Avalúos, Reglas, "
-                 "Conclusiones, Selección por comuna, Comparación tablas y "
-                 "Rangos de variación.")
+            help="La hoja General del libro que produce la liquidación, con "
+                 "su formato original.")
         st.caption(
-            f"`{libro.name}` · {_miles(libro.stat().st_size / 1024, 0)} KB · "
-            f"generado el "
-            f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}. "
-            "No responde a los filtros de la izquierda: es el libro completo "
-            "de la corrida, igual al que produce el proceso.")
+            f"Sale de `{libro.name}` · "
+            f"{_miles(len(datos_general) / 1024, 0)} KB · generado el "
+            f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}"
+            + (f" · se dejaron fuera las otras {len(quitadas)} hojas "
+               f"({', '.join(quitadas)})" if quitadas else
+               " · ATENCIÓN: no se pudo recortar, va el libro completo")
+            + ". No responde a los filtros de la izquierda: es la General de "
+              "la corrida, igual a la que produce el proceso.")
 
     st.divider()
     st.markdown("**Explorador predio a predio**")
@@ -1267,18 +1180,6 @@ un valor que no salió de una tabla no mide la tabla.
 Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
         """)
 
-    st.divider()
-    st.markdown("**Qué más queda fuera del reporte**")
-    st.markdown(
-        """
-| Queda fuera | Por qué |
-|---|---|
-| Predios de **varias construcciones** | El terreno y el anexo vienen repetidos en cada fila y no se pueden repartir por tabla |
-| `ESPECIAL = 1` en la base · `ESPECIAL_2026 = 1` | Su valor no salió de una tabla |
-| Predios con `METODO_LIQUIDACION` INTEGRAL o MIXTO | El valor de base trae el terreno adentro |
-
-Por eso el avalúo se lee **por predio**: cada uno tiene una sola construcción.
-        """)
 
 
 

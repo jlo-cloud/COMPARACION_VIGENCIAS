@@ -2,9 +2,12 @@
 # No es el entorno completo del proyecto: la app solo lee el parquet de detalle,
 # no ejecuta la liquidacion (nada de matplotlib ni scikit-learn).
 # altair no se lista porque viene dentro de streamlit.
-# xlsxwriter si hace falta: es el motor con que se arma el Excel del detalle
-# que se descarga desde la hoja Tablas.
+# xlsxwriter si hace falta: es el motor con que se arma el Excel del explorador
+# predio a predio, en la hoja Detalle.
 streamlit>=1.40
 pandas>=2.0
 pyarrow>=14.0
 xlsxwriter>=3.1
+# openpyxl abre el libro del reporte para dejar solo la hoja General,
+# conservando su formato. Sin el, esa descarga entrega el libro entero.
+openpyxl>=3.1
