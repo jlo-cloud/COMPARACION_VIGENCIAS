@@ -1,84 +1,4 @@
-"""
-=====================================================================
-COMPARACION DE VIGENCIAS - version interactiva (Streamlit)
-=====================================================================
 
-Lo mismo que entrega comparacion_vigencia.py en Excel, pero como app: se abre
-en el navegador desde cualquier PC con el enlace y los percentiles y los
-graficos se recalculan sobre lo que el usuario filtre. En el libro de Excel los
-bloques vienen fijos (tabla x actividad economica); aqui se puede pedir, por
-ejemplo, el percentil 90 de la comuna 17 en T1_RESIDENCIAL_013, que en el Excel
-no existe y habria que sacarlo a mano.
-
-Dos hojas, con los mismos filtros al lado en las dos:
-
-    Tablas          el resumen por grupo -cuantos predios, las dos medianas,
-                    la diferencia en pesos y cuantos suben o bajan, con fila de
-                    TOTAL- y los percentiles 10-100 del total de la seleccion,
-                    tambien con la diferencia y su variacion. Un solo boton
-                    baja todo en un Excel, incluidos los percentiles abiertos
-                    por grupo, que en pantalla no se muestran para no repetir.
-    Graficos        las mismas dos curvas del reporte, dibujadas sobre lo
-                    filtrado, mas el reparto de la variacion.
-
-Arriba se eligen dos cosas y toda la pantalla responde a ellas:
-
-    MEDIDA   VALOR POR M2 de la construccion, VALOR TOTAL CONSTRUIDO (ese m2
-             por el area) o AVALUO del predio completo
-    BASE     CATASTRAL, que es sobre lo que se cobra, o COMERCIAL, que es lo
-             que se estima que vale el inmueble
-
-El comercial de la VIGENCIA sale de dividir el catastral por el factor de la
-comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en las demas (el terreno va
-siempre por 0.7). El de la LIQUIDACION no necesita conversion: el VM2 de las
-tablas ya viene comercial. Por eso la variacion comercial no es igual a la
-catastral -la vigencia se convierte con dos factores distintos segun la comuna
-y la liquidacion con uno solo-, y por eso vale la pena mirar las dos.
-
-Dos fuentes, y de cual haya depende lo que se ve
------------------------------------------------
-output/COMPARACION_VIGENCIA_PUBLICO.parquet   (6.5 MB, SIN identificadores)
-    Es lo que mueve las hojas Tablas, Graficos y Reglas: las mismas filas del
-    reporte pero sin ID_PREDIO ni numero predial, solo comuna, tabla, actividad
-    y valores. Este si va al repositorio y es lo unico que la app necesita.
-
-output/COMPARACION_VIGENCIA_DETALLE.parquet   (44.7 MB, CON identificadores)
-    Es lo que mueve la hoja Detalle: 288 mil construcciones fila a fila, con
-    ID_PREDIO, numero predial, area, puntaje y las tres medidas en las dos
-    bases. Lo escribe comparacion_vigencia.py al lado del otro.
-
-    OJO: el .gitignore lo deja FUERA a proposito, porque este repositorio es
-    publico. Corriendo la app en local el detalle esta y la hoja funciona; en
-    el deploy de Streamlit Cloud el archivo no existe y la hoja lo dice en vez
-    de fallar. Para tenerlo publicado hay que decidirlo antes: el repositorio
-    tendria que volver a ser privado, o la app quedar detras de contrasena.
-    Subirlo tal como esta hoy publica el numero predial de 288 mil predios, y
-    del historial de git eso no se saca borrando el archivo despues.
-
-Trae solo los predios comparables -aquellos cuyas construcciones se liquidan
-TODAS por la tabla residencial, la de edificios o la comercial, y con valor de
-tabla en las dos vigencias-, asi que la app no vuelve a filtrar nada de eso: lo
-que se ve aqui es exactamente el universo del reporte.
-
-DOS GRANOS, y la medida elegida decide cual se lee:
-
-    Valor por m2              va por CONSTRUCCION. Un predio de tres
-                              construcciones aporta tres registros.
-    Valor construido total    van por PREDIO. El valor de las construcciones
-    Avaluo                    del predio ya viene sumado, y el terreno y el
-                              anexo contados una sola vez.
-
-Por eso el conteo de arriba cambia al cambiar de medida: no es un error, son
-dos poblaciones distintas. Estan en dos parquet separados a proposito; con el
-avaluo repetido en cada construccion, un predio de tres pesaria el triple en
-cualquier percentil.
-
-Uso
----
-    python -m streamlit run src/app_vigencias.py
-
-Para publicarla gratis y que se abra con un enlace, ver PUBLICAR al final.
-"""
 
 import io
 import os
@@ -89,34 +9,19 @@ import pandas as pd
 import streamlit as st
 
 RAIZ = Path(__file__).resolve().parent.parent
-# Las dos fuentes anonimas, una por GRANO. Una construccion no es un predio:
-# desde que entran predios de varias construcciones, el VM2 vive en el grano de
-# construccion -y ahi el predio se repite- mientras que el valor construido
-# total y el avaluo viven en el de predio. Tenerlos en un solo archivo haria que
-# un predio de tres construcciones pesara el triple en cualquier percentil de
-# avaluo, sin que nada lo delatara.
+# Las dos fuentes anonimas, una por GRANO.
 RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
 RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
 
-# El libro de revision que escribe comparacion_vigencia.py en cada corrida:
-# results/COMPARACION_VIGENCIA/COMPARACION_VIGENCIA_<fecha>.xlsx. Es el mismo
-# archivo que se descarga a mano hoy, con las ocho hojas del reporte, y desde
-# la app se entrega TAL CUAL, sin volver a armarlo: lo que se revisa en Excel y
-# lo que se baja de la app tienen que ser byte por byte el mismo documento.
+# El libro del reporte que deja cada corrida en results/.
 CARPETA_REPORTE = RAIZ / "results" / "COMPARACION_VIGENCIA"
-# Copia de nombre fijo que deja comparacion_vigencia.py al terminar. Es la UNICA
-# que se versiona -results/ entero queda fuera, ver .gitignore- y por eso es la
-# que tiene el deploy. En local suelen estar las dos y gana la mas nueva.
+# Copia de nombre fijo que deja comparacion_vigencia.py al terminar.
 RUTA_REPORTE_FIJA = RAIZ / "output" / "COMPARACION_VIGENCIA_REPORTE.xlsx"
 
 
 def reporte_mas_reciente():
-    """
-    El libro del reporte mas nuevo entre los dos sitios donde puede estar, o
-    None si no hay ninguno: en local los COMPARACION_VIGENCIA_<fecha>.xlsx de
-    results/, en el deploy la copia fija de output/.
-    """
+    """El libro del reporte mas nuevo, o None si no hay ninguno."""
     if CARPETA_REPORTE.is_dir():
         # Los de results/ mandan: traen la fecha en el nombre, que es como se
         # identifica una corrida al pasarse el archivo entre personas.
@@ -126,10 +31,7 @@ def reporte_mas_reciente():
             return con_fecha[0]
     return RUTA_REPORTE_FIJA if RUTA_REPORTE_FIJA.exists() else None
 
-# Las dos vigencias salen del modulo que genero el parquet, para que la app no
-# quede con los anos escritos a mano cuando alla se corran. Si el import falla
-# -en el servidor puede no estar matplotlib, que arrastra comparacion_ofertas-
-# se usan los mismos valores por defecto que trae aquel CONFIG.
+# Las vigencias salen del modulo que genero el parquet, no escritas a mano.
 try:
     from comparacion_vigencia import CONFIG as CONFIG_VIGENCIA
     V_BASE = CONFIG_VIGENCIA["vigencia_base"]
@@ -141,15 +43,6 @@ except Exception:                                            # pragma: no cover
 PERCENTILES = [10, 25, 50, 75, 90, 100]
 
 # --- Formato de numeros -----------------------------------------------------
-# Todo se muestra a la colombiana: miles con PUNTO y decimales con COMA. No se
-# usa el formato "localized" de Streamlit ni el de los graficos porque esos
-# siguen el idioma del NAVEGADOR de quien abre la app: el mismo numero le
-# saldria 476.900 a uno y 476,900 a otro, que aqui son cosas distintas.
-#
-# En las tablas el formato se aplica con un Styler y no con column_config, para
-# que la columna siga siendo numerica y se pueda seguir ordenando al hacer clic
-# en el encabezado; column_config manda sobre el Styler, asi que donde se usa
-# este no se le pone 'format' a aquel.
 LOCALE_VEGA = {"number": {"decimal": ",", "thousands": ".", "grouping": [3],
                           "currency": ["$ ", ""]}}
 
@@ -168,14 +61,7 @@ def pct(v, decimales: int = 2, signo: bool = False) -> str:
 
 
 def pesos_signo(v, decimales: int = 0) -> str:
-    """
-    Una diferencia SIEMPRE con su signo: '+$ 1.234.568' o '-$ 1.234.568'.
-
-    El signo va delante del de pesos y no detras -'$ -1.234.568', que es lo que
-    sale de formatear a secas-. El '+' de las positivas es a proposito: en una
-    columna de diferencias lo que se busca de un vistazo es hacia donde se
-    mueve cada fila, y sin el hay que fijarse en si la de al lado trae menos.
-    """
+    """Una diferencia SIEMPRE con su signo: '+$ 1.234.568' o '-$ 1.234.568'."""
     if v is None or pd.isna(v):
         return ""
     return ("+" if v >= 0 else "-") + pesos(abs(v), decimales)
@@ -187,11 +73,7 @@ def entero(v) -> str:
 
 
 def _miles(v: float, decimales: int) -> str:
-    """
-    El truco de siempre: Python solo sabe agrupar con coma, asi que se formatea
-    a la inglesa y despues se intercambian los dos separadores. El paso por el
-    espacio duro evita que el segundo replace deshaga el primero.
-    """
+    """Miles con punto y decimales con coma, a la colombiana."""
     return (f"{v:,.{decimales}f}"
             .replace(",", " ").replace(".", ",").replace(" ", "."))
 
@@ -199,23 +81,7 @@ def _miles(v: float, decimales: int) -> str:
 # azul = liquidacion, naranja = el valor contra el que se compara.
 AZUL, NARANJA = "#2a78d6", "#eb6834"
 
-# Que se lee: tres MEDIDAS -el VM2 de la construccion, el valor total
-# construido (ese VM2 por el area) y el avaluo del predio- en dos BASES
-# (catastral, que es sobre lo que se cobra, o comercial, que es lo que se
-# estima que vale). Son seis combinaciones y el parquet trae las seis, asi que
-# cambiar de una a otra no vuelve a calcular nada pesado.
-#
-# El VM2 y el total construido se mueven igual en porcentaje -el area es la
-# misma a los dos lados- pero no en pesos: el total dice cuanto vale el
-# cambio, el VM2 solo a que precio quedo el metro.
-#
-# El comercial de la vigencia sale de dividir el catastral por el factor de la
-# comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en el resto. Por eso la
-# variacion comercial NO es igual a la catastral: la liquidacion se baja con un
-# 0.7 parejo y la vigencia no.
-# (clave, titulo, grano). El grano decide de cual de los dos parquet se lee y
-# como se cuenta: el VM2 es de la construccion, el valor construido total y el
-# avaluo son del predio.
+# Tres medidas por dos bases: el parquet trae las seis combinaciones.
 MEDIDAS = {
     "Valor por m²": ("VM2", "Valor por m²", "construccion"),
     "Valor total construido": ("VALORCONS", "Valor total construido", "predio"),
@@ -254,26 +120,13 @@ SERIES = {
 }
 
 # --- Reglas de asignacion de tabla (hoja informativa) -----------------------
-# Esto es la ESPECIFICACION, no un recuento de la corrida: describe como se
-# asigna la tabla en general, sirva o no para los predios que hoy hay en el
-# parquet. Es el recordatorio del metodo.
-#
-# Los dos grupos de comunas tienen que coincidir con COMUNAS_7 y COMUNAS_10 de
-# tabla_construccion.py, que es donde se definen de verdad. Si alla se mueve
-# una comuna de grupo -como paso al incluir 05, 06, 13, 16 y 18-, aqui hay que
-# moverla tambien: son la misma regla escrita en dos sitios porque la app tiene
-# que poder correr sin importar el pipeline.
 GRUPOS_COMUNAS = {
     "7C": ["02", "03", "04", "08", "17", "19", "22"],
     "10C": ["01", "05", "06", "07", "09", "10", "11", "12", "13", "14", "15",
             "16", "18", "20", "21"],
 }
 
-# Los tres grupos con que se reparten las 22 comunas, que es como el filtro las
-# ofrece. Los dos primeros son los de las tablas de valor (COMUNAS_7 y
-# COMUNAS_10 de tabla_construccion.py); el tercero son las cinco que entraron
-# despues -INCLUIR_COMUNAS_FALTANTES = True- y que hoy se liquidan leyendo esas
-# mismas columnas *_10C_*, no una tabla propia.
+# Los tres grupos en que se reparten las 22 comunas.
 GRUPOS_FILTRO = {
     "10 comunas": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
     "7 comunas": ["02", "03", "04", "08", "17", "19", "22"],
@@ -287,7 +140,7 @@ USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
 
-# (uso, grupo, condicion juridica, patron de la columna). El patron lleva
+# (uso, grupo, condicion juridica, patron de la columna).
 # {t} donde va la tipologia de la ZHF.
 REGLAS_TABLA = [
     (USOS_T1, "10C", "9",
@@ -313,12 +166,7 @@ def reglas_asignacion() -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
-# Por que columna se parten el resumen, los percentiles y los graficos: se
-# arma una fila -y un grafico- por cada valor distinto de esa columna.
-#
-# "Actualizacion 2024-2025" salio de aqui: partia las 22 comunas en las mismas
-# dos mitades que "Grupo de comunas" pero con otro nombre, y en pantalla las
-# dos opciones juntas no se distinguian.
+# Por que columna se parten el resumen, los percentiles y los graficos.
 APERTURAS = {
     "Tabla de valor": "TABLA_ORIGEN",
     "Comuna": "COMUNA",
@@ -327,10 +175,7 @@ APERTURAS = {
     "Tabla y actividad juntas (como en el reporte)": "CLAVE",
 }
 
-# Lo que se lee de cada parquet. Se piden por nombre y no con un read_parquet
-# pelado para no arrastrar columnas que no se usan; las que no esten en el
-# archivo se ignoran solas. Si alguna vez hay que sumar una, revisar primero
-# que no permita senalar a un predio en concreto.
+# Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
@@ -386,14 +231,7 @@ st.markdown(
 # =====================================================================
 @st.cache_data(show_spinner="Leyendo el detalle de la comparación…")
 def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
-    """
-    Uno de los dos recortes anonimos, con solo las columnas que usa la app.
-
-    marca_tiempo es la fecha del archivo: no se usa adentro, pero al entrar en
-    la firma hace que el cache se invalide solo cuando se vuelve a correr
-    comparacion_vigencia.py, sin tener que reiniciar la app. Y grano tambien
-    entra en la firma, asi que los dos archivos se cachean por separado.
-    """
+    """Uno de los dos recortes anonimos, con solo las columnas que usa la app."""
     columnas = COLUMNAS_PREDIO if grano == "predio" else COLUMNAS
     try:
         import pyarrow.parquet as pq
@@ -415,13 +253,7 @@ def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
 
 @st.cache_data(show_spinner="Leyendo el detalle predio a predio…")
 def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
-    """
-    El detalle fila a fila, CON identificadores. Solo lo lee la hoja Detalle.
-
-    Son 288 mil filas por 50 columnas: ~345 MB en memoria. Se cachea igual que
-    el publico y con la misma marca de tiempo, asi que se lee una sola vez por
-    corrida del pipeline aunque se cambie de filtro cien veces.
-    """
+    """El detalle fila a fila, CON identificadores. Solo lo lee la hoja Detalle."""
     d = pd.read_parquet(ruta)
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
@@ -433,18 +265,14 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     return d
 
 
-# Las columnas del detalle que se muestran en la vista corta. Las que dependen
-# de la medida elegida -las cuatro de valor- se agregan despues, ya sabiendo
-# cual pidio el usuario en la barra lateral.
+# Las columnas del detalle que se muestran en la vista corta.
 COLUMNAS_DETALLE_FIJAS = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA",
     "GRUPO_COMUNAS", "ESTRPRED", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
     "TABLA_VALOR", "ZHF", "ACTIVIDAD_ECONOMICA", "PUNTCONS", "AREA_CONST",
 ]
 
-# Que es cada columna del detalle. Se trae de comparacion_vigencia.py, que es
-# donde esta escrito de verdad; si el import falla -en el servidor puede no
-# estar matplotlib- la hoja Diccionario simplemente no sale.
+# Que es cada columna del detalle.
 try:
     from comparacion_vigencia import DICCIONARIO_DETALLE
 except Exception:                                        # pragma: no cover
@@ -468,11 +296,7 @@ df_predio = (cargar(str(RUTA_PREDIO), os.path.getmtime(RUTA_PREDIO), "predio")
 # =====================================================================
 # FILTROS (uno solo para todas las hojas)
 # =====================================================================
-# La barra lateral va ANTES del encabezado en el codigo, no por gusto: la
-# medida elegida decide de cual de los dos parquet se lee, y el encabezado
-# tiene que poder decir si esta contando predios o construcciones. Streamlit
-# dibuja el sidebar aparte, asi que el encabezado sigue saliendo arriba del
-# todo en la pantalla.
+# El sidebar va antes del encabezado: la medida decide de que parquet se lee.
 with st.sidebar:
     st.header("⚙️ Filtros")
     st.caption("Se aplican a todas las hojas. Vacío = todo.")
@@ -491,9 +315,7 @@ with st.sidebar:
     medida = SERIES[(clave_medida, BASES[etiqueta_base])]
     unidad_eje = f"{titulo_medida} {etiqueta_base.lower()} (millones de pesos)"
     unidad, unidades = UNIDAD[grano]
-    # Los conteos se llaman como lo que cuentan: PREDIOS o CONSTRUCCIONES. Con
-    # un nombre fijo, la tabla de la medida por m2 diria "PREDIOS" sobre una
-    # columna que cuenta construcciones, y nadie lo notaria.
+    # Los conteos se llaman como lo que cuentan: PREDIOS o CONSTRUCCIONES.
     COL_N = unidades.upper()
     COL_NUM = f"NUM_{COL_N}"
 
@@ -538,14 +360,7 @@ with st.sidebar:
              f"muestran: con tan pocos casos una mediana no dice nada.")
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
-    """
-    Los filtros de la barra lateral, aplicados a lo que se le pase.
-
-    Esta factorizado porque lo usan los dos parquet: el publico que mueve las
-    hojas de agregados y el detalle que mueve la hoja de predios. Si el filtro
-    viviera escrito dos veces, tarde o temprano una hoja quedaria mostrando
-    algo distinto de la otra con la misma seleccion en pantalla.
-    """
+    """Los filtros de la barra lateral, aplicados a lo que se le pase."""
     if sel_familia:
         d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
     if sel_tabla:
@@ -584,9 +399,7 @@ if dff.empty:
 c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
                         f"{medida['prefijo']}_VIG_{V_LIQ}",
                         f"VARIACIÓN_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}")
-# La diferencia absoluta -en pesos- entre las dos vigencias. La variacion de esa
-# diferencia contra la vigencia base es justamente c_var, asi que las dos
-# columnas van siempre juntas: cuanto cambia y en que proporcion.
+# La diferencia absoluta -en pesos- entre las dos vigencias.
 c_dif = f"DIFERENCIA_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}"
 
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -602,14 +415,7 @@ k5.metric("Bajan", pct((dff[medida["var"]] < 0).mean() * 100, 1))
 # CALCULOS (los mismos que arma comparacion_vigencia.py)
 # =====================================================================
 def percentiles(s: pd.DataFrame) -> pd.DataFrame:
-    """
-    Los seis cortes de un grupo, con las dos series y su variacion.
-
-    Cada serie se ordena POR SEPARADO, igual que en el Excel: el p90 de una
-    vigencia y el p90 de la otra no son el mismo predio, asi que esto compara
-    distribuciones, no casos. La variacion pareada -predio contra si mismo- es
-    la que sale en los KPI de arriba y en la hoja de graficos.
-    """
+    """Los seis cortes de un grupo, con las dos series y su variacion."""
     v = pd.to_numeric(s[medida["vig"]], errors="coerce").dropna()
     l = pd.to_numeric(s[medida["liq"]], errors="coerce").dropna()
     if v.empty or l.empty:
@@ -640,15 +446,7 @@ def por_grupo(d: pd.DataFrame, col: str) -> pd.DataFrame:
 
 
 def con_formato(t: pd.DataFrame):
-    """
-    La tabla lista para mostrar: pesos en las series, porcentaje en las
-    variaciones y miles en los conteos, todo a la colombiana.
-
-    Devuelve un Styler, no un DataFrame: asi la columna sigue siendo numerica
-    -se puede ordenar haciendo clic en el encabezado- y lo unico que cambia es
-    como se dibuja. La variacion de los percentiles viene en FRACCION (0.0691)
-    y la de los resumenes en PUNTOS (6.91), por eso el x100.
-    """
+    """La tabla lista para mostrar. Devuelve un Styler: la columna sigue siendo numerica y se puede ordenar."""
     reglas = {}
     for col in t.columns:
         if col == c_dif:                         # pesos, con signo
@@ -669,13 +467,7 @@ def con_formato(t: pd.DataFrame):
 
 
 def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
-    """
-    Una fila por grupo: cuantos predios, las dos medianas y como se mueve.
-
-    Es la hoja General del reporte, pero sobre lo filtrado y por la columna que
-    se elija. Todo son agregados de por lo menos min_predios predios: ninguna
-    fila describe a un predio en particular.
-    """
+    """Una fila por grupo: cuantos predios, las dos medianas y como se mueve."""
     g = d.groupby(col, sort=True)
     t = pd.DataFrame({
         COL_N: g.size(),
@@ -693,9 +485,7 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     t.insert(3, c_dif, t[c_liq] - t[c_base])     # queda detras de las dos medianas
     t = t.reset_index().rename(columns={col: etiqueta_apertura})
 
-    # Fila de totales sobre LOS MISMOS grupos que quedaron en la tabla, para que
-    # PREDIOS sea exactamente la suma de la columna. No es la suma de las demas
-    # columnas: una mediana no se suma, se vuelve a calcular sobre el conjunto.
+    # La fila TOTAL va sobre los mismos grupos; las medianas se recalculan.
     sub = d[d[col].isin(grupos_ok)]
     fila = {etiqueta_apertura: "TOTAL",
             COL_N: len(sub),
@@ -719,7 +509,7 @@ total = percentiles(dff)
 abierto = por_grupo(dff, col_apertura)
 reglas = reglas_asignacion()
 
-# El reparto de la variacion. Aqui si es predio contra si mismo: cada uno cae
+# El reparto de la variacion.
 # en el rango de su propia variacion, no se comparan distribuciones.
 RANGOS = ["Baja más de 50%", "Baja 25-50%", "Baja 10-25%", "Estable (±10%)",
           "Sube 10-25%", "Sube 25-50%", "Sube más de 50%"]
@@ -733,16 +523,7 @@ reparto["%"] = reparto[COL_N] / reparto[COL_N].sum() * 100
 
 
 def _motor_excel():
-    """
-    El primer motor de Excel que este instalado, o None si no hay ninguno.
-
-    En Streamlit Community Cloud las dependencias salen de requirements.txt,
-    pero agregar una linea alli NO siempre dispara la reinstalacion: si el
-    entorno quedo del deploy anterior, no hay xlsxwriter ni openpyxl. Antes eso
-    reventaba la pagina COMPLETA -las tres hojas en blanco con un
-    ModuleNotFoundError-, porque el libro se arma en cada render aunque se este
-    mirando Graficos o Reglas. Ahora se detecta antes y se baja a CSV.
-    """
+    """El primer motor de Excel que este instalado, o None si no hay ninguno."""
     for modulo in ("xlsxwriter", "openpyxl"):
         try:
             __import__(modulo)
@@ -756,23 +537,7 @@ MOTOR_EXCEL = _motor_excel()
 
 
 def excel_predios(d: pd.DataFrame) -> bytes:
-    """
-    El detalle fila a fila a Excel, para revisar casos a mano.
-
-    Es el mismo libro que escribe comparacion_vigencia.py en results/, pero
-    armado sobre lo que este filtrado en pantalla y en memoria, sin pasar por
-    disco. Dos hojas:
-
-        Detalle       una fila por construccion, con autofiltro y las dos
-                      primeras columnas congeladas para que el identificador no
-                      se pierda al desplazarse a la derecha
-        Diccionario   que es cada columna y de donde sale, para que quien abra
-                      el archivo no tenga que venir a leer el codigo
-
-    Sin constant_memory a proposito: ese modo obliga a escribir en orden de
-    fila y pandas emite columna por columna, asi que la hoja saldria en blanco.
-    Por eso la hoja Detalle va con tope de filas, no con el universo completo.
-    """
+    """El detalle fila a fila a Excel, para revisar casos a mano."""
     d = d.copy()
     for c in d.columns:
         if isinstance(d[c].dtype, pd.CategoricalDtype):
@@ -831,9 +596,7 @@ def excel_predios(d: pd.DataFrame) -> bytes:
 with hoja_tablas:
     st.subheader(f"Tablas · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
-    # Sin boton de descarga aqui: la unica descarga de la app esta en la hoja
-    # Detalle, y es el libro del reporte. Tener dos era pedirle a quien la abre
-    # que adivinara cual de los dos archivos es "el bueno".
+    # Sin boton de descarga aqui: la unica esta en la hoja Detalle.
 
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
     st.caption(
@@ -843,14 +606,7 @@ with hoja_tablas:
     if res.empty:
         st.info(f"Ningún grupo llega a {min_predios} {unidades} con estos filtros.")
     else:
-        # El matiz de por que DIFERENCIA y VAR_MEDIANA_% no siempre concuerdan
-        # -una compara distribuciones y la otra es predio contra si mismo- pasa
-        # a la ayuda de cada encabezado: quien lo necesite lo tiene al pasar el
-        # mouse, y el resto no lee cinco renglones antes de ver la tabla.
-        #
-        # OJO: aqui column_config va SIN 'format'. El formato lo pone el Styler
-        # de con_formato() y column_config le ganaria, dejando los numeros en
-        # crudo.
+        # column_config SIN 'format': el formato lo pone el Styler y aquel le ganaria.
         st.dataframe(
             con_formato(res), width="stretch", hide_index=True,
             column_config={
@@ -904,17 +660,7 @@ with hoja_graf:
                 f"{entero(int(t[COL_NUM].iloc[-1]))} {unidades} comparados"]
 
     def frase(t: pd.DataFrame) -> str:
-        """
-        La lectura del grafico en una frase, para el caption de DEBAJO.
-
-        Va fuera del titulo a proposito: Vega mide el subtitulo contra el ancho
-        del grafico y lo corta con puntos suspensivos -"son +$ 66.500 (..."-,
-        que es justo donde estaba el dato. Un caption de Streamlit es texto
-        normal, se acomoda en los renglones que necesite y no pierde nada.
-
-        Y dice QUE es el porcentaje. "+29,1 %" a secas no se explica solo:
-        es la diferencia medida contra el valor de la vigencia base.
-        """
+        """La lectura del grafico en una frase, para el caption de DEBAJO."""
         fila = t[t["PERCENTIL"] == "50%"] if not t.empty else t
         if fila.empty or pd.isna(fila[c_var].iloc[0]):
             return ""
@@ -927,15 +673,7 @@ with hoja_graf:
                 f"equivale a **{pct(var, 1, signo=True)}**.")
 
     def curvas(t: pd.DataFrame, titulo: str) -> alt.Chart:
-        """
-        Las dos curvas de percentiles, en millones y con los colores del reporte.
-
-        En el aviso del punto van, ademas del valor de la serie, la DIFERENCIA
-        en pesos entre las dos vigencias en ese mismo percentil y que proporcion
-        representa. Como la diferencia es una sola por percentil, se mapea desde
-        la tabla ancha y queda igual en los dos puntos de la columna: parado en
-        cualquiera de los dos se lee lo mismo.
-        """
+        """Las dos curvas de percentiles, en millones y con los colores del reporte."""
         largo = t.melt(id_vars="PERCENTIL", value_vars=[c_base, c_liq],
                        var_name="Serie", value_name="Valor")
         largo["Millones"] = largo["Valor"] / 1e6
@@ -1015,35 +753,13 @@ with hoja_graf:
 # ---------------------------------------------------------------------
 # HOJA 3 - DETALLE DE LA LIQUIDACION
 # ---------------------------------------------------------------------
-# Dos cosas distintas, y conviene no confundirlas:
-#
-#   1. El LIBRO DEL REPORTE (results/COMPARACION_VIGENCIA_<fecha>.xlsx). Es el
-#      mismo archivo que hoy se baja a mano, con las ocho hojas de siempre. Se
-#      entrega tal cual, sin volver a armarlo: pesa 47 KB y no lleva ni
-#      ID_PREDIO ni numero predial, asi que puede salir publicado sin problema.
-#
-#   2. El EXPLORADOR fila a fila, que vive de
-#      COMPARACION_VIGENCIA_DETALLE.parquet. Ese SI lleva identificadores y el
-#      .gitignore lo deja fuera del repositorio, asi que en local funciona y en
-#      el deploy publico no esta y se dice, en vez de reventar.
+# El libro del reporte y el explorador fila a fila son cosas distintas.
 with hoja_detalle:
     st.subheader("Detalle de la liquidación")
 
     @st.cache_data(show_spinner=False)
     def hoja_general(ruta: str, marca_tiempo: float):
-        """
-        Solo la hoja General del libro del reporte.
-
-        Se abre el libro y se BORRAN las demas hojas, en vez de leer los datos
-        y volver a escribirlos: asi la General llega con el mismo formato que
-        tiene en el archivo original -encabezado, anchos, panel congelado- y no
-        con el que se le ponga aqui. El resto de hojas se quedan afuera porque
-        el proceso las produce para revisar a fondo, y lo que se pide desde la
-        app es la General y nada mas.
-
-        Devuelve (bytes, hojas_quitadas). Si openpyxl no esta o el libro no
-        trae una hoja llamada General, entrega el archivo completo y lo dice.
-        """
+        """Solo la hoja General del libro del reporte."""
         try:
             from openpyxl import load_workbook
             libro_x = load_workbook(ruta)
@@ -1073,9 +789,7 @@ with hoja_detalle:
         st.download_button(
             "📗 Ver el detalle de la liquidación",
             data=datos_general,
-            # La copia fija no lleva fecha en el nombre; se la pone la del
-            # archivo, para que el que se baja del deploy se pueda identificar
-            # igual que el que se saca a mano.
+            # La copia fija no lleva fecha en el nombre; se la pone la del archivo.
             file_name=(libro.name if libro != RUTA_REPORTE_FIJA else
                        f"COMPARACION_VIGENCIA_"
                        f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y%m%d}"
@@ -1096,17 +810,8 @@ with hoja_detalle:
               "la corrida, igual a la que produce el proceso.")
 
     st.divider()
-    st.markdown("**Explorador predio a predio**")
-
-    if not os.path.exists(RUTA_DETALLE):
-        st.info(
-            f"**{RUTA_DETALLE.name} no está en este despliegue.** Es el "
-            "archivo con el detalle fila a fila, y lleva ID_PREDIO y número "
-            "predial de 288 mil predios, así que el `.gitignore` lo deja "
-            "fuera del repositorio a propósito: este repositorio es público. "
-            "Corriendo la app en local el explorador funciona completo; si no "
-            "tiene el archivo, genérelo con `python src/comparacion_vigencia.py`.")
-    else:
+    if os.path.exists(RUTA_DETALLE):
+        st.markdown("**Explorador predio a predio**")
         det = cargar_detalle(str(RUTA_DETALLE), os.path.getmtime(RUTA_DETALLE))
         detf = filtrar(det)
 
@@ -1148,9 +853,7 @@ with hoja_detalle:
         if detf.empty:
             st.warning("Ninguna construcción cumple lo pedido.")
         else:
-            # Columnas: las fijas mas las cuatro de la medida elegida arriba,
-            # para que responda al radio de la barra lateral igual que el resto
-            # y no haya que buscar entre cincuenta columnas.
+            # Columnas: las fijas mas las cuatro de la medida elegida.
             cols_medida = [c for c in (medida["vig"], medida["liq"],
                                        medida.get("dif"), medida["var"])
                            if c and c in detf.columns]
@@ -1179,12 +882,7 @@ with hoja_detalle:
             st.divider()
             st.markdown("**Bajar esta selección**")
 
-            # NADA se arma antes de que lo pidan. st.download_button construye
-            # el dato ANTES de que nadie haga clic, y aqui eso serian 200 MB de
-            # CSV -o tres minutos de Excel- en CADA interaccion con la pagina.
-            # Por eso va en dos pasos, y lo preparado se guarda con la FIRMA de
-            # la seleccion: si se cambia un filtro, el archivo listo deja de
-            # ofrecerse en vez de entregar algo que ya no corresponde.
+            # NADA se arma antes de que lo pidan.
             g1, g2 = st.columns([1, 1])
             formato = g1.radio("Formato", ["Excel", "CSV"], horizontal=True,
                                help="El Excel va a unas 1.500 filas por "
@@ -1314,19 +1012,4 @@ st.caption(
 # =====================================================================
 # PUBLICAR (gratis, con enlace)
 # =====================================================================
-# Streamlit Community Cloud publica esto sin costo y da una URL fija que se
-# abre desde cualquier PC:
-#
-#   1. En el repositorio de GitHub tienen que estar:
-#          src/app_vigencias.py
-#          output/COMPARACION_VIGENCIA_PUBLICO.parquet   (~7 MB)
-#          requirements.txt
-#      Y NO puede estar COMPARACION_VIGENCIA_DETALLE.parquet: lleva ID_PREDIO
-#      y numero predial. El .gitignore ya lo deja fuera.
-#   2. En share.streamlit.io, "Create app", elegir el repositorio y poner
-#      src/app_vigencias.py como archivo principal.
-#   3. Queda en https://<lo-que-se-elija>.streamlit.app
-#
-# OJO con el historial: borrar un archivo en un commit nuevo no lo saca de los
-# commits anteriores, que se siguen pudiendo descargar. Si el detalle llego a
-# subirse alguna vez, no basta con borrarlo: hay que rehacer el repositorio.
+# Streamlit Community Cloud lo publica gratis con una URL fija.

@@ -1,132 +1,4 @@
-"""
-=====================================================================
-COMPARACION VM2: VIGENCIA 2027 (liquidacion)  vs  VIGENCIA 2026 (la base)
-=====================================================================
 
-Que compara
------------
-Para CADA construccion liquidada, el valor por m2 que quedaria con la
-liquidacion nueva contra el que hoy tiene la base catastral:
-
-    VM2_VIGENCIA  = VALORCONS / ACONCONS          <- lo que hay hoy (catastral)
-    VM2_LIQ       = VM2 * FACTOR_CATASTRAL        <- lo que daria la liquidacion
-
-En el reporte esas dos series salen NOMBRADAS POR VIGENCIA: VM2_VIG_2026 es lo
-que esta cobrando hoy la base y VM2_VIG_2027 lo que quedaria con la
-liquidacion; lo mismo con AVALÚO_VIG_2026 / AVALÚO_VIG_2027 y con la leyenda
-de los graficos. El ejercicio del ano pasado los llamaba VM2_2025 / VM2_2026
--el ano de la corrida-, y asi no se sabia cual de los dos era la base. Los dos
-anos salen de CONFIG["vigencia_base"] y CONFIG["vigencia_liq"] via
-nombres_series(): el ano entrante se corren esos dos numeros y el libro entero
-queda renombrado.
-
-Que entra
----------
-SOLO LO QUE SE LIQUIDA CON LA TABLA RESIDENCIAL O LA DE EDIFICIOS. Todo lo
-demas -modelo, especiales, integrales, anexos, parqueaderos, las tablas que no
-se han entregado- se ignora: no dice nada sobre las dos tablas que se estan
-revisando, y mezclarlo mueve el resultado hacia donde no corresponde.
-
-En concreto quedan fuera, y filtrar_comparables() informa cuanto se llevo cada
-motivo:
-
-1. Los predios de VARIAS construcciones. Solo los de una se pueden comparar
-   enteros: en los demas el VTER y el anexo vienen repetidos en cada fila y no
-   hay forma de repartirlos por tabla, y el VALORCONS tampoco se lee contra un
-   solo VM2. Asi el VM2 y el avaluo salen del mismo universo.
-
-2. Lo que va POR MODELO. Apartamentos_4_y_mas_pisos_en_PH se resuelve con el
-   modelo, no con la tabla; solo entran los de CONDICION 8, que si van con la
-   residencial que les toque. Eran 145.257 construcciones -el 33.6% de lo que
-   antes se comparaba- a las que se les estaba aplicando una tabla residencial
-   que no les corresponde, y eran las que producian las caidas del 40% en las
-   comunas 17, 02 y 19. Ver CONFIG["usos_por_modelo"].
-
-3. Lo VALORADO POR FUERA DE TABLA en cualquiera de las dos vigencias: ESPECIAL
-   = 1 en la base, ESPECIAL_2026 = 1, y los predios con METODO_LIQUIDACION
-   INTEGRAL o MIXTO. Su VALORCONS no salio de una tabla, asi que restarlo
-   contra un VM2 de tabla no dice nada de la tabla.
-
-   Despues de sacar lo del punto 2 quedan 1.630 por este motivo, y son
-   residenciales corrientes -no los integrales de valor inflado-: 1.377 con
-   INTEGRAL = 0, ninguna con ORIGEN_ESPECIAL (no cruzaron con el archivo de
-   especiales 2026), casi todas de las comunas 20, 15 y 03, y con VIGENCIA
-   INICIAL 2019 o 2026. Lo que las delata es el comportamiento: variacion
-   mediana +32.9% y el 41% fuera de +-50%, contra +6.9% y 9.8% de las que si
-   entran.
-
-4. Lo que no tiene con que compararse: sin area, sin valor de construccion en
-   la base, sin puntaje o sin VM2 de tabla en 2026.
-
-Con CONFIG["solo_predios_completos"] = False (o --con-predios-incompletos)
-entran tambien los predios a los que les falta liquidar alguna construccion
--su valor total queda corto, solo sirve para diagnosticar-; con
-CONFIG["solo_valor_de_tabla"] = False (o
---sin-filtro-tablas) se deja de mirar como quedo valorada la vigencia; y con
-CONFIG["usos_por_modelo"] = {} vuelven los que van por modelo.
-
-Una tabla que todavia no se entrego (hoy T3_COMERCIAL y T4_INDUSTRIAL: el
-consolidado V1 solo trae columnas T1_RESIDENCIAL y T2_EDIFICIOS) simplemente
-no aparece en el reporte, y cuando llegue entra sola sin tocar nada.
-
-VM2 en el parquet es COMERCIAL: el pipeline calcula
-    VALORCONS_2026_COM = AREA_CONST * VM2      (Liquidacion_final.py)
-    VCONST_2026_CAT    = VALORCONS_2026_COM * 0.7
-asi que para comparar contra la base (que esta en catastral) hay que bajar
-el comercial con el mismo 0.7. Sin ese factor la comparacion no significa
-nada: se estarian restando dos cosas distintas.
-
-A diferencia de comparacion_ofertas.py aqui NO hay cruce que hacer: los dos
-valores viven en la misma fila del parquet, uno al lado del otro.
-
-Avaluo
-------
-Sale de los mismos predios que el VM2, que es como estaba el analisis original
-(20250717_preliquidacion3.ipynb, filtro NO_CONST == 1). Las construcciones se
-cuentan sobre el PREDIO COMPLETO (N_CONST_PREDIO), no sobre las filas que
-pasaron el filtro: un predio con una casa y un parqueadero tiene dos, aunque
-al reporte solo llegue la casa. Contandolas mal entraban 27.658 predios cuyo
-avaluo reconstruido coincidia con el AVALPRED de la base en el 0.1% de los
-casos, contra el 89.1% de los que de verdad tienen una sola construccion.
-
-    AVALUO_VIGENCIA = VTER + VALORCONS + VALOANEX
-    AVALUO_LIQ      = VTER + (AREA_CONST * VM2 * 0.7) + VALOANEX
-
-Salidas
--------
-El libro repite la estructura del ejercicio del ano pasado
-(20250710_Ejercicio_liquidacion_tablas.xlsx): un bloque de percentiles por
-TABLA_ORIGEN y ACTIVIDAD_ECONOMICA, con las dos series una al lado de la otra.
-
-    results/COMPARACION_VIGENCIA/COMPARACION_VIGENCIA_<fecha>.xlsx
-        General              una fila por tabla y actividad: cuantas bajan
-        Resumen VM2          bloques de percentiles 10-100 del VM2
-        Resumen Avaluos      lo mismo sobre el avaluo del predio
-        Graficos             un cuadro por bloque, seccion VM2 y seccion avaluo
-        Reglas               parametros de la corrida y reglas de asignacion
-        Conclusiones         lectura de los resultados, armada con los datos
-        Comparacion tablas   anexo: una fila por tabla (variacion pareada)
-        Rangos variacion     anexo: como se reparte la variacion por tabla
-    results/COMPARACION_VIGENCIA/GRAFICOS/VM2/*.png
-    results/COMPARACION_VIGENCIA/GRAFICOS/AVALUO/*.png
-    output/COMPARACION_VIGENCIA_DETALLE.parquet   (el detalle fila a fila,
-        que no cabe comodo en Excel: son cientos de miles de construcciones.
-        Lleva ID_PREDIO y numero predial, asi que se queda adentro)
-    output/COMPARACION_VIGENCIA_PUBLICO.parquet   (el mismo detalle sin
-        identificadores, area ni puntaje: comuna, tabla, actividad y valores.
-        Es lo que lee app_vigencias.py y lo unico que sube al repositorio)
-
-Uso
----
-    python src/comparacion_vigencia.py
-    python src/comparacion_vigencia.py --tolerancia 15
-    python src/comparacion_vigencia.py --familias T1_RESIDENCIAL,T2_EDIFICIOS
-    python src/comparacion_vigencia.py --sin-filtro-tablas
-
-o desde main.py:
-    from comparacion_vigencia import comparacion_vigencia
-    comparacion_vigencia(df_liquidacion)
-"""
 
 import os
 import re
@@ -136,9 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# El estilo de los graficos y el escritor de Excel se reutilizan del modulo de
-# ofertas para que los dos reportes se vean identicos y la paleta viva en un
-# solo sitio. De ahi solo se toma presentacion, nada de la logica de ofertas.
+# El estilo de graficos y el escritor de Excel salen de comparacion_ofertas.py.
 from comparacion_ofertas import VIZ, _estilo_ejes, _png_tamano
 
 try:  # pragma: no cover
@@ -164,32 +34,15 @@ CONFIG = {
     # El mismo detalle sin identificadores, que es lo que lee app_vigencias.py
     # y lo unico de output/ que se versiona (ver .gitignore).
     "parquet_publico": str(RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"),
-    # El segundo grano: una fila por PREDIO, con el valor construido total y el
-    # avaluo. Va aparte y no como columnas del anterior porque un predio de tres
-    # construcciones ocupa tres filas alla, y su avaluo contaria tres veces en
-    # cualquier percentil. Tambien se versiona (ver .gitignore).
+    # El segundo grano: una fila por PREDIO, con el valor construido y el avaluo.
     "parquet_publico_predio": str(RAIZ / "output" /
                                   "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"),
 
-    # Comercial -> catastral. Es el mismo 0.7 que aplica Liquidacion_final.py
+    # Comercial -> catastral.
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
     "factor_catastral": 0.7,
 
     # --- Catastral <-> comercial de la VIGENCIA -------------------------------
-    # El avaluo catastral que trae la base es una fraccion del comercial, y esa
-    # fraccion depende de si la comuna se actualizo en 2024-2025: en las que si,
-    # el catastral quedo al 70% del comercial; en las demas, al 60%. Para leer
-    # la vigencia en comercial hay que dividir por ese factor.
-    #
-    # El TERRENO va siempre por 0.7, en toda la ciudad.
-    #
-    # En el universo comparable solo aparecen 17 comunas urbanas: las 12 de esta
-    # lista mas la 07, 14, 15, 20 y 21, que van por 0.6. Las rurales (51-65) no
-    # entran porque ninguna tiene VM2 de tabla todavia.
-    # Excel de las tablas de valor, para poder decir de que COLUMNA salio el
-    # VM2 de cada construccion. Es el mismo que lee Liquidacion_tablas.py, y
-    # los dos grupos de comunas son los mismos de alla: si cambian, cambian en
-    # los dos sitios. Si el archivo no esta, TABLA_VALOR sale vacia.
     "excel_tablas_valor": str(RAIZ / "input" /
                               "Tablas_Valor_Consolidado_V1_20260821.xlsx"),
     "comunas_7": ["02", "03", "04", "08", "17", "19", "22"],
@@ -200,97 +53,47 @@ CONFIG = {
     "factor_comercial_resto": 0.6,    # las demas
     "factor_comercial_terreno": 0.7,  # el terreno no distingue comuna
 
-    # En que base sale el reporte de Excel: "CATASTRAL" o "COMERCIAL". Las dos
-    # se calculan siempre y las dos van al parquet, asi que la app deja cambiar
-    # entre ellas sin volver a correr nada; esto solo decide cual se imprime.
+    # En que base sale el reporte de Excel: "CATASTRAL" o "COMERCIAL".
     "base_valor": "CATASTRAL",
 
-    # Las dos vigencias que se comparan. La base trae hoy la vigencia 2026 y la
-    # liquidacion daria la 2027. De aqui salen TODOS los nombres del reporte
-    # (columnas del Excel, series de los graficos y textos), via
-    # nombres_series(): el ano que viene se corren estos dos numeros y el libro
-    # entero queda renombrado, sin tocar nada mas.
+    # Las dos vigencias que se comparan.
     "vigencia_base": 2026,
     "vigencia_liq": 2027,
 
-    # Familias de tablas que entran al reporte, en orden. Son las que trae el
-    # consolidado: residenciales, edificios y -desde el 20260821- comerciales.
-    # T4_INDUSTRIAL y las demas existen en TABLA_ORIGEN pero ninguna de sus
-    # construcciones tiene VM2 (la tabla no se ha entregado), asi que aunque se
-    # listaran aqui se caerian enteras; cuando lleguen, se agregan a esta lista.
+    # Familias de tablas que entran al reporte, en orden.
     "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"),
                  ("T2_EDIFICIOS", "EDIFICIOS"),
                  ("T3_COMERCIAL", "COMERCIAL")],
 
-    # Usos que NO se liquidan por tabla sino por MODELO, con la CONDICION que
-    # sí entra por tabla como excepcion. Apartamentos_4_y_mas_pisos_en_PH va
-    # por modelo; solo los de CONDICION 8 se liquidan con la tabla residencial
-    # que les toque. Son el 33.6% del universo comparable, asi que dejarlos
-    # adentro contamina el reporte con una tabla que a esas construcciones no
-    # les corresponde. Poner {} para no aplicar ninguna.
+    # Usos que van por MODELO, con la CONDICION que si entra por tabla.
     "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8},
 
     # Regla de admision del predio.
-    #
-    # Antes era "solo predios de UNA SOLA construccion". No era un capricho: el
-    # avaluo se armaba fila a fila, y el VTER y el VANEXO vienen repetidos en
-    # cada fila del predio, asi que con dos construcciones el terreno se sumaba
-    # dos veces. Con una sola construccion el problema no existia.
-    #
-    # Ahora el avaluo se arma AGREGANDO POR PREDIO (ver preparar_avaluo): el
-    # valor de construccion se suma y el terreno y el anexo se toman una sola
-    # vez. Con eso la restriccion sobra, y en su lugar se exige que el predio
-    # este COMPLETO: TODAS sus construcciones -no solo las que sobrevivan al
-    # filtro- tienen que estar en las familias de arriba y traer VM2 de tabla.
-    # Si una sola queda sin liquidar, el valor de construccion del predio sale
-    # corto y su avaluo tambien, y no habria como notarlo mirando el resultado.
     "solo_predios_completos": True,
 
     # ¿Se liquida tambien el ANEXO? Hoy NO: la tabla T10 no esta aprobada.
-    #
-    # El anexo NO desaparece de la formula por eso -el 22.7% de los predios del
-    # reporte tiene uno, de $2.9 millones en la mediana, y sacarlo bajaria la
-    # coincidencia con el AVALPRED de la base del 99.9% al 83.2%-. Lo que se
-    # hace es entrarlo con el MISMO valor de la base a las dos vigencias, asi
-    # que se cancela solo al restar y no mueve la comparacion.
-    #
-    # Cuando llegue la tabla de anexos, encender esto y hacer tres cosas:
-    #   1. que la liquidacion deje un VANEXO_LIQ por predio (area del anexo por
-    #      su VM2 de tabla), como ya deja VALORCONS_CAT_LIQ;
-    #   2. sumar "T10_ANEXOS" a familias, para que los anexos sin valor tumben
-    #      el PREDIO_COMPLETO igual que hoy lo hace una construccion sin tabla;
-    #   3. nada mas: preparar_avaluo() ya lee este interruptor y cambia solo el
-    #      lado de la liquidacion.
     "liquidar_anexos": False,
 
-    # Solo entran las construcciones cuyo valor sale de la tabla EN LAS DOS
-    # vigencias. Ver preparar(): sin esto se cuelan los especiales/integrales,
-    # que traen en VALORCONS un valor que no es de tabla (incluye el terreno) y
-    # que por eso arrastran la comparacion hacia abajo.
+    # Solo entran las construcciones cuyo valor sale de tabla en las dos vigencias.
     "solo_valor_de_tabla": True,
-    # Metodos de liquidacion 2026 que si son "por tabla". INTEGRAL y MIXTO
-    # significan que el predio tiene construcciones que se resuelven completas
-    # (terreno incluido), asi que su VALORCONS de base no es un valor de tabla.
+    # Metodos de liquidacion 2026 que si son "por tabla".
     "metodos_de_tabla": ("TABLA + TERRENO", "TABLA SIN TERRENO"),
 
     "tolerancia_pct": 10.0,        # variacion aceptada antes de marcar fuera
-    # Los mismos seis cortes del ejercicio 2025. El 100% es el maximo, no un
+    # Los mismos seis cortes del ejercicio 2025.
     # percentil "alto": sirve para ver hasta donde llega la cola de cada tabla.
     "percentiles": [10, 25, 50, 75, 90, 100],
     "min_predios_bloque": 5,       # con menos predios el bloque no se abre
     "generar_graficos": True,
     "guardar_detalle": True,
-    # Excel del detalle liquidado, para revisar casos a mano. Apagado por
+    # Excel del detalle liquidado, para revisar casos a mano.
     # defecto: son 311 mil filas y escribirlas toma ~90 segundos.
     "excel_detalle": False,
     "excel_detalle_muestra": None,   # None = todas las filas
 }
 
 
-# Las cuatro series que se pueden comparar: dos medidas (el VM2 de la
-# construccion y el avaluo del predio) en dos bases (catastral y comercial).
-# Cada entrada es (columna de la vigencia, columna de la liquidacion, prefijo
-# con que se nombran las columnas del reporte).
+# Las series comparables: cada medida en sus dos bases.
 SERIES = {
     ("VM2", "CATASTRAL"): {
         "vig": "VM2_CAT_VIGENCIA", "liq": "VM2_CAT_LIQ",
@@ -319,31 +122,12 @@ SERIES = {
 
 
 def serie(medida: str) -> dict:
-    """
-    Que columnas usar para una medida en la base configurada.
-
-    medida es "VM2", "VALORCONS" o "AVALUO"; la base sale de
-    CONFIG["base_valor"]. Devuelve
-    las llaves vig / liq / dif / var / prefijo. Todo el reporte pide las
-    columnas por aqui, asi que cambiar de base no toca ninguna otra funcion.
-    """
+    """Que columnas usar para una medida en la base configurada."""
     return SERIES[(medida, CONFIG["base_valor"])]
 
 
 def _mapa_tablas_valor(ruta: str) -> dict:
-    """
-    {(TABLA_ORIGEN, grupo): nombre real de la columna en el Excel de tablas}
-
-    TABLA_ORIGEN es un nombre NORMALIZADO: al cargar las tablas,
-    Liquidacion_tablas.py le quita al encabezado el grupo de comunas y la
-    condicion, asi que 'T1_RESIDENCIAL_10C_COND_0_013' y 'T1_RESIDENCIAL_7C_013'
-    terminan los dos en 'T1_RESIDENCIAL_013'. Con eso solo no se puede saber de
-    que columna salio el valor.
-
-    Aqui se rehace el mismo recorte sobre los encabezados reales, guardando de
-    que columna vino cada uno. La llave lleva el grupo (7C / 10C) porque es lo
-    que distingue a las dos columnas que colapsan en el mismo TABLA_ORIGEN.
-    """
+    """{(TABLA_ORIGEN, grupo): nombre real de la columna en el Excel de tablas}"""
     hoja = pd.read_excel(ruta, sheet_name="CONVENCIONALES", nrows=0)
     mapa = {}
     for col in hoja.columns[1:]:                 # la primera es PUNTAJE
@@ -367,17 +151,7 @@ def _mapa_tablas_valor(ruta: str) -> dict:
 
 
 def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
-    """
-    De que columna del Excel de tablas salio el VM2 de cada construccion.
-
-    El valor se busca por (TABLA_ORIGEN, PUNTCONS, COMUNA), y la comuna es la
-    que decide el grupo: las de comunas_7 leen la columna 7C y el resto la 10C.
-    Devuelve el encabezado tal cual esta en el archivo, para poder abrirlo y
-    verificar el numero a mano.
-
-    Si el Excel no esta a mano se devuelve vacio y se avisa: es una columna
-    informativa, no vale la pena tumbar la corrida por ella.
-    """
+    """De que columna del Excel de tablas salio el VM2 de cada construccion."""
     vacio = pd.Series("", index=d.index, dtype=object)
     ruta = CONFIG["excel_tablas_valor"]
     if not os.path.exists(ruta):
@@ -397,15 +171,7 @@ def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
 
 
 def factor_comercial(d: pd.DataFrame) -> pd.Series:
-    """
-    Por cuanto hay que dividir el valor CATASTRAL de cada fila para leerlo en
-    comercial: 0.7 en las comunas actualizadas en 2024-2025 y 0.6 en el resto.
-
-    La comuna viene como texto con cero a la izquierda ('07'), asi que se pasa a
-    numero antes de comparar contra la lista. Una comuna que no se pueda leer
-    como numero cae en el factor del resto, que es el mas conservador: deja el
-    valor comercial mas alto y por lo tanto la comparacion menos favorable.
-    """
+    """Por cuanto se divide el catastral para leerlo en comercial: 0.7 o 0.6 segun la comuna."""
     act = CONFIG["comunas_act_2024_2025"]
     if "COMUNA" not in d.columns:
         return pd.Series(CONFIG["factor_comercial_act"], index=d.index)
@@ -416,26 +182,12 @@ def factor_comercial(d: pd.DataFrame) -> pd.Series:
 
 
 def nombres_series(prefijo: str) -> tuple[str, str, str]:
-    """
-    Los tres encabezados de un bloque, nombrados POR VIGENCIA.
-
-        nombres_series("VM2") -> ("VM2_VIG_2026", "VM2_VIG_2027",
-                                  "VARIACIÓN_VM2_2027_vs_2026")
-
-    El ejercicio del ano pasado los llamaba VM2_2025 / VM2_2026 -el ano de la
-    corrida, no el de la vigencia-, y con eso el lector no sabia si "2026" era
-    lo que trae la base o lo que daria la liquidacion. Aqui el numero es
-    siempre LA VIGENCIA: _VIG_2026 es lo que esta cobrando hoy la base y
-    _VIG_2027 lo que quedaria con la liquidacion.
-
-    Lo usan por igual la hoja de Excel y los graficos, para que la etiqueta de
-    la curva y el encabezado de la columna no puedan separarse.
-    """
+    """Los tres encabezados de un bloque, nombrados POR VIGENCIA."""
     base, liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
     return (f"{prefijo}_VIG_{base}", f"{prefijo}_VIG_{liq}",
             f"VARIACIÓN_{prefijo}_{liq}_vs_{base}")
 
-# Columnas del parquet que se necesitan. Se leen solo estas: el archivo pesa
+# Columnas del parquet que se necesitan.
 # ~77 MB y tiene 83 columnas.
 COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM",
             "TABLA_ORIGEN", "TIPOLOGIA_ZHF", "ZHF", "COMUNA", "ESTRPRED",
@@ -443,14 +195,11 @@ COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM
             "ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
             "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "VANEXO",
             "AVALPRED",
-            # Marcas de como se valoro la construccion a cada lado. Son las que
+            # Marcas de como se valoro la construccion a cada lado.
             # dejan fuera lo que no sale de la tabla (ver preparar()).
             "ESPECIAL", "INTEGRAL", "METODO_LIQUIDACION", "CONDICION"]
 
-# Actividad economica de la ZHF donde esta la construccion, leida del mismo
-# codigo de tipologia con que se arman las tablas (Liquidacion_tablas.py).
-# Es la segunda mitad de la llave de cada bloque: una construccion residencial
-# parada en una zona comercial no se comporta como una en zona residencial.
+# Actividad economica de la ZHF, por los ultimos tres digitos del codigo.
 ACTIVIDAD_ZHF = {
     "RESIDENCIAL": ["011", "012", "013", "014", "015", "016"],
     "COMERCIAL":   ["021", "022", "023"],
@@ -523,20 +272,11 @@ def cargar(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
 
 
 def preparar(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Deja una fila por construccion con los dos VM2 comparables y su variacion.
-
-    Solo entran las construcciones de las familias configuradas que pasan
-    filtrar_comparables(): predio con construccion valorada y valor de tabla en
-    las dos vigencias.
-    """
+    """Deja una fila por construccion con los dos VM2 comparables y su variacion."""
     d = df.copy()
     d["TABLA_ORIGEN"] = d["TABLA_ORIGEN"].astype(str)
 
-    # Cuantas construcciones tiene el PREDIO COMPLETO. Se cuenta aqui, antes de
-    # cualquier filtro, porque despues ya no se ve: si se cuenta sobre las filas
-    # que quedaron, un predio con una casa y un parqueadero pasa por predio de
-    # una sola construccion. Los anexos no son construccion, no cuentan.
+    # Cuantas construcciones tiene el PREDIO COMPLETO.
     prefijos = tuple(p for p, _ in CONFIG["familias"])
 
     if "CONSTRUCCION_ID" in d.columns:
@@ -544,14 +284,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         n_const = d.loc[es_const].groupby("ID_PREDIO")["CONSTRUCCION_ID"].nunique()
         d["N_CONST_PREDIO"] = d["ID_PREDIO"].map(n_const).fillna(0).astype(int)
 
-        # Cuantas de esas construcciones SI se liquidan por una de las tablas
-        # activas. Se cuenta aqui por lo mismo que N_CONST_PREDIO: dos lineas
-        # mas abajo el df se recorta a las familias y las que se cayeron dejan
-        # de verse, asi que un predio con una casa y una bodega industrial
-        # pasaria por completo cuando no lo esta.
-        #
-        # Se mira el VM2 crudo del parquet y no VM2_CAT_LIQ, que todavia no
-        # existe; son el mismo numero por 0.7, asi que "> 0" da igual en los dos.
+        # Cuantas de esas se liquidan por alguna de las tablas activas.
         vm2 = pd.to_numeric(d["VM2"], errors="coerce").fillna(0) if "VM2" in d.columns             else pd.Series(0, index=d.index)
         con_tabla = es_const & d["TABLA_ORIGEN"].str.startswith(prefijos) & (vm2 > 0)
         n_ok = (d.loc[con_tabla].groupby("ID_PREDIO")["CONSTRUCCION_ID"].nunique())
@@ -573,19 +306,11 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
-    # Solo el VM2 que salio de la TABLA DE VALOR. Ni el especial ni el del
-    # modelo entran: se resuelven por fuera y no dicen nada de la tabla que se
-    # esta revisando. Sin esto, una tabla que todavia no existe (el consolidado
-    # V1 solo trae T1_RESIDENCIAL y T2_EDIFICIOS) aparecia igual en el reporte,
-    # armada con el puñado de especiales que si tenian valor.
+    # Solo el VM2 que salio de la TABLA DE VALOR.
     solo_esp = (int(((d["VM2"] <= 0) & (d["VM2_ESP_2026"] > 0)).sum())
                 if "VM2_ESP_2026" in d.columns else 0)
 
     # --- Las dos bases, calculadas siempre ----------------------------------
-    # El VM2 del parquet ya es COMERCIAL (asi lo deja Liquidacion_tablas.py),
-    # asi que la liquidacion en comercial es el VM2 tal cual, y en catastral es
-    # ese mismo VM2 por 0.7. La vigencia va al reves: VALORCONS es catastral, y
-    # para leerlo en comercial hay que dividir por el factor de la comuna.
     factor = CONFIG["factor_catastral"]
     d["F_COMERCIAL"] = factor_comercial(d)
     d["ACTUALIZACION"] = np.where(
@@ -597,10 +322,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     d["VM2_CAT_VIGENCIA"] = d["VALORCONS"] / d["ACONCONS"]       # catastral, hoy
     d["VM2_COM_VIGENCIA"] = d["VM2_CAT_VIGENCIA"] / d["F_COMERCIAL"]  # com., hoy
 
-    # Cuantas se caen por familia por no tener VM2 de tabla. Es la forma de ver
-    # que tablas no llegaron todavia: T3_COMERCIAL y T4_INDUSTRIAL se caen
-    # completas mientras el consolidado siga trayendo solo T1 y T2. Va al Excel,
-    # no solo a la consola.
+    # Cuantas se caen por familia por no tener VM2 de tabla.
     sin_vm2 = d.loc[d["VM2_CAT_LIQ"] <= 0, "TABLA_ORIGEN"]
     por_familia = {}
     for prefijo, _ in CONFIG["familias"]:
@@ -623,11 +345,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     if d.empty:
         return d
 
-    # La variacion se calcula en las DOS bases y con nombres distintos, para que
-    # el parquet las lleve las dos y la app pueda cambiar de una a otra sin
-    # volver a correr esto. Ojo: en comercial la variacion NO es la misma que en
-    # catastral, porque el factor de la vigencia (0.7 o 0.6) no es el mismo 0.7
-    # con que se baja la liquidacion.
+    # La variacion en comercial NO es la misma que en catastral: otro factor.
     for base in ("_CAT", "_COM"):
         vig, liq = f"VM2{base}_VIGENCIA", f"VM2{base}_LIQ"
         d[f"DIF{base}_ABS"] = d[liq] - d[vig]
@@ -646,15 +364,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         labels=["baja mas de 50%", "baja 25-50%", "baja 10-25%",
                 "estable (±10%)", "sube 10-25%", "sube 25-50%", "sube mas de 50%"])
 
-    # Valor TOTAL de la construccion: el area por el VM2, que es la tercera
-    # medida del analisis (por m2, total construido y avaluo del predio).
-    # El comercial es el area por el VM2 tal cual, sin bajarlo con el 0.7; el
-    # de la vigencia sale de dividir el VALORCONS de la base por el factor de
-    # la comuna, igual que en las otras medidas.
-    #
-    # VALORCONS_CAT_VIGENCIA es el mismo VALORCONS de la base. Se repite con
-    # ese nombre para que las cuatro columnas de la medida se lean en paralelo
-    # y para que el bucle de abajo sirva igual que en VM2 y en avaluo.
+    # Valor total de la construccion: el area por el VM2.
     d["VALORCONS_COM_LIQ"] = d["AREA_CONST"] * d["VM2_COM_LIQ"]
     d["VALORCONS_CAT_LIQ"] = d["VALORCONS_COM_LIQ"] * factor
     d["VALORCONS_CAT_VIGENCIA"] = d["VALORCONS"]
@@ -674,63 +384,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
-    """
-    Deja solo las construcciones que se pueden comparar contra la tabla, y
-    devuelve (df, motivos) con cuantas se llevo cada motivo.
-
-    Tres condiciones, y las tres hacen falta:
-
-    1) El predio esta COMPLETO: todas sus construcciones se liquidan por alguna
-       de las tablas activas (PREDIO_COMPLETO == 1, calculado en preparar()
-       sobre el predio entero, no sobre las filas que sobreviven). Con eso el
-       valor de construccion del predio se puede sumar sin que falte un pedazo,
-       y el avaluo se arma agregando por predio: el terreno y el anexo entran
-       una sola vez y no repetidos por construccion.
-
-       Antes la condicion era mas dura -UNA SOLA construccion- porque el avaluo
-       se calculaba fila a fila y el terreno se contaba tantas veces como
-       construcciones tuviera el predio. Al agregar por predio esa razon
-       desaparecio; lo que no desaparece es la exigencia de que no falte
-       ninguna construccion por liquidar.
-
-    2) Ese predio TIENE una construccion valorada: area, valor de construccion
-       y puntaje. Sin cualquiera de los tres no hay VM2 de vigencia que sacar
-       (VALORCONS / ACONCONS), asi que el predio no entra.
-
-    3) Esa construccion TIENE RELACION CON LA TABLA DE VALOR en las dos
-       vigencias, no en una sola:
-
-         - 2026: el VM2 salio del cruce con la tabla (VM2 > 0) y no de un
-           valor especial (ESPECIAL_2026 = 1). Esta mitad ya estaba.
-         - vigencia: el VALORCONS de la base tambien salio de una tabla. Es la
-           mitad que faltaba. En la base, ESPECIAL = 1 marca las construcciones
-           valoradas por fuera de las tablas; las integrales (INTEGRAL = 1) son
-           un subconjunto y ademas traen el terreno adentro del VALORCONS.
-
-           Lo que esta regla descarta depende de lo que ya se haya caido antes.
-           Con la regla del modelo activa quedan 1.630, y son residenciales
-           corrientes: solo 253 integrales, ninguna con ORIGEN_ESPECIAL, casi
-           todas de las comunas 20, 15 y 03, con VM2 de vigencia mediano de
-           188 mil -por DEBAJO de los 477 mil de las normales, no por encima- y
-           una variacion mediana de +32.9% con el 41% fuera de +-50%. No se van
-           por el valor que tienen sino porque ese valor no salio de la tabla
-           contra la que se los estaria comparando.
-         - predio: METODO_LIQUIDACION INTEGRAL o MIXTO significa que el predio
-           tiene construcciones que se resuelven completas, y su valor de base
-           arrastra lo mismo aunque la construccion quede clasificada en una
-           tabla.
-
-    Los motivos se aplican EN CASCADA: cada uno cuenta solo lo que no se habia
-    caido antes, para que la suma de por resultado el total descartado y no un
-    numero inflado por los solapes (un especial suele fallar tres condiciones
-    a la vez).
-
-    Con CONFIG["solo_predios_completos"] = False entran tambien los predios a
-    los que les falta liquidar alguna construccion -su valor total quedara
-    corto, asi que es solo para diagnosticar-, y con
-    CONFIG["solo_valor_de_tabla"] = False se salta la condicion 3 sobre la
-    vigencia.
-    """
+    """Deja solo lo comparable contra la tabla; devuelve (df, motivos de descarte)."""
     def _marca(col: str) -> pd.Series:
         """La columna leida como bandera 0/1; todo en False si no viene."""
         if col not in d.columns:
@@ -796,17 +450,7 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 
 def actividad_economica(d: pd.DataFrame) -> pd.Series:
-    """
-    RESIDENCIAL / COMERCIAL / INDUSTRIAL / OTRAS segun la tipologia de la ZHF.
-
-    La tipologia son los ULTIMOS TRES digitos del codigo de ZHF, no los de una
-    posicion fija. El campo TIPOLOGIA_ZHF que trae el parquet sale de
-    ZHF.str[8:11] (Liquidacion_tablas.py), que solo cae bien cuando el codigo
-    tiene 11 caracteres: los de 13 quedan corridos dos posiciones y producen
-    codigos inexistentes (110, 210, 310...) que aqui se leerian como OTRAS.
-    Por eso se lee el ZHF directo y TIPOLOGIA_ZHF queda de respaldo para las
-    filas sin codigo utilizable.
-    """
+    """RESIDENCIAL / COMERCIAL / INDUSTRIAL / OTRAS segun la tipologia de la ZHF."""
     indice = d.index
     codigo = pd.Series("", index=indice, dtype=object)
     if "ZHF" in d.columns:
@@ -824,45 +468,7 @@ def actividad_economica(d: pd.DataFrame) -> pd.Series:
 
 
 def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
-    """
-    Avaluo POR PREDIO: una fila por predio, no una por construccion.
-
-    Es el segundo grano del reporte. El VM2 es de la construccion y ahi el
-    ID_PREDIO se repite; el avaluo y el valor construido son del predio y aqui
-    aparecen una sola vez. Mezclarlos en una sola tabla haria que un predio de
-    tres construcciones pesara el triple en cualquier percentil de avaluo.
-
-    Como se agrega cada cosa:
-
-        VALORCONS, VALORCONS_CAT_LIQ, VALORCONS_COM_LIQ   se SUMAN
-            son de la construccion; el total del predio es la suma de las suyas
-        VTER, VANEXO, AVALPRED, F_COMERCIAL, COMUNA, ...  se toman UNA vez
-            ya vienen del predio y estan repetidos identicos en cada fila.
-            Sumarlos los contaria tantas veces como construcciones haya: es
-            exactamente el error que la vieja regla de "una sola construccion"
-            estaba evitando.
-
-    El predio entra completo o no entra: filtrar_comparables() ya dejo fuera a
-    los que tienen alguna construccion sin liquidar (PREDIO_COMPLETO), asi que
-    la suma de aqui nunca es parcial.
-
-    El anexo se toma de VANEXO, no de VALOANEX. VALOANEX es el valor de UNA
-    fila de anexo y en la fila de la construccion viene en cero: con el, 41.824
-    predios entraban al reporte sin su anexo -uno de ~3.8 millones en la
-    mediana- y el avaluo reconstruido solo cuadraba con el AVALPRED de la base
-    en el 89.1% de los casos. Con VANEXO, que es el total del predio, cuadra en
-    el 99.99%. Si algun dia hay que volver a VALOANEX, es esta linea.
-
-    El anexo NO se liquida -la tabla T10 todavia no esta aprobada-, asi que
-    entra con el mismo valor de la base a las dos vigencias y se cancela solo
-    al restar. Lo mismo el terreno.
-
-    Para poder abrir el reporte por tabla a nivel predio se guarda la tabla de
-    la construccion de MAYOR AREA (TABLA_ORIGEN_PRINCIPAL). En un predio de
-    varias construcciones no hay "una" tabla, y elegir la mas grande es lo que
-    mas se parece a decir de que es el predio; N_TABLAS_PREDIO avisa cuando esa
-    simplificacion aplica.
-    """
+    """Avaluo POR PREDIO: una fila por predio, no una por construccion."""
     col_anexo = "VANEXO" if "VANEXO" in d.columns else "VALOANEX"
     faltan = [c for c in ("VTER", col_anexo) if c not in d.columns]
     if faltan or d.empty:
@@ -898,12 +504,7 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
          g[una_vez].first(),
          g["TABLA_ORIGEN"].nunique().rename("N_TABLAS_PREDIO")],
         axis=1)
-    # Se conservan los MISMOS nombres que a nivel construccion -TABLA_ORIGEN,
-    # ACTIVIDAD_ECONOMICA, CLAVE- pero aqui significan "los de la construccion
-    # dominante del predio". Asi el resto del reporte (resumen general,
-    # conclusiones, bloques de percentiles) agrupa igual sin saber que cambio
-    # el grano. N_TABLAS_PREDIO avisa en cuantos predios esa simplificacion
-    # esta tapando mas de una tabla.
+    # Mismos nombres que a nivel construccion, pero de la construccion dominante.
     for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM"):
         if c in principal.columns:
             uni[c] = principal[c]
@@ -923,14 +524,6 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     anexo = uni[col_anexo]
 
     # --- El anexo, a los dos lados -------------------------------------------
-    # Mientras CONFIG["liquidar_anexos"] este en False, el anexo de la
-    # liquidacion es el MISMO de la base: entra en las dos vigencias y se
-    # cancela al restar. El termino se queda en la formula igual, porque sin el
-    # el avaluo no cuadra con el de la base (99.9% -> 83.2%).
-    #
-    # Este es el punto exacto donde engancha la tabla de anexos cuando llegue:
-    # basta con que la liquidacion traiga VANEXO_LIQ y aqui no hay nada mas que
-    # tocar. Ver el comentario de "liquidar_anexos" en CONFIG.
     if CONFIG["liquidar_anexos"] and "VANEXO_LIQ" in uni.columns:
         anexo_liq = pd.to_numeric(uni["VANEXO_LIQ"], errors="coerce").fillna(0)
         anexo_liq_com = anexo_liq                    # ya viene comercial
@@ -943,8 +536,6 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     uni["AVALUO_CAT_LIQ"] = uni["VTER"] + uni["VALORCONS_CAT_LIQ"] + anexo_liq
 
     # --- Comercial: cada componente dividido por su factor -------------------
-    # El terreno va siempre por 0.7; la construccion y el anexo de la vigencia,
-    # por el factor de la comuna (0.7 si se actualizo en 2024-2025, 0.6 si no).
     f_ter = CONFIG["factor_comercial_terreno"]
     f_com = uni["F_COMERCIAL"]
     terreno_com = uni["VTER"] / f_ter
@@ -954,8 +545,6 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
                              + uni["VALORCONS_COM_LIQ"])
 
     # --- Valor construido del predio, en las dos bases -----------------------
-    # Mismo nombre que a nivel construccion para que la app lea las dos con el
-    # mismo codigo; aqui es la suma de todas las construcciones del predio.
     uni["VALORCONS_CAT_VIGENCIA"] = uni["VALORCONS"]
     uni["VALORCONS_COM_VIGENCIA"] = uni["VALORCONS"] / f_com
     for base in ("_CAT", "_COM"):
@@ -1010,23 +599,7 @@ def resumen_por_tabla(d: pd.DataFrame) -> pd.DataFrame:
 
 def bloques_percentiles(d: pd.DataFrame, col_vig: str, col_liq: str,
                         nombres: tuple[str, str, str]) -> dict:
-    """
-    Un DataFrame de percentiles por bloque (tabla x actividad economica), con
-    las mismas cinco columnas del ejercicio 2025 y los encabezados que arma
-    nombres_series():
-
-        PERCENTIL | <serie>_VIG_<base> | <serie>_VIG_<liq> | VARIACIÓN_... |
-        NUM_PREDIOS
-
-    NUM_PREDIOS es el conteo ACUMULADO de predios del bloque (percentil x total
-    de predios), igual que el ano pasado: dice cuantos predios quedan por
-    debajo de ese corte, no cuantos hay en el corte.
-
-    OJO: cada serie se ordena POR SEPARADO. El p90 de una vigencia y el p90 de
-    la otra no son la misma construccion, asi que esto compara distribuciones,
-    no casos. La variacion pareada (construccion contra si misma) esta en la
-    hoja "Comparacion tablas".
-    """
+    """Un DataFrame de percentiles por bloque (tabla x actividad economica)."""
     bloques = {}
     if d.empty:
         return bloques
@@ -1049,7 +622,7 @@ def bloques_percentiles(d: pd.DataFrame, col_vig: str, col_liq: str,
                 "PERCENTIL": f"{p}%",
                 c_base: pv,
                 c_liq: pl,
-                # Fraccion, no porcentaje: Excel la formatea con 0.0%
+                # Fraccion y no porcentaje: Excel la formatea con 0.0%.
                 c_var: (pl / pv - 1) if pv else np.nan,
                 "NUM_PREDIOS": int(round(p / 100 * predios)),
             })
@@ -1061,11 +634,7 @@ def bloques_percentiles(d: pd.DataFrame, col_vig: str, col_liq: str,
 
 
 def resumen_general(d: pd.DataFrame, aval: pd.DataFrame) -> pd.DataFrame:
-    """
-    La hoja General del ejercicio 2025: una fila por tabla y actividad con
-    cuantas construcciones bajan y cuantas suben, mas la misma lectura sobre
-    el avaluo de los predios de una sola construccion.
-    """
+    """La hoja General: una fila por tabla y actividad."""
     if d.empty:
         return pd.DataFrame()
 
@@ -1099,14 +668,7 @@ def resumen_general(d: pd.DataFrame, aval: pd.DataFrame) -> pd.DataFrame:
 
 
 def conclusiones(d: pd.DataFrame, aval: pd.DataFrame) -> list[tuple[str, str]]:
-    """
-    La hoja Conclusiones, redactada con los numeros de la corrida.
-
-    El ano pasado ese texto se escribio a mano; aqui se arma solo para que no
-    quede desfasado del dato cada vez que se vuelve a correr la liquidacion.
-    Devuelve una lista de (SECCION, TEXTO); las secciones en mayuscula son los
-    titulos de banda.
-    """
+    """La hoja Conclusiones, redactada con los numeros de la corrida."""
     filas: list[tuple[str, str]] = []
     v_base, v_liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
 
@@ -1122,7 +684,7 @@ def conclusiones(d: pd.DataFrame, aval: pd.DataFrame) -> list[tuple[str, str]]:
                    if abs(p50) < 0.05
                    else f"queda por debajo de la vigencia {v_base}" if p50 < 0
                    else f"queda por encima de la vigencia {v_base}")
-        # Que categoria se mueve mas, para no dejar la conclusion en el promedio
+        # Que categoria se mueve mas, para no dejar la conclusion solo en el promedio.
         por_cat = sub.groupby("CLAVE")[col_var].median().sort_values()
         extremos = ""
         if len(por_cat) > 1:
@@ -1160,14 +722,7 @@ def conclusiones(d: pd.DataFrame, aval: pd.DataFrame) -> list[tuple[str, str]]:
 
 
 def seleccion_por_comuna(d: pd.DataFrame) -> pd.DataFrame:
-    """
-    Que quedo seleccionado y donde esta: una fila por comuna.
-
-    Responde "sobre que predios se armo este reporte", que es lo primero que
-    pregunta quien lo recibe. Trae el factor con que se paso a comercial, para
-    que se vea de una que las comunas actualizadas y las que no se convierten
-    distinto.
-    """
+    """Que quedo seleccionado y donde esta: una fila por comuna."""
     if d.empty or "COMUNA" not in d.columns:
         return pd.DataFrame()
     s = serie("VM2")
@@ -1212,13 +767,7 @@ def _sin_tildes(texto: str) -> str:
 
 
 def _hoja_bloques(libro, hoja, bloques: dict) -> None:
-    """
-    Escribe un bloque por tabla y actividad: titulo, encabezados y percentiles.
-
-    Todos los bloques de una misma tabla (T1, T2, T3...) van uno al lado del
-    otro y cada tabla abre una banda nueva, que es como quedaba el resumen del
-    ejercicio 2025 (una tablita por bloque, no una fila larga por percentil).
-    """
+    """Escribe un bloque por tabla y actividad: titulo, encabezados y percentiles."""
     f_tit = libro.add_format({"bold": True, "font_size": 12})
     f_head = libro.add_format({"bold": True, "align": "center", "valign": "vcenter",
                                "text_wrap": True, "border": 1, "bg_color": "#DDEBF7"})
@@ -1261,11 +810,7 @@ def _hoja_bloques(libro, hoja, bloques: dict) -> None:
 
 
 def _por_tabla(claves) -> list:
-    """
-    Agrupa las claves por numero de tabla (T1, T2, ...) y las devuelve en ese
-    orden, con las de cada tabla ordenadas alfabeticamente. Lo que no empieza
-    por T<numero> va al final para no perderlo en silencio.
-    """
+    """Agrupa las claves por numero de tabla (T1, T2, ...) y las devuelve ordenadas."""
     grupos: dict = {}
     for clave in claves:
         m = re.match(r"T(\d+)", str(clave))
@@ -1275,12 +820,7 @@ def _por_tabla(claves) -> list:
 
 def _hoja_graficos(libro, hoja, secciones: dict, ancho_px: int = 430,
                    por_fila: int = 3) -> None:
-    """
-    Pega los PNG en grilla, con el nombre del bloque encima de cada imagen y
-    una seccion por tanda (VM2 y avaluo), como en el reporte del ano pasado.
-
-    secciones: {"VM2 CATASTRAL": [(clave, ruta), ...], ...}
-    """
+    """Pega los PNG en grilla, con el nombre del bloque encima de cada imagen."""
     f_sec = libro.add_format({"bold": True, "font_size": 14, "font_color": "#2F5496"})
     f_tit = libro.add_format({"bold": True, "font_size": 9})
     ANCHO_COL = 12                       # caracteres; ~89 px
@@ -1318,11 +858,7 @@ def _hoja_graficos(libro, hoja, secciones: dict, ancho_px: int = 430,
 
 
 def _hoja_reglas(libro, hoja, parametros: pd.DataFrame) -> None:
-    """
-    Dos bloques: los parametros con que corrio la comparacion (para que el
-    lector sepa que se comparo y con que factor) y la tabla de reglas con que
-    la liquidacion asigna tabla a cada construccion.
-    """
+    """Los parametros con que corrio la comparacion y las reglas de asignacion."""
     f_sec = libro.add_format({"bold": True, "font_size": 14, "font_color": "#2F5496"})
     f_head = libro.add_format({"bold": True, "align": "center", "valign": "vcenter",
                                "text_wrap": True, "border": 1, "bg_color": "#DDEBF7"})
@@ -1391,9 +927,7 @@ def _hoja_conclusiones(libro, hoja, filas: list) -> None:
         fila += 1
 
 
-# Que es cada columna del detalle y de donde sale. Va como hoja del libro de
-# revision: sin esto, quien abra el archivo tiene que venir a leer el codigo
-# para saber si VM2_LIQ esta en catastral o en comercial.
+# Que es cada columna del detalle y de donde sale.
 DICCIONARIO_DETALLE = [
     ("ID_PREDIO", "Identificador del predio en la base", ""),
     ("NUMERO_PREDIAL_NACIONAL", "Numero predial nacional", ""),
@@ -1487,24 +1021,7 @@ DICCIONARIO_DETALLE = [
 
 def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
                            muestra: int | None = None) -> str:
-    """
-    El detalle liquidado a Excel, para revisar casos a mano.
-
-    Sale con TODOS los identificadores -ID_PREDIO y numero predial-, asi que
-    este archivo se queda adentro: no es el recorte anonimo de la app. Vive en
-    results/, que el .gitignore deja fuera.
-
-    Dos hojas:
-        Detalle       una fila por construccion liquidada, con autofiltro y las
-                      dos primeras columnas congeladas para que el identificador
-                      no se pierda al desplazarse a la derecha
-        Diccionario   que es cada columna y con que formula salio
-
-    Las 311 mil filas caben (el limite de Excel es un millon) y pesan ~3 MB,
-    pero escribirlas toma cerca de minuto y medio; con 'muestra' se saca en
-    cambio una seleccion repartida entre las tablas, que es mas comodo cuando
-    solo se quieren mirar unos cuantos casos.
-    """
+    """El detalle liquidado a Excel, para revisar casos a mano."""
     d = det.copy()
     if muestra:
         # Repartida por tabla y no las primeras N filas: asi la muestra trae
@@ -1530,13 +1047,7 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
         if isinstance(d[c].dtype, pd.CategoricalDtype):
             d[c] = d[c].astype(str)
 
-    # constant_memory escribe fila por fila y libera cada una: sin eso, 311 mil
-    # filas por 38 columnas se quedan en RAM y son varios GB. El precio es que
-    # hay que escribir EN ORDEN DE FILA, y por eso aqui no se usa to_excel:
-    # pandas emite las celdas COLUMNA POR COLUMNA, asi que en este modo solo
-    # sobrevive la primera y la hoja sale con todo lo demas en blanco.
-    # Las filas se pasan por bloques para no armar los 11.8 millones de valores
-    # de Python de una sola vez.
+    # constant_memory obliga a escribir en orden de fila; por eso no se usa to_excel.
     import xlsxwriter                                     # solo para el libro
 
     libro = xlsxwriter.Workbook(ruta, {"constant_memory": True,
@@ -1578,9 +1089,7 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
             fila = 1
             for ini in range(0, len(tabla), 20_000):
                 bloque = tabla.iloc[ini:ini + 20_000]
-                # astype(object) devuelve escalares de Python (xlsxwriter no
-                # entiende los de numpy) y el where deja None donde habia nulo,
-                # que se escribe como celda vacia y no como el texto "nan".
+                # astype(object): xlsxwriter no acepta tipos de numpy.
                 for valores in (bloque.astype(object)
                                       .where(pd.notna(bloque), None)
                                       .values.tolist()):
@@ -1594,13 +1103,7 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
 def escribir_excel(general: pd.DataFrame, bloques_vm2: dict, bloques_aval: dict,
                    graficos: dict, parametros: pd.DataFrame, concl: list,
                    anexos: dict, ruta: str) -> str:
-    """
-    Arma el libro en el orden del ejercicio 2025: General, Resumen VM2,
-    Resumen Avaluos, Graficos, Reglas, Conclusiones, y al final los anexos.
-
-    (No se llama 'exportar' porque el orquestador tiene un parametro con ese
-    nombre y lo taparia.)
-    """
+    """Arma el libro en el orden del ejercicio 2025."""
     os.makedirs(os.path.dirname(ruta) or ".", exist_ok=True)
     if os.path.exists(ruta):
         try:
@@ -1656,24 +1159,12 @@ def escribir_excel(general: pd.DataFrame, bloques_vm2: dict, bloques_aval: dict,
 # =====================================================================
 def graficos_vigencia(bloques_vm2: dict, bloques_aval: dict,
                       carpeta_base: str, fecha: str) -> dict:
-    """
-    Un cuadro por bloque, en dos tandas (VM2 y avaluo) y en carpetas separadas.
-
-    Se dibujan los MISMOS numeros que quedaron en las hojas de resumen: se
-    reciben los bloques ya calculados en vez de volver a sacar percentiles, asi
-    la linea del grafico y la fila de la tabla nunca se contradicen.
-
-    Devuelve {"VM2 CATASTRAL": [(clave, ruta), ...], "AVALÚO CATASTRAL": [...]}
-    para que la hoja de Excel pueda armar las dos secciones.
-    """
+    """Un cuadro por bloque, en dos tandas (VM2 y avaluo) y en carpetas separadas."""
     v_base, v_liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
     base = CONFIG["base_valor"]              # CATASTRAL o COMERCIAL
     etiqueta = base.lower()
     salida = {}
-    # Los nombres de las columnas y los de las curvas salen del mismo sitio que
-    # los del Excel -serie() y nombres_series()-, para que la leyenda del
-    # grafico diga lo mismo que el encabezado de la tabla que tiene al lado y
-    # para que los dos cambien juntos al cambiar de base.
+    # Los nombres de columnas y curvas salen del mismo sitio que el resto.
     cb, cl, cvar = nombres_series(serie("VM2")["prefijo"])
     vm2 = _tanda_graficos(bloques_vm2, cb, cl, cvar,
                           f"Comparación VM2 {etiqueta}",
@@ -1697,13 +1188,7 @@ def graficos_vigencia(bloques_vm2: dict, bloques_aval: dict,
 def _tanda_graficos(bloques: dict, col_base: str, col_liq: str, col_var: str,
                     titulo: str, serie_base: str, serie_liq: str, ylabel: str,
                     sufijo: str, carpeta: str, fecha: str) -> list:
-    """
-    Las dos curvas de percentiles de un bloque, una encima de la otra: la
-    vigencia que trae la base contra la que daria la liquidacion.
-
-    El eje Y va en millones porque en el avaluo los numeros crudos no caben,
-    y el X son los seis cortes de la tabla, no una escala continua.
-    """
+    """Las dos curvas de percentiles de un bloque, una encima de la otra."""
     if not bloques:
         return []
     try:
@@ -1717,10 +1202,7 @@ def _tanda_graficos(bloques: dict, col_base: str, col_liq: str, col_var: str,
         return []
 
     os.makedirs(carpeta, exist_ok=True)
-    # Los nombres llevan un consecutivo que cambia cuando cambia el conjunto de
-    # bloques (por ejemplo si llega una tabla nueva), asi que sin esto la
-    # carpeta se va llenando de PNG huerfanos de corridas anteriores que ya no
-    # corresponden a ningun bloque del Excel.
+    # Los nombres llevan consecutivo, que cambia si cambia el conjunto de bloques.
     for viejo in os.listdir(carpeta):
         if viejo.lower().endswith(".png"):
             os.remove(os.path.join(carpeta, viejo))
@@ -1783,34 +1265,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                          solo_predios_completos: bool | None = None,
                          solo_valor_de_tabla: bool | None = None,
                          exportar: bool = True) -> pd.DataFrame:
-    """
-    Compara el VM2 que daria la liquidacion contra el que hoy trae la base.
-
-    Parametros
-    ----------
-    df_liq        : DataFrame de construcciones liquidadas. Si es None se lee
-                    ./output/LIQUIDACION_TABLAS.parquet
-    tolerancia_pct: % de variacion aceptada (default CONFIG)
-    familias      : lista de prefijos de tabla, p.ej. ["T1_RESIDENCIAL"]
-    base_valor    : "CATASTRAL" (default) o "COMERCIAL". Las dos se calculan
-                    siempre; esto decide cual se imprime en el Excel
-    excel_detalle : True escribe tambien el detalle liquidado a Excel, con
-                    identificadores, para revisar casos a mano
-    muestra       : filas del Excel de detalle (None = todas); implica
-                    excel_detalle=True
-    solo_predios_completos: False deja entrar tambien los predios a los que
-                    les falta liquidar alguna construccion; su valor de
-                    construccion y su avaluo quedan cortos, asi que es solo
-                    para diagnosticar
-    solo_valor_de_tabla: False deja entrar tambien los especiales e integrales,
-                    cuyo valor de base no sale de la tabla (ver
-                    filtrar_comparables)
-    exportar      : False devuelve el detalle sin escribir Excel ni PNG
-
-    Retorna
-    -------
-    DataFrame con una fila por construccion comparada.
-    """
+    """Compara el VM2 que daria la liquidacion contra el que hoy trae la base."""
     if tolerancia_pct is not None:
         CONFIG["tolerancia_pct"] = float(tolerancia_pct)
     if familias:
@@ -2008,31 +1463,15 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     graficos = {}
     if CONFIG["generar_graficos"]:
         print("\n-- PASO 4: graficos")
-        # Carpeta propia por base: cada tanda borra los PNG que encuentra, asi
-        # que compartirla dejaria en disco los de la ultima corrida y no los
-        # que correspondan al libro que se este mirando.
+        # Carpeta propia por base: cada tanda borra los PNG que encuentra.
         graficos = graficos_vigencia(
             bloques_vm2, bloques_aval,
             os.path.join(CONFIG["carpeta_results"], f"GRAFICOS{sufijo}"), fecha)
     crono.marca("VIGENCIA: graficos")
 
     # --- Detalle fila a fila: a parquet, no a Excel -------------------------
-    # Este archivo se queda ADENTRO: lleva ID_PREDIO y numero predial nacional
-    # de todos los predios comparados. Lo que sale a la app publica es el
-    # recorte anonimo que se escribe justo despues.
     if CONFIG["guardar_detalle"]:
-        # El avaluo se calcula aparte y POR PREDIO, asi que se trae de vuelta
-        # al detalle cruzando por ID_PREDIO.
-        #
-        # OJO: antes esto era 'd[c] = aval[c]', que funcionaba solo porque
-        # 'aval' tenia el mismo indice que 'd' -un predio, una construccion,
-        # una fila-. Al agregar por predio ese indice dejo de coincidir y la
-        # asignacion por posicion habria repartido avaluos entre predios que no
-        # son, sin fallar ni avisar. Por eso va merge y no asignacion.
-        #
-        # En el detalle el avaluo queda REPETIDO en cada construccion del
-        # predio, que es lo correcto para revisar un caso a mano pero no para
-        # contar: para eso esta el parquet por predio que se escribe abajo.
+        # El avaluo va por PREDIO: se cruza por ID_PREDIO, NUNCA por indice.
         cols_aval = [c for c in ("AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
                                  "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
                                  "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
@@ -2078,34 +1517,6 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Detalle en Excel: {ruta_det}")
 
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
-        # Sin ID_PREDIO, sin numero predial, sin area ni puntaje: solo la
-        # comuna, la tabla, la actividad y los valores. Una fila queda en "un
-        # predio de la comuna 17 en T1_RESIDENCIAL_013 que vale tanto", que no
-        # identifica a nadie.
-        #
-        # Va fila a fila y no agregado porque los percentiles se recalculan
-        # sobre lo que el usuario filtre: no hay forma de precalcularlos para
-        # todas las combinaciones de tabla x comuna x actividad.
-        #
-        # Se ordena por valor a proposito: asi se pierde el orden original del
-        # parquet, que corre en paralelo al del ID_PREDIO y permitiria volver a
-        # pegar las filas contra la base fila por fila.
-        # USO_LADM y TABLA_VALOR entran para que la app pueda armar sola la
-        # hoja de reglas: con el uso, la comuna y el nombre de la columna de
-        # la tabla se reconstruye la asignacion completa. Son categorias
-        # gruesas -6 usos, 26 tablas-, no senalan a ningun predio.
-        # Dos granos, dos archivos:
-        #
-        #   PUBLICO         una fila por CONSTRUCCION, con el VM2 y el valor de
-        #                   esa construccion. El ID_PREDIO se repite tantas
-        #                   veces como construcciones tenga el predio.
-        #   PUBLICO_PREDIO  una fila por PREDIO, con el valor construido TOTAL
-        #                   y el avaluo.
-        #
-        # El avaluo NO va en el primero. Repetido en cada construccion, un
-        # predio de tres pesaria el triple en cualquier percentil de avaluo, y
-        # nada en la app avisaria de eso. Mientras el reporte solo admitia
-        # predios de una construccion daba igual; ahora no.
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
@@ -2116,10 +1527,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT",
                     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"]
 
-        # A nivel predio la tabla y la actividad son las de la construccion de
-        # mayor area (ver preparar_avaluo). N_CONST_PREDIO y N_TABLAS_PREDIO
-        # entran para poder separar los predios simples de los que mezclan
-        # varias construcciones o varias tablas.
+        # A nivel predio, la tabla y la actividad son las de la construccion mayor.
         publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
                            "N_CONST_PREDIO", "N_TABLAS_PREDIO",
@@ -2133,12 +1541,6 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                            "VARIACION_AVALUO_COM_PCT"]
 
         # Quitar el ID no basta: el valor exacto es una llave igual de buena.
-        # La mitad de los avaluos (49.7%) es un numero que aparece una sola vez
-        # en todo el archivo, asi que quien tuviera la base podria devolverle el
-        # predio a cada fila cruzando por valor. Redondeados casi ninguna fila
-        # queda sola -del 49.7% al 1.2% en el avaluo, del 13.0% al 1.5% en el
-        # VM2- y los percentiles no se corren mas de 0.07%, que sobre una
-        # mediana de 146 millones no se ve.
         REDONDEO = {"VALORCONS_CAT_VIGENCIA": 100_000,
                     "VALORCONS_CAT_LIQ": 100_000,
                     "VALORCONS_COM_VIGENCIA": 100_000,
@@ -2159,26 +1561,16 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                   "VARIACION_AVALUO_COM_PCT"))
 
         def anonimizar(origen, columnas, orden):
-            """
-            El recorte que sale a la app: sin identificadores, redondeado y
-            reordenado. Es una sola funcion para los dos granos, para que no
-            terminen con criterios de anonimizacion distintos.
-            """
+            """El recorte que sale a la app: sin identificadores, redondeado y reordenado."""
             t = origen[[c for c in columnas if c in origen.columns]].copy()
             for col, paso in REDONDEO.items():
                 if col in t.columns:
                     t[col] = (t[col] / paso).round() * paso
-            # Las variaciones se rehacen sobre los valores ya redondeados: si se
-            # copiaran del detalle, la columna no cuadraria con la division de
-            # las dos que tiene al lado. Y se cortan a dos decimales, que es
-            # como se muestran de todos modos: con el decimal largo la variacion
-            # volvia a ser unica en el 25% de las filas, o sea otra llave.
+            # Las variaciones se rehacen sobre los valores ya redondeados.
             for vig, liq, var in TRIOS:
                 if {vig, liq} <= set(t.columns):
                     t[var] = ((t[liq] / t[vig] - 1) * 100).round(2)
-            # Y se reordena por valor para perder el orden original del parquet,
-            # que corre en paralelo al del ID_PREDIO: sin esto se podrian pegar
-            # las dos tablas fila por fila sin necesidad de cruzar por valor.
+            # Se reordena por valor: el orden original corre junto al ID_PREDIO.
             hay = [c for c in orden if c in t.columns]
             return t.sort_values(hay, kind="stable", ignore_index=True)
 
@@ -2200,9 +1592,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     # --- Excel --------------------------------------------------------------
     ruta = os.path.join(CONFIG["carpeta_results"],
                         f"COMPARACION_VIGENCIA{sufijo}_{fecha}.xlsx")
-    # Anexos: van despues de Conclusiones para no romper el orden de hojas del
-    # ejercicio anterior, pero se siguen escribiendo porque son los unicos que
-    # traen la variacion PAREADA (construccion contra si misma).
+    # Los anexos van despues de Conclusiones, como en el ejercicio anterior.
     anexos = {
         "Seleccion por comuna": seleccion,
         "Comparacion tablas": por_tabla,
@@ -2212,14 +1602,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                    concl, anexos, ruta)
     print(f"\n   Excel generado: {ruta}")
 
-    # Copia de NOMBRE FIJO en output/, que es la que se versiona y la que la
-    # app entrega con el boton "Ver el detalle de la liquidacion". El libro con
-    # fecha se queda en results/ como archivo historico; esta copia existe para
-    # que el deploy tenga siempre el de la ultima corrida sin depender de que
-    # alguien se acuerde de subir el archivo con el nombre nuevo.
-    #
-    # Se copia byte por byte -no se vuelve a escribir- para que lo que se
-    # revisa en Excel y lo que se baja de la app sean el mismo documento.
+    # Copia de nombre fijo en output/: es la que se versiona y la que da la app.
     try:
         import shutil
         copia = os.path.join(os.path.dirname(CONFIG["parquet_publico"]),
