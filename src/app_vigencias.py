@@ -12,10 +12,12 @@ no existe y habria que sacarlo a mano.
 
 Dos hojas, con los mismos filtros al lado en las dos:
 
-    Tablas          el resumen por grupo -cuantos predios, las dos medianas y
-                    cuantos suben o bajan- y los percentiles 10-100, primero
-                    del total de la seleccion y despues abiertos por tabla,
-                    comuna o actividad economica. Los dos se descargan en CSV.
+    Tablas          el resumen por grupo -cuantos predios, las dos medianas,
+                    la diferencia en pesos y cuantos suben o bajan, con fila de
+                    TOTAL- y los percentiles 10-100 del total de la seleccion,
+                    tambien con la diferencia y su variacion. Un solo boton
+                    baja todo en un Excel, incluidos los percentiles abiertos
+                    por grupo, que en pantalla no se muestran para no repetir.
     Graficos        las mismas dos curvas del reporte, dibujadas sobre lo
                     filtrado, mas el reparto de la variacion.
 
@@ -56,6 +58,7 @@ Uso
 Para publicarla gratis y que se abra con un enlace, ver PUBLICAR al final.
 """
 
+import io
 import os
 from pathlib import Path
 
@@ -105,6 +108,13 @@ def pct(v, decimales: int = 2, signo: bool = False) -> str:
         return ""
     texto = _miles(v, decimales)
     return f"+{texto} %" if signo and v > 0 else f"{texto} %"
+
+
+def pesos_signo(v, decimales: int = 0) -> str:
+    """-1234567.8 -> '-$ 1.234.568'  ·  1234567.8 -> '+$ 1.234.568'"""
+    if v is None or pd.isna(v):
+        return ""
+    return ("+" if v >= 0 else "-") + pesos(abs(v), decimales)
 
 
 def entero(v) -> str:
@@ -183,6 +193,23 @@ GRUPOS_COMUNAS = {
             "16", "18", "20", "21"],
 }
 
+# Los tres grupos con que se reparten las 22 comunas, que es como el filtro las
+# ofrece. Los dos primeros son los de las tablas de valor (COMUNAS_7 y
+# COMUNAS_10 de tabla_construccion.py); el tercero son las cinco que entraron
+# despues -INCLUIR_COMUNAS_FALTANTES = True- y que hoy se liquidan leyendo esas
+# mismas columnas *_10C_*, no una tabla propia.
+GRUPOS_FILTRO = {
+    "10 comunas": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
+    "7 comunas": ["02", "03", "04", "08", "17", "19", "22"],
+    "5 comunas (extra)": ["05", "06", "13", "16", "18"],
+}
+
+NOTA_GRUPOS = "  ·  ".join(f"**{g}**: {', '.join(c)}"
+                           for g, c in GRUPOS_FILTRO.items())
+
+# comuna -> grupo, para armar la columna con la que se filtra y se abre.
+COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
+
 USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
@@ -218,6 +245,7 @@ APERTURAS = {
     "Tabla de valor": "TABLA_ORIGEN",
     "Comuna": "COMUNA",
     "Actividad económica de la ZHF": "ACTIVIDAD_ECONOMICA",
+    "Grupo de comunas": "GRUPO_COMUNAS",
     "Actualización 2024-2025": "ACTUALIZACION",
     "Tabla x actividad (bloques del reporte)": "CLAVE",
 }
@@ -285,6 +313,9 @@ def cargar(ruta: str, marca_tiempo: float) -> pd.DataFrame:
               "ACTIVIDAD_ECONOMICA", "CLAVE"):
         if c in d.columns:
             d[c] = d[c].astype(str)
+    # Grupo de comunas: es con lo que se filtra y se abre, no viene en el parquet.
+    d["GRUPO_COMUNAS"] = (d["COMUNA"].map(COMUNA_A_GRUPO)
+                          .fillna("sin grupo"))
     return d
 
 
@@ -343,10 +374,8 @@ with st.sidebar:
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
     sel_actividad = st.multiselect("Actividad económica de la ZHF",
                                    sorted(df["ACTIVIDAD_ECONOMICA"].unique()))
-    sel_act = st.multiselect("Actualización 2024-2025",
-                             sorted(df["ACTUALIZACION"].unique()),
-                             help="Separa las comunas cuyo catastral quedó al "
-                                  "70% del comercial de las que quedaron al 60%.")
+    sel_grupo = st.multiselect("Grupo de comunas", list(GRUPOS_FILTRO))
+    st.caption(NOTA_GRUPOS)
 
     st.divider()
     etiqueta_apertura = st.selectbox("Abrir percentiles y gráficos por",
@@ -366,8 +395,8 @@ if sel_comuna:
     dff = dff[dff["COMUNA"].isin(sel_comuna)]
 if sel_actividad:
     dff = dff[dff["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
-if sel_act:
-    dff = dff[dff["ACTUALIZACION"].isin(sel_act)]
+if sel_grupo:
+    dff = dff[dff["GRUPO_COMUNAS"].isin(sel_grupo)]
 
 # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
 # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
@@ -381,6 +410,10 @@ if dff.empty:
 c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
                         f"{medida['prefijo']}_VIG_{V_LIQ}",
                         f"VARIACIÓN_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}")
+# La diferencia absoluta -en pesos- entre las dos vigencias. La variacion de esa
+# diferencia contra la vigencia base es justamente c_var, asi que las dos
+# columnas van siempre juntas: cuanto cambia y en que proporcion.
+c_dif = f"DIFERENCIA_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}"
 
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Predios", entero(len(dff)),
@@ -412,9 +445,11 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
     filas = []
     for p in PERCENTILES:
         pv, pl = float(v.quantile(p / 100)), float(l.quantile(p / 100))
-        filas.append({"PERCENTIL": f"{p}%", c_base: pv, c_liq: pl,
-                      c_var: (pl / pv - 1) if pv else None,
-                      "NUM_PREDIOS": int(round(p / 100 * len(s)))})
+        filas.append({"PERCENTIL": f"{p}%",
+                      "NUM_PREDIOS": int(round(p / 100 * len(s))),
+                      c_base: pv, c_liq: pl,
+                      c_dif: pl - pv,
+                      c_var: (pl / pv - 1) if pv else None})
     return pd.DataFrame(filas)
 
 
@@ -444,7 +479,9 @@ def con_formato(t: pd.DataFrame):
     """
     reglas = {}
     for col in t.columns:
-        if col in (c_base, c_liq):
+        if col == c_dif:                         # pesos, con signo
+            reglas[col] = pesos_signo
+        elif col in (c_base, c_liq):
             reglas[col] = pesos
         elif col == c_var:                       # fraccion
             reglas[col] = lambda v: pct(v * 100 if pd.notna(v) else v, 2)
@@ -473,11 +510,111 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
         "SUBEN_%": g[medida["var"]].apply(lambda s: (s > 0).mean() * 100),
     })
     t = t[t["PREDIOS"] >= min_predios]
-    return t.reset_index().rename(columns={col: etiqueta_apertura})
+    if t.empty:
+        return pd.DataFrame()
+
+    grupos_ok = list(t.index)                    # antes de perder el indice
+    t.insert(3, c_dif, t[c_liq] - t[c_base])     # queda detras de las dos medianas
+    t = t.reset_index().rename(columns={col: etiqueta_apertura})
+
+    # Fila de totales sobre LOS MISMOS grupos que quedaron en la tabla, para que
+    # PREDIOS sea exactamente la suma de la columna. No es la suma de las demas
+    # columnas: una mediana no se suma, se vuelve a calcular sobre el conjunto.
+    sub = d[d[col].isin(grupos_ok)]
+    fila = {etiqueta_apertura: "TOTAL",
+            "PREDIOS": len(sub),
+            c_base: sub[medida["vig"]].median(),
+            c_liq: sub[medida["liq"]].median(),
+            "VAR_MEDIANA_%": sub[medida["var"]].median(),
+            "BAJAN_%": (sub[medida["var"]] < 0).mean() * 100,
+            "SUBEN_%": (sub[medida["var"]] > 0).mean() * 100}
+    fila[c_dif] = fila[c_liq] - fila[c_base]
+    return pd.concat([t, pd.DataFrame([fila])[t.columns]], ignore_index=True)
 
 
 hoja_tablas, hoja_graf, hoja_reglas = st.tabs(
     ["📊 Tablas", "📈 Gráficos", "📋 Reglas"])
+
+# Todo se arma una sola vez aca arriba: las tres hojas y el Excel leen de estos
+# mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
+res = resumen(dff, col_apertura)
+total = percentiles(dff)
+abierto = por_grupo(dff, col_apertura)
+reglas = reglas_asignacion()
+
+# El reparto de la variacion. Aqui si es predio contra si mismo: cada uno cae
+# en el rango de su propia variacion, no se comparan distribuciones.
+RANGOS = ["Baja más de 50%", "Baja 25-50%", "Baja 10-25%", "Estable (±10%)",
+          "Sube 10-25%", "Sube 25-50%", "Sube más de 50%"]
+reparto = (dff[medida["var"]]
+           .pipe(pd.cut,
+                 bins=[-float("inf"), -50, -25, -10, 10, 25, 50, float("inf")],
+                 labels=RANGOS)
+           .value_counts(sort=False)
+           .rename_axis("RANGO").reset_index(name="PREDIOS"))
+reparto["%"] = reparto["PREDIOS"] / reparto["PREDIOS"].sum() * 100
+
+
+def excel_detalle() -> bytes:
+    """
+    Un solo libro con todo lo que hay en pantalla, en vez de un CSV por tabla.
+
+    Va con los numeros CRUDOS, no con el texto formateado: en Excel se siguen
+    pudiendo sumar y ordenar, y el separador de miles lo pone el Excel de quien
+    lo abra. La hoja FILTROS deja escrito con que seleccion se saco, que es lo
+    primero que se pregunta cuando el archivo cambia de manos.
+    """
+    filtros = pd.DataFrame(
+        [("Medida", etiqueta_medida),
+         ("Base de valor", etiqueta_base),
+         ("Categoría de tabla", ", ".join(sel_familia) or "todas"),
+         ("Tabla de valor", ", ".join(sel_tabla) or "todas"),
+         ("Comuna", ", ".join(sel_comuna) or "todas"),
+         ("Actividad económica", ", ".join(sel_actividad) or "todas"),
+         ("Grupo de comunas", ", ".join(sel_grupo) or "todos"),
+         ("Abierto por", etiqueta_apertura),
+         ("Mínimo de predios por grupo", entero(min_predios)),
+         ("Predios de la selección", entero(len(dff))),
+         ("Vigencias comparadas", f"{V_BASE} → {V_LIQ}"),
+         ("Fuente", RUTA_DATOS.name)],
+        columns=["FILTRO", "VALOR"])
+
+    hojas = [("FILTROS", filtros),
+             ("RESUMEN", res),
+             ("PERCENTILES", total),
+             ("PERCENTILES_POR_GRUPO", abierto),
+             ("REPARTO_VARIACION", reparto),
+             ("REGLAS", reglas)]
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as xw:
+        libro = xw.book
+        f_tit = libro.add_format({"bold": True, "bg_color": "#1e3a8a",
+                                  "font_color": "#ffffff", "border": 1})
+        f_pesos = libro.add_format({"num_format": "$ #,##0"})
+        f_pct = libro.add_format({"num_format": "0.00 %"})
+        f_ent = libro.add_format({"num_format": "#,##0"})
+        for nombre, t in hojas:
+            if t is None or t.empty:
+                continue
+            t.to_excel(xw, sheet_name=nombre, index=False)
+            h = xw.sheets[nombre]
+            for i, col in enumerate(t.columns):
+                h.write(0, i, str(col), f_tit)
+                if col in (c_base, c_liq, c_dif):
+                    fmt, ancho = f_pesos, 22
+                elif col == c_var:                       # viene en fraccion
+                    fmt, ancho = f_pct, 16
+                elif str(col).endswith("_%") or col == "%":
+                    fmt, ancho = f_ent, 12
+                elif col in ("PREDIOS", "NUM_PREDIOS"):
+                    fmt, ancho = f_ent, 12
+                else:
+                    fmt, ancho = None, max(14, min(46, int(
+                        t[col].astype(str).str.len().max() or 14) + 2))
+                h.set_column(i, i, ancho, fmt)
+            h.freeze_panes(1, 0)
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------
@@ -486,49 +623,42 @@ hoja_tablas, hoja_graf, hoja_reglas = st.tabs(
 with hoja_tablas:
     st.subheader(f"Tablas · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
+    st.download_button(
+        "⬇️ Descargar el Excel del detalle",
+        data=excel_detalle(),
+        file_name=(f"comparacion_{V_BASE}_{V_LIQ}_{medida['prefijo']}"
+                   f"_{col_apertura}.xlsx"),
+        mime=("application/vnd.openxmlformats-officedocument"
+              ".spreadsheetml.sheet"),
+        type="primary", key="xlsx_detalle",
+        help="Un solo libro con el resumen, los percentiles -del total y "
+             "abiertos por grupo-, el reparto de la variación, las reglas y "
+             "los filtros con que se sacó.")
+
+    st.divider()
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
     st.caption("Las dos medianas son de distribuciones separadas; "
                "VAR_MEDIANA_% es predio contra sí mismo. Por eso pueden "
                "apuntar a lados distintos: si en un grupo conviven comunas que "
                "suben mucho y comunas que caen mucho, la mediana de los valores "
                "se va con las más pesadas y la de las variaciones no.")
-    res = resumen(dff, col_apertura)
     if res.empty:
         st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
     else:
         st.dataframe(con_formato(res), width="stretch", hide_index=True)
-        st.download_button(
-            "⬇️ Descargar el resumen (CSV)",
-            data=res.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"resumen_{medida['prefijo']}_{col_apertura}.csv",
-            mime="text/csv", key="csv_resumen",
-        )
+        st.caption("La fila **TOTAL** es sobre los mismos grupos que se ven "
+                   "arriba: PREDIOS sí es la suma de la columna, pero las "
+                   "medianas y los porcentajes se vuelven a calcular sobre el "
+                   "conjunto -una mediana no se suma-.")
 
     st.divider()
-    st.markdown("**Percentiles del total de la selección** · "
+    st.markdown("**Percentiles, diferencia y variación** · "
                 f"{entero(len(dff))} predios")
-    total = percentiles(dff)
+    st.caption(f"En cada corte: cuánto vale en la vigencia {V_BASE}, cuánto "
+               f"valdría en la {V_LIQ}, cuántos pesos de diferencia hay entre "
+               f"los dos y qué proporción representa esa diferencia.")
     st.dataframe(con_formato(total), width="stretch", hide_index=True)
 
-    st.divider()
-    st.markdown(f"**Percentiles abiertos por {etiqueta_apertura.lower()}**")
-    abierto = por_grupo(dff, col_apertura)
-    if abierto.empty:
-        st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros. "
-                f"Baje el mínimo en la barra lateral.")
-    else:
-        n_grupos = abierto[etiqueta_apertura].nunique()
-        n_fuera = dff[col_apertura].nunique() - n_grupos
-        st.caption(f"{n_grupos} grupos"
-                   + (f" · {n_fuera} quedaron fuera por tener menos de "
-                      f"{entero(min_predios)} predios" if n_fuera else ""))
-        st.dataframe(con_formato(abierto), width="stretch", hide_index=True)
-        st.download_button(
-            "⬇️ Descargar los percentiles (CSV)",
-            data=abierto.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"percentiles_{medida['prefijo']}_{col_apertura}.csv",
-            mime="text/csv", key="csv_percentiles",
-        )
 
 
 # ---------------------------------------------------------------------
@@ -537,19 +667,58 @@ with hoja_tablas:
 with hoja_graf:
     st.subheader(f"Gráficos · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
+    def pie(t: pd.DataFrame) -> list:
+        """
+        Las lineas que van bajo el titulo, dichas en palabras y no en jerga.
+
+        Antes decia "· en la mediana +29,1 %", que obliga a saber que es la
+        mediana y contra que. Ahora dice de cuanto a cuanto va y cuantos pesos
+        son, que es lo que se pregunta al mirar el grafico.
+        """
+        if t.empty:
+            return []
+        lineas = [f"{entero(int(t['NUM_PREDIOS'].iloc[-1]))} predios comparados"]
+        fila = t[t["PERCENTIL"] == "50%"]
+        if not fila.empty and pd.notna(fila[c_var].iloc[0]):
+            pv, pl = float(fila[c_base].iloc[0]), float(fila[c_liq].iloc[0])
+            lineas.append(
+                f"El valor del medio (percentil 50) "
+                f"{'sube' if pl >= pv else 'baja'} de {pesos(pv)} en {V_BASE} "
+                f"a {pesos(pl)} en {V_LIQ}: son {pesos_signo(pl - pv)} "
+                f"({pct(float(fila[c_var].iloc[0]) * 100, 1, signo=True)})")
+        return lineas
+
     def curvas(t: pd.DataFrame, titulo: str) -> alt.Chart:
-        """Las dos curvas de percentiles, en millones y con los mismos colores
-        que los PNG del reporte."""
+        """
+        Las dos curvas de percentiles, en millones y con los colores del reporte.
+
+        En el aviso del punto van, ademas del valor de la serie, la DIFERENCIA
+        en pesos entre las dos vigencias en ese mismo percentil y que proporcion
+        representa. Como la diferencia es una sola por percentil, se mapea desde
+        la tabla ancha y queda igual en los dos puntos de la columna: parado en
+        cualquiera de los dos se lee lo mismo.
+        """
         largo = t.melt(id_vars="PERCENTIL", value_vars=[c_base, c_liq],
                        var_name="Serie", value_name="Valor")
         largo["Millones"] = largo["Valor"] / 1e6
         largo["Etiqueta"] = largo["Valor"].map(pesos)
+        ref = t.set_index("PERCENTIL")
+        largo["Diferencia"] = largo["PERCENTIL"].map(
+            ref[c_dif].map(pesos_signo))
+        largo["Variacion"] = largo["PERCENTIL"].map(
+            ref[c_var].map(lambda v: pct(v * 100, 1, signo=True)
+                           if pd.notna(v) else ""))
         return (
-            alt.Chart(largo, title=titulo)
+            alt.Chart(largo,
+                      title=alt.TitleParams(text=titulo, subtitle=pie(t),
+                                            subtitleColor="#667085",
+                                            anchor="start"))
             .mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=2.5)
             .encode(
+                # labelAngle=0: los rotulos del eje x van en horizontal.
                 x=alt.X("PERCENTIL:N", title="Percentil",
-                        sort=[f"{p}%" for p in PERCENTILES]),
+                        sort=[f"{p}%" for p in PERCENTILES],
+                        axis=alt.Axis(labelAngle=0)),
                 y=alt.Y("Millones:Q", title=unidad_eje),
                 color=alt.Color("Serie:N", title=None,
                                 scale=alt.Scale(domain=[c_base, c_liq],
@@ -557,20 +726,19 @@ with hoja_graf:
                                 legend=alt.Legend(orient="top")),
                 tooltip=[alt.Tooltip("PERCENTIL:N", title="Percentil"),
                          alt.Tooltip("Serie:N", title="Serie"),
-                         alt.Tooltip("Etiqueta:N", title="Valor")],
+                         alt.Tooltip("Etiqueta:N", title="Valor"),
+                         alt.Tooltip("Diferencia:N",
+                                     title=f"Diferencia {V_LIQ} vs {V_BASE}"),
+                         alt.Tooltip("Variacion:N", title="Variación")],
             )
             .properties(height=340)
             .configure(locale=LOCALE_VEGA)      # ejes en formato colombiano
         )
 
-    st.altair_chart(
-        curvas(percentiles(dff),
-               f"Total de la selección · {entero(len(dff))} predios"),
-        width="stretch")
+    st.altair_chart(curvas(total, "Total de la selección"), width="stretch")
 
     st.divider()
     st.markdown(f"**Por {etiqueta_apertura.lower()}**")
-    abierto = por_grupo(dff, col_apertura)
     if abierto.empty:
         st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
     else:
@@ -584,14 +752,9 @@ with hoja_graf:
         for i in range(0, len(elegidos), columnas_grilla):
             for col, nombre in zip(st.columns(columnas_grilla),
                                    elegidos[i:i + columnas_grilla]):
-                t = abierto[abierto[etiqueta_apertura] == nombre]
-                predios = int(t["NUM_PREDIOS"].iloc[-1])
-                mediana = t.loc[t["PERCENTIL"] == "50%", c_var]
-                pie = ("" if mediana.empty or pd.isna(mediana.iloc[0])
-                       else " · en la mediana "
-                            + pct(mediana.iloc[0] * 100, 1, signo=True))
                 col.altair_chart(
-                    curvas(t, f"{nombre} · {entero(predios)} predios{pie}"),
+                    curvas(abierto[abierto[etiqueta_apertura] == nombre],
+                           nombre),
                     width="stretch")
 
     st.divider()
@@ -599,23 +762,17 @@ with hoja_graf:
     st.caption("Aquí sí es predio contra sí mismo, no distribución contra "
                "distribución: cada predio cae en el rango de su propia "
                "variación.")
-    reparto = (dff[medida["var"]]
-               .pipe(pd.cut,
-                     bins=[-float("inf"), -50, -25, -10, 10, 25, 50, float("inf")],
-                     labels=["baja más de 50%", "baja 25-50%", "baja 10-25%",
-                             "estable (±10%)", "sube 10-25%", "sube 25-50%",
-                             "sube más de 50%"])
-               .value_counts(sort=False).rename_axis("RANGO").reset_index(name="PREDIOS"))
-    reparto["%"] = reparto["PREDIOS"] / reparto["PREDIOS"].sum() * 100
     st.altair_chart(
         alt.Chart(reparto).mark_bar(color=AZUL, cornerRadiusEnd=3).encode(
-            x=alt.X("RANGO:N", title=None, sort=list(reparto["RANGO"])),
+            x=alt.X("RANGO:N", title=None, sort=list(reparto["RANGO"]),
+                    axis=alt.Axis(labelAngle=0)),   # rotulos en horizontal
             y=alt.Y("PREDIOS:Q", title="Predios"),
             tooltip=[alt.Tooltip("RANGO:N", title="Rango"),
                      alt.Tooltip("PREDIOS:Q", title="Predios", format=",.0f"),
                      alt.Tooltip("%:Q", title="% del total", format=",.1f")],
         ).properties(height=300).configure(locale=LOCALE_VEGA),
         width="stretch")
+
 
 
 # ---------------------------------------------------------------------
@@ -625,16 +782,12 @@ with hoja_reglas:
     st.subheader("Cómo se asigna la tabla de valor")
     st.caption("Hoja informativa: es la regla **general**, no un recuento de "
                "los predios de esta corrida. No responde a los filtros de la "
-               "izquierda.")
+               "izquierda. Se descarga con el botón de la hoja Tablas, en la "
+               "pestaña REGLAS del Excel.")
 
-    reglas = reglas_asignacion()
     st.dataframe(reglas, width="stretch", hide_index=True,
                  column_config={"COMUNAS": st.column_config.TextColumn(
                      width="medium")})
-    st.download_button("⬇️ Descargar las reglas (CSV)",
-                       data=reglas.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="reglas_asignacion_tablas.csv",
-                       mime="text/csv", key="csv_reglas")
 
     st.caption("Se entra por el uso de la construcción, se mira en qué grupo "
                "cae la comuna, luego la condición jurídica y la tipología de "
@@ -643,56 +796,59 @@ with hoja_reglas:
                "(PUNTCONS), que va de 1 a 100.")
 
     st.divider()
+    st.markdown("**Grupos de comunas**")
+    st.markdown("\n".join(f"- **{g}** — {', '.join(c)}"
+                          for g, c in GRUPOS_FILTRO.items()))
+    st.caption("Las 5 comunas extra no tienen tabla propia: hoy se liquidan "
+               "leyendo las mismas columnas *_10C_* del grupo de 10.")
+
+    st.divider()
     st.markdown("**Excepciones**")
     st.info("**ZHF fuera de 011-016.** Si las tres últimas posiciones de la "
             "ZHF son diferentes a 011, 012, 013, 014, 015 y 016, se emplea el "
             "**estrato socioeconómico del predio (ESTRPRED)** y se asigna la "
             "tabla correspondiente según la comuna y la condición jurídica.")
-    st.info("**Apartamentos_4_y_mas_pisos_en_PH (001).** No se liquidan por "
-            "tabla sino **por modelo**. La única excepción es la condición "
-            "jurídica 8, que sí va con la tabla residencial que le "
-            "corresponda.")
-    st.info("**Valores especiales e integrales.** Las construcciones marcadas "
-            "como especiales, y los predios con método de liquidación INTEGRAL "
-            "o MIXTO, se resuelven por fuera de las tablas.")
 
     st.divider()
-    st.markdown("**Qué predios entran al reporte**")
+    st.markdown("**Qué predios NO se liquidan por tabla**")
     st.markdown(
-        f"""
-Solo lo que se liquida **con la tabla residencial o la de edificios**. Todo lo
-demás se ignora, porque no dice nada sobre las dos tablas que se están
-revisando y mezclarlo mueve el resultado hacia donde no corresponde.
+        """
+Tres razones, y ninguna entra a este reporte: comparar contra un VM2 de tabla
+un valor que no salió de una tabla no mide la tabla.
 
+**1. Van por modelo, no por tabla**
+
+| Uso de construcción |
+|---|
+| `Apartamentos_4_y_mas_pisos_en_PH` |
+| `Comercio_en_PH` |
+| `Oficinas_Consultorios_en_PH` |
+
+**2. Son especiales por defecto**
+
+| Uso de construcción |
+|---|
+| `Centros_Comerciales_grandes` |
+| `Centros_Comerciales_en_PH_grandes` |
+
+**3. El predio tiene información incompleta**
+
+Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
+        """)
+
+    st.divider()
+    st.markdown("**Qué más queda fuera del reporte**")
+    st.markdown(
+        """
 | Queda fuera | Por qué |
 |---|---|
 | Predios de **varias construcciones** | El terreno y el anexo vienen repetidos en cada fila y no se pueden repartir por tabla |
-| `Apartamentos_4_y_mas_pisos_en_PH` salvo condición 8 | Se resuelven **por modelo**, no por tabla |
-| `ESPECIAL = 1` en la base · `ESPECIAL_2026 = 1` | Su valor no salió de una tabla, así que restarlo contra un VM2 de tabla no mide la tabla |
+| `ESPECIAL = 1` en la base · `ESPECIAL_2026 = 1` | Su valor no salió de una tabla |
 | Predios con `METODO_LIQUIDACION` INTEGRAL o MIXTO | El valor de base trae el terreno adentro |
-| Sin área, sin valor, sin puntaje o sin VM2 de tabla | No hay con qué comparar |
 
 Por eso el avalúo se lee **por predio**: cada uno tiene una sola construcción.
         """)
 
-    st.divider()
-    st.markdown("**Cómo se calcula cada medida**")
-    st.markdown(
-        f"""
-| | Vigencia {V_BASE} (lo que se cobra hoy) | Vigencia {V_LIQ} (lo que daría la liquidación) |
-|---|---|---|
-| **Valor por m² catastral** | `VALORCONS / ACONCONS` | `VM2 de tabla × 0,7` |
-| **Valor por m² comercial** | `VALORCONS / ACONCONS / f` | `VM2 de tabla` (ya viene comercial) |
-| **Valor total construido** | el m² × `AREA_CONST` | el m² × `AREA_CONST` |
-| **Avalúo catastral** | `VTER + VALORCONS + VANEXO` | `VTER + valor construido + VANEXO` |
-| **Avalúo comercial** | `VTER/0,7 + (VALORCONS + VANEXO)/f` | `VTER/0,7 + valor construido + VANEXO/f` |
-
-`f` es el factor de la comuna para pasar de catastral a comercial: **0,7** en
-las comunas actualizadas en 2024-2025 y **0,6** en las demás. El terreno va
-siempre por 0,7. Por eso la variación comercial no coincide con la catastral:
-la vigencia se convierte con dos factores según la comuna y la liquidación con
-uno solo.
-        """)
 
 
 st.caption(
