@@ -2017,6 +2017,23 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     escribir_excel(general, bloques_vm2, bloques_aval, graficos, resumen,
                    concl, anexos, ruta)
     print(f"\n   Excel generado: {ruta}")
+
+    # Copia de NOMBRE FIJO en output/, que es la que se versiona y la que la
+    # app entrega con el boton "Ver el detalle de la liquidacion". El libro con
+    # fecha se queda en results/ como archivo historico; esta copia existe para
+    # que el deploy tenga siempre el de la ultima corrida sin depender de que
+    # alguien se acuerde de subir el archivo con el nombre nuevo.
+    #
+    # Se copia byte por byte -no se vuelve a escribir- para que lo que se
+    # revisa en Excel y lo que se baja de la app sean el mismo documento.
+    try:
+        import shutil
+        copia = os.path.join(os.path.dirname(CONFIG["parquet_publico"]),
+                             "COMPARACION_VIGENCIA_REPORTE.xlsx")
+        shutil.copyfile(ruta, copia)
+        print(f"   Copia para la app:  {copia}")
+    except Exception as e:
+        print(f"   AVISO: no se pudo dejar la copia para la app: {e}")
     print(f"     General                {len(general):>7,} filas")
     print(f"     Resumen VM2            {len(bloques_vm2):>7,} bloques")
     print(f"     Resumen Avaluos        {len(bloques_aval):>7,} bloques")
