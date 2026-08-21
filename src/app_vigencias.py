@@ -35,17 +35,25 @@ tablas ya viene comercial. Por eso la variacion comercial no es igual a la
 catastral -la vigencia se convierte con dos factores distintos segun la comuna
 y la liquidacion con uno solo-, y por eso vale la pena mirar las dos.
 
-SOLO SALEN AGREGADOS. No hay hoja de predio a predio ni descarga fila a fila:
-la app esta hecha para publicarse abierta, asi que aqui no entran ID_PREDIO,
-numero predial, area ni puntaje. Lo mas fino que se puede pedir es un grupo, y
-los grupos por debajo del minimo de predios ni siquiera se abren.
+Dos fuentes, y de cual haya depende lo que se ve
+-----------------------------------------------
+output/COMPARACION_VIGENCIA_PUBLICO.parquet   (6.5 MB, SIN identificadores)
+    Es lo que mueve las hojas Tablas, Graficos y Reglas: las mismas filas del
+    reporte pero sin ID_PREDIO ni numero predial, solo comuna, tabla, actividad
+    y valores. Este si va al repositorio y es lo unico que la app necesita.
 
-Fuente
-------
-output/COMPARACION_VIGENCIA_PUBLICO.parquet, que escribe comparacion_vigencia.py
-al lado del detalle: las mismas filas pero sin identificadores, solo comuna,
-tabla, actividad y valores. El detalle completo -ese si con ID_PREDIO y numero
-predial- se queda adentro y NO se versiona (ver .gitignore).
+output/COMPARACION_VIGENCIA_DETALLE.parquet   (44.7 MB, CON identificadores)
+    Es lo que mueve la hoja Detalle: 288 mil construcciones fila a fila, con
+    ID_PREDIO, numero predial, area, puntaje y las tres medidas en las dos
+    bases. Lo escribe comparacion_vigencia.py al lado del otro.
+
+    OJO: el .gitignore lo deja FUERA a proposito, porque este repositorio es
+    publico. Corriendo la app en local el detalle esta y la hoja funciona; en
+    el deploy de Streamlit Cloud el archivo no existe y la hoja lo dice en vez
+    de fallar. Para tenerlo publicado hay que decidirlo antes: el repositorio
+    tendria que volver a ser privado, o la app quedar detras de contrasena.
+    Subirlo tal como esta hoy publica el numero predial de 288 mil predios, y
+    del historial de git eso no se saca borrando el archivo despues.
 
 Trae solo los predios comparables (una sola construccion y valor de tabla en
 las dos vigencias), asi que la app no vuelve a filtrar nada de eso: lo que se
@@ -68,6 +76,34 @@ import streamlit as st
 
 RAIZ = Path(__file__).resolve().parent.parent
 RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
+RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
+
+# El libro de revision que escribe comparacion_vigencia.py en cada corrida:
+# results/COMPARACION_VIGENCIA/COMPARACION_VIGENCIA_<fecha>.xlsx. Es el mismo
+# archivo que se descarga a mano hoy, con las ocho hojas del reporte, y desde
+# la app se entrega TAL CUAL, sin volver a armarlo: lo que se revisa en Excel y
+# lo que se baja de la app tienen que ser byte por byte el mismo documento.
+CARPETA_REPORTE = RAIZ / "results" / "COMPARACION_VIGENCIA"
+# Copia de nombre fijo que deja comparacion_vigencia.py al terminar. Es la UNICA
+# que se versiona -results/ entero queda fuera, ver .gitignore- y por eso es la
+# que tiene el deploy. En local suelen estar las dos y gana la mas nueva.
+RUTA_REPORTE_FIJA = RAIZ / "output" / "COMPARACION_VIGENCIA_REPORTE.xlsx"
+
+
+def reporte_mas_reciente():
+    """
+    El libro del reporte mas nuevo entre los dos sitios donde puede estar, o
+    None si no hay ninguno: en local los COMPARACION_VIGENCIA_<fecha>.xlsx de
+    results/, en el deploy la copia fija de output/.
+    """
+    if CARPETA_REPORTE.is_dir():
+        # Los de results/ mandan: traen la fecha en el nombre, que es como se
+        # identifica una corrida al pasarse el archivo entre personas.
+        con_fecha = sorted(CARPETA_REPORTE.glob("COMPARACION_VIGENCIA_*.xlsx"),
+                           key=lambda f: f.stat().st_mtime, reverse=True)
+        if con_fecha:
+            return con_fecha[0]
+    return RUTA_REPORTE_FIJA if RUTA_REPORTE_FIJA.exists() else None
 
 # Las dos vigencias salen del modulo que genero el parquet, para que la app no
 # quede con los anos escritos a mano cuando alla se corran. Si el import falla
@@ -159,22 +195,28 @@ BASES = {"Catastral": "CATASTRAL", "Comercial": "COMERCIAL"}
 SERIES = {
     ("VALORCONS", "CATASTRAL"): {
         "vig": "VALORCONS_CAT_VIGENCIA", "liq": "VALORCONS_CAT_LIQ",
-        "var": "VARIACION_VALORCONS_CAT_PCT", "prefijo": "VALORCONS_CAT"},
+        "var": "VARIACION_VALORCONS_CAT_PCT", "prefijo": "VALORCONS_CAT",
+        "dif": "DIF_VALORCONS_CAT"},
     ("VALORCONS", "COMERCIAL"): {
         "vig": "VALORCONS_COM_VIGENCIA", "liq": "VALORCONS_COM_LIQ",
-        "var": "VARIACION_VALORCONS_COM_PCT", "prefijo": "VALORCONS_COM"},
+        "var": "VARIACION_VALORCONS_COM_PCT", "prefijo": "VALORCONS_COM",
+        "dif": "DIF_VALORCONS_COM"},
     ("VM2", "CATASTRAL"): {
         "vig": "VM2_CAT_VIGENCIA", "liq": "VM2_CAT_LIQ",
-        "var": "VARIACION_CAT_PCT", "prefijo": "VM2_CAT"},
+        "var": "VARIACION_CAT_PCT", "prefijo": "VM2_CAT",
+        "dif": "DIF_CAT_ABS"},
     ("VM2", "COMERCIAL"): {
         "vig": "VM2_COM_VIGENCIA", "liq": "VM2_COM_LIQ",
-        "var": "VARIACION_COM_PCT", "prefijo": "VM2_COM"},
+        "var": "VARIACION_COM_PCT", "prefijo": "VM2_COM",
+        "dif": "DIF_COM_ABS"},
     ("AVALUO", "CATASTRAL"): {
         "vig": "AVALUO_CAT_VIGENCIA", "liq": "AVALUO_CAT_LIQ",
-        "var": "VARIACION_AVALUO_CAT_PCT", "prefijo": "AVALÚO_CAT"},
+        "var": "VARIACION_AVALUO_CAT_PCT", "prefijo": "AVALÚO_CAT",
+        "dif": "DIF_AVALUO_CAT"},
     ("AVALUO", "COMERCIAL"): {
         "vig": "AVALUO_COM_VIGENCIA", "liq": "AVALUO_COM_LIQ",
-        "var": "VARIACION_AVALUO_COM_PCT", "prefijo": "AVALÚO_COM"},
+        "var": "VARIACION_AVALUO_COM_PCT", "prefijo": "AVALÚO_COM",
+        "dif": "DIF_AVALUO_COM"},
 }
 
 # --- Reglas de asignacion de tabla (hoja informativa) -----------------------
@@ -319,6 +361,44 @@ def cargar(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     return d
 
 
+@st.cache_data(show_spinner="Leyendo el detalle predio a predio…")
+def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
+    """
+    El detalle fila a fila, CON identificadores. Solo lo lee la hoja Detalle.
+
+    Son 288 mil filas por 50 columnas: ~345 MB en memoria. Se cachea igual que
+    el publico y con la misma marca de tiempo, asi que se lee una sola vez por
+    corrida del pipeline aunque se cambie de filtro cien veces.
+    """
+    d = pd.read_parquet(ruta)
+    d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+    for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
+              "TABLA_ORIGEN", "TABLA_VALOR", "USO_LADM", "ZHF",
+              "ACTIVIDAD_ECONOMICA", "CLAVE", "SENTIDO", "RANGO_VARIACION"):
+        if c in d.columns:
+            d[c] = d[c].astype(str)
+    d["GRUPO_COMUNAS"] = d["COMUNA"].map(COMUNA_A_GRUPO).fillna("sin grupo")
+    return d
+
+
+# Las columnas del detalle que se muestran en la vista corta. Las que dependen
+# de la medida elegida -las cuatro de valor- se agregan despues, ya sabiendo
+# cual pidio el usuario en la barra lateral.
+COLUMNAS_DETALLE_FIJAS = [
+    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA",
+    "GRUPO_COMUNAS", "ESTRPRED", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
+    "TABLA_VALOR", "ZHF", "ACTIVIDAD_ECONOMICA", "PUNTCONS", "AREA_CONST",
+]
+
+# Que es cada columna del detalle. Se trae de comparacion_vigencia.py, que es
+# donde esta escrito de verdad; si el import falla -en el servidor puede no
+# estar matplotlib- la hoja Diccionario simplemente no sale.
+try:
+    from comparacion_vigencia import DICCIONARIO_DETALLE
+except Exception:                                        # pragma: no cover
+    DICCIONARIO_DETALLE = []
+
+
 if not os.path.exists(RUTA_DATOS):
     st.error(
         f"No se encontró **{RUTA_DATOS.name}**.\n\n"
@@ -386,21 +466,31 @@ with st.sidebar:
                                        "abren: con tan pocos casos un percentil "
                                        "no dice nada.")
 
-dff = df
-if sel_familia:
-    dff = dff[dff["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
-if sel_tabla:
-    dff = dff[dff["TABLA_ORIGEN"].isin(sel_tabla)]
-if sel_comuna:
-    dff = dff[dff["COMUNA"].isin(sel_comuna)]
-if sel_actividad:
-    dff = dff[dff["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
-if sel_grupo:
-    dff = dff[dff["GRUPO_COMUNAS"].isin(sel_grupo)]
+def filtrar(d: pd.DataFrame) -> pd.DataFrame:
+    """
+    Los filtros de la barra lateral, aplicados a lo que se le pase.
 
-# La medida de avaluo puede venir vacia si se corrio la comparacion sin las
-# columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
-dff = dff[dff[medida["vig"]].notna() & dff[medida["liq"]].notna()]
+    Esta factorizado porque lo usan los dos parquet: el publico que mueve las
+    hojas de agregados y el detalle que mueve la hoja de predios. Si el filtro
+    viviera escrito dos veces, tarde o temprano una hoja quedaria mostrando
+    algo distinto de la otra con la misma seleccion en pantalla.
+    """
+    if sel_familia:
+        d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
+    if sel_tabla:
+        d = d[d["TABLA_ORIGEN"].isin(sel_tabla)]
+    if sel_comuna:
+        d = d[d["COMUNA"].isin(sel_comuna)]
+    if sel_actividad:
+        d = d[d["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
+    if sel_grupo:
+        d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
+    # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
+    # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
+    return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
+
+
+dff = filtrar(df)
 
 if dff.empty:
     st.warning("Ningún predio cumple los filtros elegidos. Quite alguno en la "
@@ -532,8 +622,9 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     return pd.concat([t, pd.DataFrame([fila])[t.columns]], ignore_index=True)
 
 
-hoja_tablas, hoja_graf, hoja_reglas = st.tabs(
-    ["📊 Tablas", "📈 Gráficos", "📋 Reglas"])
+hoja_tablas, hoja_graf, hoja_detalle, hoja_reglas = st.tabs(
+    ["📊 Tablas", "📈 Gráficos", "🔎 Detalle",
+     "📋 Reglas"])
 
 # Todo se arma una sola vez aca arriba: las tres hojas y el Excel leen de estos
 # mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
@@ -555,15 +646,31 @@ reparto = (dff[medida["var"]]
 reparto["%"] = reparto["PREDIOS"] / reparto["PREDIOS"].sum() * 100
 
 
-def excel_detalle() -> bytes:
+def _motor_excel():
     """
-    Un solo libro con todo lo que hay en pantalla, en vez de un CSV por tabla.
+    El primer motor de Excel que este instalado, o None si no hay ninguno.
 
-    Va con los numeros CRUDOS, no con el texto formateado: en Excel se siguen
-    pudiendo sumar y ordenar, y el separador de miles lo pone el Excel de quien
-    lo abra. La hoja FILTROS deja escrito con que seleccion se saco, que es lo
-    primero que se pregunta cuando el archivo cambia de manos.
+    En Streamlit Community Cloud las dependencias salen de requirements.txt,
+    pero agregar una linea alli NO siempre dispara la reinstalacion: si el
+    entorno quedo del deploy anterior, no hay xlsxwriter ni openpyxl. Antes eso
+    reventaba la pagina COMPLETA -las tres hojas en blanco con un
+    ModuleNotFoundError-, porque el libro se arma en cada render aunque se este
+    mirando Graficos o Reglas. Ahora se detecta antes y se baja a CSV.
     """
+    for modulo in ("xlsxwriter", "openpyxl"):
+        try:
+            __import__(modulo)
+            return modulo
+        except ImportError:
+            continue
+    return None
+
+
+MOTOR_EXCEL = _motor_excel()
+
+
+def _hojas_detalle():
+    """Las seis tablas del detalle, en el orden en que van al archivo."""
     filtros = pd.DataFrame(
         [("Medida", etiqueta_medida),
          ("Base de valor", etiqueta_base),
@@ -579,25 +686,42 @@ def excel_detalle() -> bytes:
          ("Fuente", RUTA_DATOS.name)],
         columns=["FILTRO", "VALOR"])
 
-    hojas = [("FILTROS", filtros),
-             ("RESUMEN", res),
-             ("PERCENTILES", total),
-             ("PERCENTILES_POR_GRUPO", abierto),
-             ("REPARTO_VARIACION", reparto),
-             ("REGLAS", reglas)]
+    return [("FILTROS", filtros),
+            ("RESUMEN", res),
+            ("PERCENTILES", total),
+            ("PERCENTILES_POR_GRUPO", abierto),
+            ("REPARTO_VARIACION", reparto),
+            ("REGLAS", reglas)]
 
+
+def excel_detalle() -> bytes:
+    """
+    Un solo libro con todo lo que hay en pantalla, en vez de un CSV por tabla.
+
+    Va con los numeros CRUDOS, no con el texto formateado: en Excel se siguen
+    pudiendo sumar y ordenar, y el separador de miles lo pone el Excel de quien
+    lo abra. La hoja FILTROS deja escrito con que seleccion se saco, que es lo
+    primero que se pregunta cuando el archivo cambia de manos.
+
+    El decorado -encabezado azul, formato de pesos, anchos- es API de
+    xlsxwriter. Con openpyxl se escribe lo mismo pero sin decorar: mejor un
+    libro feo que ningun libro.
+    """
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as xw:
-        libro = xw.book
-        f_tit = libro.add_format({"bold": True, "bg_color": "#1e3a8a",
-                                  "font_color": "#ffffff", "border": 1})
-        f_pesos = libro.add_format({"num_format": "$ #,##0"})
-        f_pct = libro.add_format({"num_format": "0.00 %"})
-        f_ent = libro.add_format({"num_format": "#,##0"})
-        for nombre, t in hojas:
+    with pd.ExcelWriter(buf, engine=MOTOR_EXCEL) as xw:
+        libro = xw.book if MOTOR_EXCEL == "xlsxwriter" else None
+        if libro is not None:
+            f_tit = libro.add_format({"bold": True, "bg_color": "#1e3a8a",
+                                      "font_color": "#ffffff", "border": 1})
+            f_pesos = libro.add_format({"num_format": "$ #,##0"})
+            f_pct = libro.add_format({"num_format": "0.00 %"})
+            f_ent = libro.add_format({"num_format": "#,##0"})
+        for nombre, t in _hojas_detalle():
             if t is None or t.empty:
                 continue
             t.to_excel(xw, sheet_name=nombre, index=False)
+            if libro is None:
+                continue
             h = xw.sheets[nombre]
             for i, col in enumerate(t.columns):
                 h.write(0, i, str(col), f_tit)
@@ -617,23 +741,131 @@ def excel_detalle() -> bytes:
     return buf.getvalue()
 
 
+def csv_detalle() -> bytes:
+    """
+    Plan B cuando no hay motor de Excel: las mismas tablas, una debajo de otra
+    en un solo archivo, con su nombre de hoja como separador.
+    """
+    partes = []
+    for nombre, t in _hojas_detalle():
+        if t is None or t.empty:
+            continue
+        partes.append(f"### {nombre}")
+        partes.append(t.to_csv(index=False))
+    return "\n".join(partes).encode("utf-8-sig")
+
+
+def excel_predios(d: pd.DataFrame) -> bytes:
+    """
+    El detalle fila a fila a Excel, para revisar casos a mano.
+
+    Es el mismo libro que escribe comparacion_vigencia.py en results/, pero
+    armado sobre lo que este filtrado en pantalla y en memoria, sin pasar por
+    disco. Dos hojas:
+
+        Detalle       una fila por construccion, con autofiltro y las dos
+                      primeras columnas congeladas para que el identificador no
+                      se pierda al desplazarse a la derecha
+        Diccionario   que es cada columna y de donde sale, para que quien abra
+                      el archivo no tenga que venir a leer el codigo
+
+    Sin constant_memory a proposito: ese modo obliga a escribir en orden de
+    fila y pandas emite columna por columna, asi que la hoja saldria en blanco.
+    Por eso la hoja Detalle va con tope de filas, no con el universo completo.
+    """
+    d = d.copy()
+    for c in d.columns:
+        if isinstance(d[c].dtype, pd.CategoricalDtype):
+            d[c] = d[c].astype(str)
+
+    dic = pd.DataFrame(
+        [(col, desc, nota) for col, desc, nota in DICCIONARIO_DETALLE
+         if col in d.columns],
+        columns=["COLUMNA", "QUÉ ES", "DE DÓNDE SALE"])
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine=MOTOR_EXCEL) as xw:
+        libro = xw.book if MOTOR_EXCEL == "xlsxwriter" else None
+        if libro is not None:
+            f_tit = libro.add_format({"bold": True, "bg_color": "#1F4E78",
+                                      "font_color": "white", "border": 1,
+                                      "align": "center", "valign": "vcenter",
+                                      "text_wrap": True})
+            f_pesos = libro.add_format({"num_format": "$ #,##0"})
+            f_pct = libro.add_format({"num_format": "0.00"})
+            f_ent = libro.add_format({"num_format": "#,##0"})
+            f_texto = libro.add_format({"text_wrap": True, "valign": "top"})
+
+        for nombre, t in (("Detalle", d), ("Diccionario", dic)):
+            if t.empty:
+                continue
+            t.to_excel(xw, sheet_name=nombre, index=False)
+            if libro is None:
+                continue
+            h = xw.sheets[nombre]
+            h.freeze_panes(1, 2 if nombre == "Detalle" else 0)
+            h.autofilter(0, 0, len(t), len(t.columns) - 1)
+            for i, col in enumerate(t.columns):
+                h.write(0, i, str(col), f_tit)
+                nom = str(col)
+                if nombre == "Diccionario":
+                    fmt, ancho = f_texto, (26 if i == 0 else 60)
+                elif nom.startswith(("VM2", "VALORCONS", "AVALUO", "AVALPRED",
+                                     "VTER", "VANEXO", "DIF_")):
+                    fmt, ancho = f_pesos, 20
+                elif nom.startswith("VARIACION") or nom.endswith("_PCT"):
+                    fmt, ancho = f_pct, 16
+                elif nom in ("PUNTCONS", "ACONCONS", "AREA_CONST", "ESTRPRED",
+                             "CONDICION", "N_CONST_PREDIO"):
+                    fmt, ancho = f_ent, 14
+                else:
+                    largo = int(t[col].astype(str).str.len().head(500).max() or 12)
+                    fmt, ancho = None, min(max(14, largo + 3, len(nom) + 3), 40)
+                h.set_column(i, i, ancho, fmt)
+    return buf.getvalue()
+
+
 # ---------------------------------------------------------------------
 # HOJA 1 - TABLAS
 # ---------------------------------------------------------------------
 with hoja_tablas:
     st.subheader(f"Tablas · {etiqueta_medida} · base {etiqueta_base.lower()}")
 
-    st.download_button(
-        "⬇️ Descargar el Excel del detalle",
-        data=excel_detalle(),
-        file_name=(f"comparacion_{V_BASE}_{V_LIQ}_{medida['prefijo']}"
-                   f"_{col_apertura}.xlsx"),
-        mime=("application/vnd.openxmlformats-officedocument"
-              ".spreadsheetml.sheet"),
-        type="primary", key="xlsx_detalle",
-        help="Un solo libro con el resumen, los percentiles -del total y "
-             "abiertos por grupo-, el reparto de la variación, las reglas y "
-             "los filtros con que se sacó.")
+    # La descarga NO puede tumbar el reporte. Si falta el motor de Excel o el
+    # libro falla por lo que sea, se baja a CSV y las tres hojas siguen vivas:
+    # a esta app se entra a mirar los numeros, bajarlos es lo secundario.
+    nombre_archivo = (f"comparacion_{V_BASE}_{V_LIQ}_{medida['prefijo']}"
+                      f"_{col_apertura}")
+    ayuda = ("Todo junto: el resumen, los percentiles -del total y abiertos "
+             "por grupo-, el reparto de la variación, las reglas y los "
+             "filtros con que se sacó.")
+    problema = None
+    if MOTOR_EXCEL:
+        try:
+            st.download_button(
+                "⬇️ Descargar el Excel del detalle",
+                data=excel_detalle(),
+                file_name=f"{nombre_archivo}.xlsx",
+                mime=("application/vnd.openxmlformats-officedocument"
+                      ".spreadsheetml.sheet"),
+                type="primary", key="xlsx_detalle", help=ayuda)
+        except Exception as exc:                         # pragma: no cover
+            problema = f"No se pudo armar el Excel ({exc})."
+    else:
+        problema = ("Este entorno no tiene instalado **xlsxwriter**, que es "
+                    "con lo que se arma el Excel.")
+
+    if problema:
+        st.download_button(
+            "⬇️ Descargar el detalle (CSV)",
+            data=csv_detalle(), file_name=f"{nombre_archivo}.csv",
+            mime="text/csv", type="primary", key="csv_detalle", help=ayuda)
+        st.caption(
+            f"{problema} Va el mismo detalle en un CSV, con las tablas una "
+            "debajo de otra. Para recuperar el Excel: `xlsxwriter` tiene que "
+            "estar en `requirements.txt` y hay que reiniciar la app desde "
+            "**Manage app › Reboot app** —cambiar el archivo no basta, el "
+            "entorno no se reinstala solo—.")
 
     st.divider()
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
@@ -772,6 +1004,205 @@ with hoja_graf:
                      alt.Tooltip("%:Q", title="% del total", format=",.1f")],
         ).properties(height=300).configure(locale=LOCALE_VEGA),
         width="stretch")
+
+
+
+# ---------------------------------------------------------------------
+# HOJA 3 - DETALLE DE LA LIQUIDACION
+# ---------------------------------------------------------------------
+# Dos cosas distintas, y conviene no confundirlas:
+#
+#   1. El LIBRO DEL REPORTE (results/COMPARACION_VIGENCIA_<fecha>.xlsx). Es el
+#      mismo archivo que hoy se baja a mano, con las ocho hojas de siempre. Se
+#      entrega tal cual, sin volver a armarlo: pesa 47 KB y no lleva ni
+#      ID_PREDIO ni numero predial, asi que puede salir publicado sin problema.
+#
+#   2. El EXPLORADOR fila a fila, que vive de
+#      COMPARACION_VIGENCIA_DETALLE.parquet. Ese SI lleva identificadores y el
+#      .gitignore lo deja fuera del repositorio, asi que en local funciona y en
+#      el deploy publico no esta y se dice, en vez de reventar.
+with hoja_detalle:
+    st.subheader("Detalle de la liquidación")
+
+    @st.cache_data(show_spinner=False)
+    def leer_reporte(ruta: str, marca_tiempo: float) -> bytes:
+        """El libro del reporte tal cual esta en disco, sin tocarle nada."""
+        with open(ruta, "rb") as f:
+            return f.read()
+
+    libro = reporte_mas_reciente()
+    if libro is None:
+        st.info(
+            "**No se encontró el libro del reporte.** Se busca el "
+            "`COMPARACION_VIGENCIA_<fecha>.xlsx` más reciente en "
+            f"`{CARPETA_REPORTE.relative_to(RAIZ)}`. Lo escribe "
+            "`python src/comparacion_vigencia.py` al terminar.")
+    else:
+        st.markdown("**El libro completo de la liquidación**")
+        st.download_button(
+            "📗 Ver el detalle de la liquidación",
+            data=leer_reporte(str(libro), libro.stat().st_mtime),
+            # La copia fija no lleva fecha en el nombre; se la pone la del
+            # archivo, para que el que se baja del deploy se pueda identificar
+            # igual que el que se saca a mano.
+            file_name=(libro.name if libro != RUTA_REPORTE_FIJA else
+                       f"COMPARACION_VIGENCIA_"
+                       f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y%m%d}"
+                       f".xlsx"),
+            mime=("application/vnd.openxmlformats-officedocument"
+                  ".spreadsheetml.sheet"),
+            type="primary", key="dl_reporte",
+            help="Es el mismo archivo que se descarga hoy a mano, entregado "
+                 "tal cual: General, Resumen VM2, Resumen Avalúos, Reglas, "
+                 "Conclusiones, Selección por comuna, Comparación tablas y "
+                 "Rangos de variación.")
+        st.caption(
+            f"`{libro.name}` · {_miles(libro.stat().st_size / 1024, 0)} KB · "
+            f"generado el "
+            f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}. "
+            "No responde a los filtros de la izquierda: es el libro completo "
+            "de la corrida, igual al que produce el proceso.")
+
+    st.divider()
+    st.markdown("**Explorador predio a predio**")
+
+    if not os.path.exists(RUTA_DETALLE):
+        st.info(
+            f"**{RUTA_DETALLE.name} no está en este despliegue.** Es el "
+            "archivo con el detalle fila a fila, y lleva ID_PREDIO y número "
+            "predial de 288 mil predios, así que el `.gitignore` lo deja "
+            "fuera del repositorio a propósito: este repositorio es público. "
+            "Corriendo la app en local el explorador funciona completo; si no "
+            "tiene el archivo, genérelo con `python src/comparacion_vigencia.py`.")
+    else:
+        det = cargar_detalle(str(RUTA_DETALLE), os.path.getmtime(RUTA_DETALLE))
+        detf = filtrar(det)
+
+        st.caption("Esto SÍ trae identificadores: ID_PREDIO y número predial. "
+                   "Responde a los mismos filtros de la barra lateral que las "
+                   "demás hojas, más los de aquí abajo.")
+
+        f1, f2, f3 = st.columns([2, 1, 1])
+        busca = f1.text_input(
+            "Buscar por ID_PREDIO o número predial",
+            placeholder="uno o varios, separados por espacio o coma",
+            help="Coincidencia exacta en cualquiera de las dos columnas. Pasa "
+                 "por encima de los filtros de la barra lateral para que un "
+                 "predio concreto siempre aparezca.")
+        rangos_disp = (sorted(detf["RANGO_VARIACION"].dropna().unique())
+                       if "RANGO_VARIACION" in detf.columns else [])
+        sel_rango = f2.multiselect("Rango de variación", rangos_disp)
+        solo_fuera = f3.checkbox(
+            "Solo fuera de tolerancia", value=False,
+            help="La marca FUERA_TOLERANCIA de comparacion_vigencia.py.",
+            disabled="FUERA_TOLERANCIA" not in detf.columns)
+
+        if busca.strip():
+            claves = {t.strip() for t in busca.replace(",", " ").split()
+                      if t.strip()}
+            detf = det[det["ID_PREDIO"].isin(claves)
+                       | det["NUMERO_PREDIAL_NACIONAL"].isin(claves)]
+            st.caption(f"Búsqueda directa sobre el detalle completo: "
+                       f"{entero(len(detf))} filas para "
+                       f"{entero(len(claves))} clave(s). Los filtros de la "
+                       f"barra lateral no se aplican.")
+        else:
+            if sel_rango:
+                detf = detf[detf["RANGO_VARIACION"].isin(sel_rango)]
+            if solo_fuera and "FUERA_TOLERANCIA" in detf.columns:
+                detf = detf[detf["FUERA_TOLERANCIA"].astype(str)
+                            .isin(["1", "True", "true", "SI", "SÍ"])]
+
+        if detf.empty:
+            st.warning("Ninguna construcción cumple lo pedido.")
+        else:
+            # Columnas: las fijas mas las cuatro de la medida elegida arriba,
+            # para que responda al radio de la barra lateral igual que el resto
+            # y no haya que buscar entre cincuenta columnas.
+            cols_medida = [c for c in (medida["vig"], medida["liq"],
+                                       medida.get("dif"), medida["var"])
+                           if c and c in detf.columns]
+            cortas = ([c for c in COLUMNAS_DETALLE_FIJAS if c in detf.columns]
+                      + cols_medida)
+
+            c1, c2 = st.columns([1, 1])
+            vista = c1.radio(
+                "Columnas", ["Las de la medida elegida", "Todas"],
+                horizontal=True,
+                help=f"La vista corta deja los identificadores y las cuatro "
+                     f"columnas de {etiqueta_medida.lower()} "
+                     f"{etiqueta_base.lower()}. La completa trae las "
+                     f"{len(detf.columns)} del archivo.")
+            n_ver = c2.number_input(
+                "Filas en pantalla", 50, 5000, 300, step=50,
+                help="Solo cuántas se dibujan aquí. La descarga no depende "
+                     "de esto.")
+
+            cols = cortas if vista.startswith("Las") else list(detf.columns)
+            st.caption(f"**{entero(len(detf))} construcciones** cumplen la "
+                       f"selección · se muestran las primeras {entero(n_ver)}")
+            st.dataframe(con_formato(detf[cols].head(int(n_ver))),
+                         width="stretch", hide_index=True)
+
+            st.divider()
+            st.markdown("**Bajar esta selección**")
+
+            # NADA se arma antes de que lo pidan. st.download_button construye
+            # el dato ANTES de que nadie haga clic, y aqui eso serian 200 MB de
+            # CSV -o tres minutos de Excel- en CADA interaccion con la pagina.
+            # Por eso va en dos pasos, y lo preparado se guarda con la FIRMA de
+            # la seleccion: si se cambia un filtro, el archivo listo deja de
+            # ofrecerse en vez de entregar algo que ya no corresponde.
+            g1, g2 = st.columns([1, 1])
+            formato = g1.radio("Formato", ["Excel", "CSV"], horizontal=True,
+                               help="El Excel va a unas 1.500 filas por "
+                                    "segundo y trae la hoja Diccionario. El "
+                                    "CSV no tiene tope y es mucho más rápido.")
+            tope = g2.number_input(
+                "Filas al Excel", 500, 50000, 5000, step=500,
+                disabled=formato != "Excel",
+                help="5.000 filas tardan ~4 s; 50.000, cerca de medio minuto.")
+
+            recorte = detf.head(int(tope)) if formato == "Excel" else detf
+            if formato == "Excel" and len(detf) > len(recorte):
+                st.warning(f"El Excel llevará {entero(len(recorte))} de las "
+                           f"{entero(len(detf))} filas. Para llevarlas todas, "
+                           f"use el CSV o afine los filtros.")
+
+            firma = (medida["prefijo"], tuple(sel_familia), tuple(sel_tabla),
+                     tuple(sel_comuna), tuple(sel_actividad), tuple(sel_grupo),
+                     busca.strip(), tuple(sel_rango), bool(solo_fuera),
+                     formato, int(tope), len(detf))
+
+            if st.button(f"🧾 Preparar el {formato}", type="secondary",
+                         disabled=formato == "Excel" and not MOTOR_EXCEL,
+                         help=None if MOTOR_EXCEL else
+                         "Este entorno no tiene xlsxwriter instalado."):
+                with st.spinner(f"Armando el {formato} "
+                                f"({entero(len(recorte))} filas)…"):
+                    st.session_state["descarga"] = {
+                        "firma": firma,
+                        "n": len(recorte),
+                        "datos": (excel_predios(recorte) if formato == "Excel"
+                                  else recorte.to_csv(index=False)
+                                              .encode("utf-8-sig")),
+                        "nombre": (f"DETALLE_PREDIOS_{V_BASE}_{V_LIQ}"
+                                   f".{'xlsx' if formato == 'Excel' else 'csv'}"),
+                        "mime": ("application/vnd.openxmlformats-officedocument"
+                                 ".spreadsheetml.sheet" if formato == "Excel"
+                                 else "text/csv")}
+
+            listo = st.session_state.get("descarga")
+            if listo and listo["firma"] == firma:
+                st.download_button(
+                    f"⬇️ Descargar {listo['nombre']} "
+                    f"({entero(listo['n'])} filas · "
+                    f"{_miles(len(listo['datos']) / 1e6, 1)} MB)",
+                    data=listo["datos"], file_name=listo["nombre"],
+                    mime=listo["mime"], type="primary", key="dl_predios")
+            elif listo:
+                st.caption("Cambió la selección: vuelva a preparar la "
+                           "descarga para no bajar lo de antes.")
 
 
 
