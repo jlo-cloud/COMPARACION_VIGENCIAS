@@ -55,9 +55,23 @@ output/COMPARACION_VIGENCIA_DETALLE.parquet   (44.7 MB, CON identificadores)
     Subirlo tal como esta hoy publica el numero predial de 288 mil predios, y
     del historial de git eso no se saca borrando el archivo despues.
 
-Trae solo los predios comparables (una sola construccion y valor de tabla en
-las dos vigencias), asi que la app no vuelve a filtrar nada de eso: lo que se
-ve aqui es exactamente el universo del reporte.
+Trae solo los predios comparables -aquellos cuyas construcciones se liquidan
+TODAS por la tabla residencial, la de edificios o la comercial, y con valor de
+tabla en las dos vigencias-, asi que la app no vuelve a filtrar nada de eso: lo
+que se ve aqui es exactamente el universo del reporte.
+
+DOS GRANOS, y la medida elegida decide cual se lee:
+
+    Valor por m2              va por CONSTRUCCION. Un predio de tres
+                              construcciones aporta tres registros.
+    Valor construido total    van por PREDIO. El valor de las construcciones
+    Avaluo                    del predio ya viene sumado, y el terreno y el
+                              anexo contados una sola vez.
+
+Por eso el conteo de arriba cambia al cambiar de medida: no es un error, son
+dos poblaciones distintas. Estan en dos parquet separados a proposito; con el
+avaluo repetido en cada construccion, un predio de tres pesaria el triple en
+cualquier percentil.
 
 Uso
 ---
@@ -75,7 +89,14 @@ import pandas as pd
 import streamlit as st
 
 RAIZ = Path(__file__).resolve().parent.parent
+# Las dos fuentes anonimas, una por GRANO. Una construccion no es un predio:
+# desde que entran predios de varias construcciones, el VM2 vive en el grano de
+# construccion -y ahi el predio se repite- mientras que el valor construido
+# total y el avaluo viven en el de predio. Tenerlos en un solo archivo haria que
+# un predio de tres construcciones pesara el triple en cualquier percentil de
+# avaluo, sin que nada lo delatara.
 RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
+RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
 
 # El libro de revision que escribe comparacion_vigencia.py en cada corrida:
@@ -192,11 +213,17 @@ AZUL, NARANJA = "#2a78d6", "#eb6834"
 # comuna: 0.7 en las actualizadas en 2024-2025 y 0.6 en el resto. Por eso la
 # variacion comercial NO es igual a la catastral: la liquidacion se baja con un
 # 0.7 parejo y la vigencia no.
+# (clave, titulo, grano). El grano decide de cual de los dos parquet se lee y
+# como se cuenta: el VM2 es de la construccion, el valor construido total y el
+# avaluo son del predio.
 MEDIDAS = {
-    "Valor por m²": ("VM2", "Valor por m²"),
-    "Valor total construido": ("VALORCONS", "Valor total construido"),
-    "Avalúo": ("AVALUO", "Avalúo"),
+    "Valor por m²": ("VM2", "Valor por m²", "construccion"),
+    "Valor total construido": ("VALORCONS", "Valor total construido", "predio"),
+    "Avalúo": ("AVALUO", "Avalúo", "predio"),
 }
+# Como se llama lo que se esta contando, en singular y plural, segun el grano.
+UNIDAD = {"construccion": ("construcción", "construcciones"),
+          "predio": ("predio", "predios")}
 BASES = {"Catastral": "CATASTRAL", "Comercial": "COMERCIAL"}
 
 SERIES = {
@@ -300,19 +327,26 @@ APERTURAS = {
     "Tabla y actividad juntas (como en el reporte)": "CLAVE",
 }
 
-# Todo lo que trae el parquet publico. Si alguna vez hay que sumar una columna,
-# revisar primero que no permita senalar a un predio en concreto.
-COLUMNAS = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "TABLA_VALOR",
-            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
-            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
-            "VARIACION_VALORCONS_CAT_PCT",
-            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
-            "VARIACION_VALORCONS_COM_PCT",
-            "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT",
-            "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
-            "VARIACION_AVALUO_CAT_PCT",
-            "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT",
-            "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"]
+# Lo que se lee de cada parquet. Se piden por nombre y no con un read_parquet
+# pelado para no arrastrar columnas que no se usan; las que no esten en el
+# archivo se ignoran solas. Si alguna vez hay que sumar una, revisar primero
+# que no permita senalar a un predio en concreto.
+COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
+           "ACTIVIDAD_ECONOMICA", "CLAVE",
+           "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
+           "VARIACION_VALORCONS_CAT_PCT",
+           "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
+           "VARIACION_VALORCONS_COM_PCT"]
+
+COLUMNAS = COMUNES + [
+    "TABLA_VALOR",
+    "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "VARIACION_CAT_PCT",
+    "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"]
+
+COLUMNAS_PREDIO = COMUNES + [
+    "N_CONST_PREDIO", "N_TABLAS_PREDIO",
+    "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ", "VARIACION_AVALUO_CAT_PCT",
+    "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"]
 
 
 st.set_page_config(page_title=f"Comparación de vigencias {V_BASE} → {V_LIQ}",
@@ -351,21 +385,23 @@ st.markdown(
 # DATOS
 # =====================================================================
 @st.cache_data(show_spinner="Leyendo el detalle de la comparación…")
-def cargar(ruta: str, marca_tiempo: float) -> pd.DataFrame:
+def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     """
-    El detalle, con solo las columnas que usa la app.
+    Uno de los dos recortes anonimos, con solo las columnas que usa la app.
 
     marca_tiempo es la fecha del archivo: no se usa adentro, pero al entrar en
     la firma hace que el cache se invalide solo cuando se vuelve a correr
-    comparacion_vigencia.py, sin tener que reiniciar la app.
+    comparacion_vigencia.py, sin tener que reiniciar la app. Y grano tambien
+    entra en la firma, asi que los dos archivos se cachean por separado.
     """
+    columnas = COLUMNAS_PREDIO if grano == "predio" else COLUMNAS
     try:
         import pyarrow.parquet as pq
         hay = set(pq.ParquetFile(ruta).schema_arrow.names)
-        d = pd.read_parquet(ruta, columns=[c for c in COLUMNAS if c in hay])
+        d = pd.read_parquet(ruta, columns=[c for c in columnas if c in hay])
     except ImportError:                                      # pragma: no cover
         d = pd.read_parquet(ruta)
-        d = d[[c for c in COLUMNAS if c in d.columns]]
+        d = d[[c for c in columnas if c in d.columns]]
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     for c in ("TABLA_ORIGEN", "TABLA_VALOR", "USO_LADM",
               "ACTIVIDAD_ECONOMICA", "CLAVE"):
@@ -423,37 +459,52 @@ if not os.path.exists(RUTA_DATOS):
     )
     st.stop()
 
-df = cargar(str(RUTA_DATOS), os.path.getmtime(RUTA_DATOS))
-
-st.markdown(
-    f"""
-    <div class="app-hero">
-        <h1>🏙️ Comparación de vigencias · {V_BASE} → {V_LIQ}</h1>
-        <p>La liquidación ({V_LIQ}) contra lo que cobra hoy la base
-        ({V_BASE}) · <b>{entero(len(df))} predios</b> de una sola construcción
-        con valor de tabla en las dos vigencias.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+df_construccion = cargar(str(RUTA_DATOS), os.path.getmtime(RUTA_DATOS),
+                         "construccion")
+df_predio = (cargar(str(RUTA_PREDIO), os.path.getmtime(RUTA_PREDIO), "predio")
+             if os.path.exists(RUTA_PREDIO) else None)
 
 
 # =====================================================================
-# FILTROS (uno solo para las tres hojas)
+# FILTROS (uno solo para todas las hojas)
 # =====================================================================
+# La barra lateral va ANTES del encabezado en el codigo, no por gusto: la
+# medida elegida decide de cual de los dos parquet se lee, y el encabezado
+# tiene que poder decir si esta contando predios o construcciones. Streamlit
+# dibuja el sidebar aparte, asi que el encabezado sigue saliendo arriba del
+# todo en la pantalla.
 with st.sidebar:
     st.header("⚙️ Filtros")
-    st.caption("Se aplican a las tres hojas. Vacío = todo.")
+    st.caption("Se aplican a todas las hojas. Vacío = todo.")
 
-    etiqueta_medida = st.radio("Medida", list(MEDIDAS), index=0)
+    etiqueta_medida = st.radio(
+        "Medida", list(MEDIDAS), index=0,
+        help="El valor por m² es de cada CONSTRUCCIÓN; el valor construido "
+             "total y el avalúo son del PREDIO completo, sumando sus "
+             "construcciones. Por eso al cambiar de medida cambia el conteo.")
     etiqueta_base = st.radio(
         "Base de valor", list(BASES), index=0, horizontal=True,
         help="Catastral es lo que se cobra. Comercial es lo que se estima que "
              "vale: el catastral de la vigencia dividido por 0,7 en las comunas "
              "actualizadas en 2024-2025 y por 0,6 en las demás.")
-    clave_medida, titulo_medida = MEDIDAS[etiqueta_medida]
+    clave_medida, titulo_medida, grano = MEDIDAS[etiqueta_medida]
     medida = SERIES[(clave_medida, BASES[etiqueta_base])]
     unidad_eje = f"{titulo_medida} {etiqueta_base.lower()} (millones de pesos)"
+    unidad, unidades = UNIDAD[grano]
+    # Los conteos se llaman como lo que cuentan: PREDIOS o CONSTRUCCIONES. Con
+    # un nombre fijo, la tabla de la medida por m2 diria "PREDIOS" sobre una
+    # columna que cuenta construcciones, y nadie lo notaria.
+    COL_N = unidades.upper()
+    COL_NUM = f"NUM_{COL_N}"
+
+    # De aqui en adelante 'df' es el parquet del grano que corresponda, y todo
+    # lo demas -filtros, tablas, graficos- trabaja sobre el sin enterarse.
+    if grano == "predio" and df_predio is None:
+        st.error(f"Falta {RUTA_PREDIO.name}, que es de donde salen el valor "
+                 f"construido total y el avalúo. Corra "
+                 f"`python src/comparacion_vigencia.py`.")
+        st.stop()
+    df = df_predio if grano == "predio" else df_construccion
 
     familias = sorted({t.split("_")[0] + "_" + t.split("_")[1]
                        for t in df["TABLA_ORIGEN"].unique() if "_" in t})
@@ -482,9 +533,9 @@ with st.sidebar:
              "por cada comuna.")
     col_apertura = APERTURAS[etiqueta_apertura]
     min_predios = st.number_input(
-        "Mínimo de predios por grupo", 1, 5000, 5,
-        help="Los grupos con menos predios de los que se pidan aquí no se "
-             "muestran: con tan pocos casos una mediana no dice nada.")
+        f"Mínimo de {unidades} por grupo", 1, 5000, 5,
+        help=f"Los grupos con menos {unidades} de los que se pidan aquí no se "
+             f"muestran: con tan pocos casos una mediana no dice nada.")
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     """
@@ -510,11 +561,24 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
 
 
+st.markdown(
+    f"""
+    <div class="app-hero">
+        <h1>🏙️ Comparación de vigencias · {V_BASE} → {V_LIQ}</h1>
+        <p>La liquidación ({V_LIQ}) contra lo que cobra hoy la base
+        ({V_BASE}) · <b>{entero(len(df))} {unidades}</b> ·
+        {titulo_medida.lower()}, base {etiqueta_base.lower()}. Solo predios con
+        todas sus construcciones valoradas por tabla en las dos vigencias.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 dff = filtrar(df)
 
 if dff.empty:
-    st.warning("Ningún predio cumple los filtros elegidos. Quite alguno en la "
-               "barra lateral.")
+    st.warning(f"Ningún {unidad} cumple los filtros elegidos. Quite alguno en "
+               f"la barra lateral.")
     st.stop()
 
 c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
@@ -526,7 +590,7 @@ c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
 c_dif = f"DIFERENCIA_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}"
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Predios", entero(len(dff)),
+k1.metric(unidades.capitalize(), entero(len(dff)),
           f"{pct(len(dff) / len(df) * 100, 1)} del total")
 k2.metric(f"Mediana vigencia {V_BASE}", pesos(dff[medida["vig"]].median()))
 k3.metric(f"Mediana vigencia {V_LIQ}", pesos(dff[medida["liq"]].median()))
@@ -554,7 +618,7 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
     for p in PERCENTILES:
         pv, pl = float(v.quantile(p / 100)), float(l.quantile(p / 100))
         filas.append({"PERCENTIL": f"{p}%",
-                      "NUM_PREDIOS": int(round(p / 100 * len(s))),
+                      COL_NUM: int(round(p / 100 * len(s))),
                       c_base: pv, c_liq: pl,
                       c_dif: pl - pv,
                       c_var: (pl / pv - 1) if pv else None})
@@ -598,7 +662,8 @@ def con_formato(t: pd.DataFrame):
             reglas[col] = lambda v: pct(v, 2, signo=True)
         elif col.endswith("_%"):                 # BAJAN_% y SUBEN_% son
             reglas[col] = lambda v: pct(v, 2)    # proporciones, no variaciones
-        elif col in ("NUM_PREDIOS", "PREDIOS"):
+        elif col in (COL_N, COL_NUM, "NUM_PREDIOS", "PREDIOS",
+                     "N_CONST_PREDIO", "N_TABLAS_PREDIO"):
             reglas[col] = entero
     return t.style.format(reglas)
 
@@ -613,14 +678,14 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     """
     g = d.groupby(col, sort=True)
     t = pd.DataFrame({
-        "PREDIOS": g.size(),
+        COL_N: g.size(),
         c_base: g[medida["vig"]].median(),
         c_liq: g[medida["liq"]].median(),
         "VAR_MEDIANA_%": g[medida["var"]].median(),
         "BAJAN_%": g[medida["var"]].apply(lambda s: (s < 0).mean() * 100),
         "SUBEN_%": g[medida["var"]].apply(lambda s: (s > 0).mean() * 100),
     })
-    t = t[t["PREDIOS"] >= min_predios]
+    t = t[t[COL_N] >= min_predios]
     if t.empty:
         return pd.DataFrame()
 
@@ -633,7 +698,7 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     # columnas: una mediana no se suma, se vuelve a calcular sobre el conjunto.
     sub = d[d[col].isin(grupos_ok)]
     fila = {etiqueta_apertura: "TOTAL",
-            "PREDIOS": len(sub),
+            COL_N: len(sub),
             c_base: sub[medida["vig"]].median(),
             c_liq: sub[medida["liq"]].median(),
             "VAR_MEDIANA_%": sub[medida["var"]].median(),
@@ -663,8 +728,8 @@ reparto = (dff[medida["var"]]
                  bins=[-float("inf"), -50, -25, -10, 10, 25, 50, float("inf")],
                  labels=RANGOS)
            .value_counts(sort=False)
-           .rename_axis("RANGO").reset_index(name="PREDIOS"))
-reparto["%"] = reparto["PREDIOS"] / reparto["PREDIOS"].sum() * 100
+           .rename_axis("RANGO").reset_index(name=COL_N))
+reparto["%"] = reparto[COL_N] / reparto[COL_N].sum() * 100
 
 
 def _motor_excel():
@@ -771,10 +836,12 @@ with hoja_tablas:
     # que adivinara cual de los dos archivos es "el bueno".
 
     st.markdown(f"**Resumen por {etiqueta_apertura.lower()}**")
-    st.caption(f"Comparación de los valores **medianos** de cada grupo entre "
-               f"las vigencias {V_BASE} y {V_LIQ}.")
+    st.caption(
+        f"Comparación de la mediana de los valores de cada grupo entre las vigencias "
+        f"{V_BASE} y {V_LIQ}."
+    )
     if res.empty:
-        st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
+        st.info(f"Ningún grupo llega a {min_predios} {unidades} con estos filtros.")
     else:
         # El matiz de por que DIFERENCIA y VAR_MEDIANA_% no siempre concuerdan
         # -una compara distribuciones y la otra es predio contra si mismo- pasa
@@ -787,8 +854,9 @@ with hoja_tablas:
         st.dataframe(
             con_formato(res), width="stretch", hide_index=True,
             column_config={
-                "PREDIOS": st.column_config.Column(
-                    help="Construcciones del grupo que entran a la comparación."),
+                COL_N: st.column_config.Column(
+                    help=f"{unidades.capitalize()} del grupo que entran a la "
+                         f"comparación."),
                 c_base: st.column_config.Column(
                     help=f"Valor mediano del grupo en la vigencia {V_BASE}: la "
                          f"mitad de los predios está por debajo."),
@@ -810,11 +878,10 @@ with hoja_tablas:
                 "SUBEN_%": st.column_config.Column(
                     help="Qué proporción del grupo sube de una vigencia a otra."),
             })
-        st.caption("La fila **TOTAL** consolida todos los grupos: *PREDIOS* es la suma, mientras que las medianas y porcentajes se recalculan sobre el conjunto total es sobre los mismos grupos que se ven ")
 
     st.divider()
     st.markdown("**Percentiles, diferencia y variación** · "
-                f"{entero(len(dff))} predios")
+                f"{entero(len(dff))} {unidades}")
     st.caption(f"En cada corte: cuánto vale en la vigencia {V_BASE}, cuánto "
                f"valdría en la {V_LIQ}, cuántos pesos de diferencia hay entre "
                f"los dos y qué proporción representa esa diferencia.")
@@ -832,7 +899,9 @@ with hoja_graf:
         """Bajo el titulo va SOLO el conteo: es corto y nunca se corta."""
         if t.empty:
             return []
-        return [f"{entero(int(t['NUM_PREDIOS'].iloc[-1]))} predios comparados"]
+        return [f"{entero(int(t[COL_NUM].iloc[-1]))} {unidades} comparadas"
+                if grano == "construccion" else
+                f"{entero(int(t[COL_NUM].iloc[-1]))} {unidades} comparados"]
 
     def frase(t: pd.DataFrame) -> str:
         """
@@ -910,7 +979,7 @@ with hoja_graf:
     st.divider()
     st.markdown(f"**Por {etiqueta_apertura.lower()}**")
     if abierto.empty:
-        st.info(f"Ningún grupo llega a {min_predios} predios con estos filtros.")
+        st.info(f"Ningún grupo llega a {min_predios} {unidades} con estos filtros.")
     else:
         grupos = list(abierto[etiqueta_apertura].unique())
         # Con muchos grupos la grilla se vuelve ilegible; se muestran de a pocos
@@ -927,17 +996,16 @@ with hoja_graf:
                 col.caption(frase(t))
 
     st.divider()
-    st.markdown("**Cómo se reparte la variación**")
-    st.caption("Aquí sí es predio contra sí mismo, no distribución contra "
-               "distribución: cada predio cae en el rango de su propia "
-               "variación.")
+    st.markdown(f"**Distribución de {unidades} según variación porcentual**")
+    st.caption("Muestra cómo se distribuyen los predios según la variación porcentual de su valor entre las vigencias 2026 y 2027, comparando cada predio consigo mismo.")
     st.altair_chart(
         alt.Chart(reparto).mark_bar(color=AZUL, cornerRadiusEnd=3).encode(
             x=alt.X("RANGO:N", title=None, sort=list(reparto["RANGO"]),
                     axis=alt.Axis(labelAngle=0)),   # rotulos en horizontal
-            y=alt.Y("PREDIOS:Q", title="Predios"),
+            y=alt.Y(f"{COL_N}:Q", title=unidades.capitalize()),
             tooltip=[alt.Tooltip("RANGO:N", title="Rango"),
-                     alt.Tooltip("PREDIOS:Q", title="Predios", format=",.0f"),
+                     alt.Tooltip(f"{COL_N}:Q", title=unidades.capitalize(),
+                                 format=",.0f"),
                      alt.Tooltip("%:Q", title="% del total", format=",.1f")],
         ).properties(height=300).configure(locale=LOCALE_VEGA),
         width="stretch")

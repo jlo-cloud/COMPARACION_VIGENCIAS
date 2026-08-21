@@ -793,7 +793,7 @@ def tablas_liquidacion(df_const):
     # =============================================================================
     # (comunas_7 y comunas_10 se definen arriba, junto a las condiciones de tabla:
     #  son las mismas listas y no deben quedar dos versiones que se desincronicen)
-    ruta = "./input/Tablas_Valor_Consolidado_V1_20260805.xlsx"
+    ruta = "./input/Tablas_Valor_Consolidado_V1_20260821.xlsx"
 
     # Grupos de comunas usados tanto en CONVENCIONALES como en NO_CONVENCIONALES
     grupos_comunas = {'7': comunas_7, '10': comunas_10}
@@ -1392,7 +1392,10 @@ def tablas_liquidacion(df_const):
     #tabla_especiales['VM2_ESP_2026'] = 0
 
     tabla_especiales = df_const[df_const['TABLA_ORIGEN'] == 'ESPECIALES'].copy()
-    tabla_especiales['VM2_ESP_2026'] = 0
+    # 0.0 y no 0: la columna recibe mas abajo el VIM2_ESPECIAL, que trae
+    # decimales. Inicializada en entero, pandas 3 rechaza la asignacion con
+    # "Invalid value ... for dtype 'int64'" y tumba toda la liquidacion.
+    tabla_especiales['VM2_ESP_2026'] = 0.0
 
     #tabla_especiales['INTEGRAL_ESP_2026'] = 1
 
@@ -1430,10 +1433,13 @@ def tablas_liquidacion(df_const):
     print("\n📂 Cargando archivo de especiales...")
 
          # Inicializar columnas con 0
+    # Las dos primeras son banderas 0/1 y pueden ser enteras; las de VALOR van
+    # en flotante porque reciben el VIM2_ESPECIAL, que trae decimales (ver el
+    # comentario de tabla_especiales, mas arriba).
     df_const_liq['ESPECIAL_2026'] = 0
     df_const_liq['INTEGRAL_ESP_2026'] = 0
-    df_const_liq['VM2_ESP_2026'] = 0
-    df_const_liq['VM2_INT_ESP_2026'] = 0
+    df_const_liq['VM2_ESP_2026'] = 0.0
+    df_const_liq['VM2_INT_ESP_2026'] = 0.0
     df_const_liq['ORIGEN_ESPECIAL'] = ''
 
     print("   ✓ Columnas inicializadas")
