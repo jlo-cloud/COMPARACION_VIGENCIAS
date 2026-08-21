@@ -13,7 +13,8 @@ import gc
 
 from model_liq import ejecutar_modelos
 from perf import crono  # ⏱️ medición de tiempos
-from tabla_construccion import convertir_a_cero, convertir_a_float,convertir_a_string
+from tabla_construccion import (convertir_a_cero, convertir_a_float,
+                                convertir_a_string, COMUNAS_7, COMUNAS_10)
 
 
 
@@ -80,8 +81,11 @@ def tablas_liquidacion(df_const):
     # condiciones de TABLA_ORIGEN los necesitan; la carga del Excel los vuelve a
     # usar mas abajo. En las 10 comunas el residencial se separa por condicion
     # (COND_0 / COND_9); en las 7 no, y edificios no se separa en ninguna.
-    comunas_7 = ['02', '03', '04', '08', '17', '19', '22']
-    comunas_10 = ['01', '07', '09', '10', '11', '12', '14', '15', '20', '21']
+    # Los dos grupos viven en tabla_construccion.py, junto al interruptor que
+    # decide si las comunas 05, 06, 13, 16 y 18 entran o no. Aqui solo se leen:
+    # tener una segunda copia era la forma segura de que se desincronizaran.
+    comunas_7 = COMUNAS_7
+    comunas_10 = COMUNAS_10
 
     # Por ahora la liquidacion es solo por tablas. En True, las construcciones
     # de la condicion 2 salen de su tabla y pasan a TABLA_ORIGEN = 'MODELO';

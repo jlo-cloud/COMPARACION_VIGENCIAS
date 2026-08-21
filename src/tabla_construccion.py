@@ -12,6 +12,44 @@ from Homologacion import aplicar_homologacion, cruce_uso_ladm, homologar_rural
 from pre_inconsistencias import generar_reporte_inconsistencias
 from uso_principal import uso_principal_const
 
+
+# =====================================================================
+# ALCANCE URBANO: que comunas entran a la liquidacion
+# =====================================================================
+# Cali tiene 22 comunas urbanas y hasta ahora se liquidan 17. Las cinco que
+# faltan -05, 06, 13, 16 y 18- se descartan aqui mismo, antes de armar las
+# construcciones, asi que no llegan a ninguna etapa posterior: en el parquet
+# de salida no hay ni una sola fila de ellas.
+#
+# Para incluirlas hay que hacer DOS cosas, y este interruptor hace las dos:
+#   1. dejar de filtrarlas en este archivo, y
+#   2. meterlas en un grupo de las tablas de valor, porque si entran pero no
+#      pertenecen a ningun grupo el merge no les encuentra valor y se quedan
+#      con VM2 = 0, que es como no haber entrado.
+#
+#     INCLUIR_COMUNAS_FALTANTES = True   -> entran, y se liquidan leyendo las
+#                                           columnas *_10C_* de las tablas
+#     INCLUIR_COMUNAS_FALTANTES = False  -> como estaba: quedan fuera
+#
+# Es una sola linea para prender y apagar. Liquidacion_tablas.py lee de aqui
+# los dos grupos, asi que no hay una segunda lista que se pueda desincronizar.
+#
+# OJO: meterlas en el grupo de 10 es una DECISION, no algo que salga de los
+# datos. Significa cobrarles con los valores que se calcularon para las otras
+# diez comunas. Si mas adelante les hacen tabla propia, se agrega una columna
+# *_5C_* al Excel de tablas y estas cinco pasan a un grupo nuevo.
+INCLUIR_COMUNAS_FALTANTES = True
+
+COMUNAS_FALTANTES = ["05", "06", "13", "16", "18"]
+
+# Las que NO entran al proceso (se usa en los dos filtros de este archivo).
+COMUNAS_EXCLUIDAS = [] if INCLUIR_COMUNAS_FALTANTES else list(COMUNAS_FALTANTES)
+
+# Grupos con que se leen las tablas de valor (los usa Liquidacion_tablas.py).
+COMUNAS_7 = ['02', '03', '04', '08', '17', '19', '22']
+COMUNAS_10 = (['01', '07', '09', '10', '11', '12', '14', '15', '20', '21']
+              + (COMUNAS_FALTANTES if INCLUIR_COMUNAS_FALTANTES else []))
+
 def convertir_a_float(df, columnas):
     for col in columnas:
         if col in df.columns:
@@ -195,7 +233,7 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     
     df_predio['CONDICION'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(int)
     df_predio['COMUNA'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[9:11].astype(str)
-    df_predio = df_predio[~df_predio['COMUNA'].isin(["05", "06", "13", "16", "18"])]
+    df_predio = df_predio[~df_predio['COMUNA'].isin(COMUNAS_EXCLUIDAS)]
     print("Total de predios:", df_predio.shape)
 
            
@@ -320,7 +358,7 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
 
     df_const = df_const[
         df_const['COMUNA'].notna() &
-        ~df_const['COMUNA'].isin(["05", "06", "13", "16", "18"])
+        ~df_const['COMUNA'].isin(COMUNAS_EXCLUIDAS)
     ]
 
     print("Después:", len(df_const))
