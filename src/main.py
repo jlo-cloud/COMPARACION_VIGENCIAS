@@ -5,6 +5,7 @@ from datetime import datetime
 from tqdm import tqdm  # ✅ Barra de progreso
 
 # Importar funciones modulares
+from consolidar_tablas import consolidar_tablas, tabla_valor_vigente
 from tabla_construccion import procesar_construcciones, cruces_const_predio
 from Liquidacion_tablas import tablas_liquidacion
 from Liquidacion_final import liquidacion_completa
@@ -30,6 +31,7 @@ def main():
     crono.inicio("LIQUIDACION (main)")  # ⏱️
 
     pasos = [
+        "Consolidar tablas de valor",
         "Generar base de construcciones y predios",
         "Cruzar construcciones con predios",
         "Aplicar tablas de liquidación",
@@ -53,10 +55,33 @@ def main():
               bar_format="{l_bar}{bar} | {n_fmt}/{total_fmt} pasos") as pbar:
         
         # ============================================================
+        # PASO 0: CONSOLIDAR TABLAS DE VALOR
+        # ============================================================
+        # Del Consolidado_<fecha>.xlsx que deja el equipo de tablas en
+        # input/tablas/input/ sale el consolidado que lee la liquidacion. Si
+        # falla, se sigue con el que ya estuviera: no tiene sentido tumbar la
+        # corrida por no poder rearmar un archivo que quiza no cambio.
+        print(f"\n{'='*60}")
+        print(f"=== PASO 0: {pasos[0]} ===")
+        print(f"{'='*60}")
+        try:
+            ruta_tablas = consolidar_tablas()
+            print(f"✅ Tablas de valor consolidadas")
+            print(f"   - {ruta_tablas}")
+        except Exception as e:
+            vigente = tabla_valor_vigente()
+            print(f"⚠️ No se pudieron consolidar las tablas: {e}")
+            if vigente is None:
+                raise
+            print(f"   Se sigue con el consolidado que ya estaba: {vigente.name}")
+        pbar.update(1)
+        crono.marca("PASO 0: consolidar tablas")  # ⏱️
+
+        # ============================================================
         # PASO 1: GENERAR BASE DE CONSTRUCCIONES
         # ============================================================
         print(f"\n{'='*60}")
-        print(f"=== PASO 1: {pasos[0]} ===")
+        print(f"=== PASO 1: {pasos[1]} ===")
         print(f"{'='*60}")
         try:
             df_predio, df_conv, df_noconv = procesar_construcciones()
@@ -79,7 +104,7 @@ def main():
         # PASO 2: CRUCES PREDIO - CONSTRUCCIÓN
         # ============================================================
         print(f"\n{'='*60}")
-        print(f"=== PASO 2: {pasos[1]} ===")
+        print(f"=== PASO 2: {pasos[2]} ===")
         print(f"{'='*60}")
         try:
             df_const_predio_final = cruces_const_predio(df_predio, df_conv, df_noconv)
@@ -98,7 +123,7 @@ def main():
         # PASO 3: APLICAR TABLAS DE LIQUIDACIÓN
         # ============================================================
         print(f"\n{'='*60}")
-        print(f"=== PASO 3: {pasos[2]} ===")
+        print(f"=== PASO 3: {pasos[3]} ===")
         print(f"{'='*60}")
         try:
             df_liquidacion = tablas_liquidacion(df_const_predio_final)
@@ -117,7 +142,7 @@ def main():
         # PASO 4: GUARDAR RESULTADOS INTERMEDIOS
         # ============================================================
         print(f"\n{'='*60}")
-        print(f"=== PASO 4: {pasos[3]} ===")
+        print(f"=== PASO 4: {pasos[4]} ===")
         print(f"{'='*60}")
         try:
             fecha_actual = datetime.now().strftime('%Y%m%d')
@@ -149,13 +174,13 @@ def main():
         # guardada en el PASO 4, así que un problema del reporte (por ejemplo
         # el Excel abierto) no debe tumbar toda la corrida. Se avisa y se sigue.
         print(f"\n{'='*60}")
-        print(f"=== PASO 6: {pasos[5]} ===")
+        print(f"=== PASO 6: {pasos[6]} ===")
         print(f"{'='*60}")
         archivo_comparacion = None
         try:
             df_comparacion = comparacion_vigencia(df_liquidacion)
             archivo_comparacion = (f'./results/COMPARACION_VIGENCIA/'
-                                   f'COMPARACION_VIGENCIA_{fecha_actual}.xlsx')
+                                   f'DETALLE_LIQUIDADOS_{fecha_actual}.xlsx')
             print(f"✅ Comparación contra la vigencia 2026 generada")
             print(f"   - Construcciones comparadas: {len(df_comparacion):,}")
 
@@ -185,7 +210,7 @@ def main():
         # # PASO 5: LIQUIDACIÓN COMPLETA Y ARCHIVO FINAL
         # # ============================================================
         # print(f"\n{'='*60}")
-        # print(f"=== PASO 5: {pasos[4]} ===")
+        # print(f"=== PASO 5: {pasos[5]} ===")
         # print(f"{'='*60}")
         # try:
         #     df_predio_final = liquidacion_completa(
