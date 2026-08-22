@@ -13,6 +13,7 @@ import gc
 
 from model_liq import ejecutar_modelos
 from perf import crono  # ⏱️ medición de tiempos
+from consolidar_tablas import tabla_valor_vigente
 from tabla_construccion import (convertir_a_cero, convertir_a_float,
                                 convertir_a_string, COMUNAS_7, COMUNAS_10)
 
@@ -793,7 +794,16 @@ def tablas_liquidacion(df_const):
     # =============================================================================
     # (comunas_7 y comunas_10 se definen arriba, junto a las condiciones de tabla:
     #  son las mismas listas y no deben quedar dos versiones que se desincronicen)
-    ruta = "./input/Tablas_Valor_Consolidado_V1_20260821.xlsx"
+    # El consolidado mas reciente que dejo consolidar_tablas.py en
+    # input/tablas/output/. Sin nombre con fecha escrito a mano: se corre el
+    # consolidador y la liquidacion toma el nuevo sola.
+    ruta_tabla = tabla_valor_vigente()
+    if ruta_tabla is None:
+        raise FileNotFoundError(
+            "No hay Tablas_Valor_Consolidado_*.xlsx en input/tablas/output/. "
+            "Corra primero: python src/consolidar_tablas.py")
+    ruta = str(ruta_tabla)
+    print(f"Tablas de valor: {ruta_tabla.name}")
 
     # Grupos de comunas usados tanto en CONVENCIONALES como en NO_CONVENCIONALES
     grupos_comunas = {'7': comunas_7, '10': comunas_10}

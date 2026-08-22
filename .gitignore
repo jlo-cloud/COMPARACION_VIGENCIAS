@@ -30,16 +30,6 @@
 # construido total y el avaluo. Tampoco lleva identificadores.
 !/output/COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet
 
-# El libro del reporte, que la hoja Detalle de la app entrega tal cual con el
-# boton "Ver el detalle de la liquidacion". Son ~47 KB y ocho hojas AGREGADAS
-# -la mas larga tiene 54 filas-: ni ID_PREDIO ni numero predial, revisado.
-#
-# Es una COPIA de nombre fijo del COMPARACION_VIGENCIA_<fecha>.xlsx de la
-# corrida, que comparacion_vigencia.py deja aqui al terminar. Se versiona esta
-# y no la carpeta results/ a proposito: alli conviven corridas viejas de 4.4 MB
-# y el DETALLE_LIQUIDADOS de 57 MB, que SI lleva identificadores. Con un solo
-# nombre fijo, un 'git add .' distraido no puede arrastrar nada de eso.
-!/output/COMPARACION_VIGENCIA_REPORTE.xlsx
 
 # Basura de Python que vive dentro de src/
 __pycache__/

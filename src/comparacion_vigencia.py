@@ -27,6 +27,9 @@ RAIZ = Path(__file__).resolve().parent.parent
 # =====================================================================
 # CONFIGURACION
 # =====================================================================
+from consolidar_tablas import tabla_valor_vigente
+
+
 CONFIG = {
     "parquet_liquidacion": str(RAIZ / "output" / "LIQUIDACION_TABLAS.parquet"),
     "carpeta_results": str(RAIZ / "results" / "COMPARACION_VIGENCIA"),
@@ -43,8 +46,9 @@ CONFIG = {
     "factor_catastral": 0.7,
 
     # --- Catastral <-> comercial de la VIGENCIA -------------------------------
-    "excel_tablas_valor": str(RAIZ / "input" /
-                              "Tablas_Valor_Consolidado_V1_20260821.xlsx"),
+    # Lo resuelve tabla_valor_vigente() al arrancar: el consolidado mas nuevo
+    # de input/tablas/output/, el mismo que leyo la liquidacion.
+    "excel_tablas_valor": None,
     "comunas_7": ["02", "03", "04", "08", "17", "19", "22"],
     "comunas_10": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
     # Las cinco que entraron despues. No tienen tabla propia: se liquidan con
@@ -87,7 +91,13 @@ CONFIG = {
     # percentil "alto": sirve para ver hasta donde llega la cola de cada tabla.
     "percentiles": [10, 25, 50, 75, 90, 100],
     "min_predios_bloque": 5,       # con menos predios el bloque no se abre
-    "generar_graficos": True,
+    # El libro COMPARACION_VIGENCIA_<fecha>.xlsx: los agregados del reporte.
+    # Apagado: eso mismo lo muestra la app, recalculado sobre lo que se filtre.
+    # Encenderlo vuelve a escribirlo, con sus graficos incrustados.
+    "excel_reporte": False,
+    # Los PNG existen solo para incrustarlos en ese libro; sin el, nadie los
+    # lee y cuestan ~20 s por corrida.
+    "generar_graficos": False,
     "guardar_detalle": True,
     # Excel del detalle liquidado: una fila por construccion con como se
     # liquido. Es el DETALLE_LIQUIDADOS_<fecha>.xlsx que entrega la hoja
@@ -95,6 +105,12 @@ CONFIG = {
     "excel_detalle": True,
     "excel_detalle_muestra": None,   # None = todas las filas
 }
+
+# La ruta del consolidado no va escrita: se toma el mas reciente que haya
+# dejado consolidar_tablas.py, para que no queden dos fechas distintas
+# entre lo que liquido y lo que se reporta.
+_vigente = tabla_valor_vigente()
+CONFIG["excel_tablas_valor"] = str(_vigente) if _vigente else ""
 
 
 # Las series comparables: cada medida en sus dos bases.
@@ -1116,10 +1132,14 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
                 return f_num, 12
             return None, max(14, min(len(str(col)) + 4, 26))
 
-        dic = pd.DataFrame(DICCIONARIO_DETALLE,
-                           columns=["COLUMNA", "QUE ES", "COMO SE CALCULA"])
+        # El diccionario describe EXACTAMENTE las columnas de la hoja Detalle y
+        # en su mismo orden: si listara las que no estan, mandaria a buscar
+        # columnas que el archivo no trae.
+        desc = {c: q for c, q, _ in DICCIONARIO_DETALLE}
+        dic = pd.DataFrame([(c, desc.get(c, "")) for c in d.columns],
+                           columns=["VARIABLE", "DESCRIPCIÓN"])
         for nombre, tabla, anchos in (("Detalle", d, None),
-                                      ("Diccionario", dic, (30, 52, 58))):
+                                      ("Diccionario", dic, (34, 72))):
             hoja = libro.add_worksheet(nombre)
             for i, col in enumerate(tabla.columns):
                 fmt, ancho = (_formato_col(col) if anchos is None
@@ -1633,7 +1653,15 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                   f"{CONFIG['parquet_publico_predio']} ({len(pub_p):,} filas, "
                   f"{len(pub_p.columns)} columnas)")
 
-    # --- Excel --------------------------------------------------------------
+    # --- Excel de agregados (apagado por defecto) ---------------------------
+    if not CONFIG["excel_reporte"]:
+        print("\n   Libro de agregados: APAGADO (lo muestra la app). "
+              "Se enciende con CONFIG['excel_reporte'] = True.")
+        crono.marca("VIGENCIA: exportar excel")
+        if df_liq is None:
+            crono.resumen()
+        return d
+
     ruta = os.path.join(CONFIG["carpeta_results"],
                         f"COMPARACION_VIGENCIA{sufijo}_{fecha}.xlsx")
     # Los anexos van despues de Conclusiones, como en el ejercicio anterior.
@@ -1646,15 +1674,6 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                    concl, anexos, ruta)
     print(f"\n   Excel generado: {ruta}")
 
-    # Copia de nombre fijo en output/: es la que se versiona y la que da la app.
-    try:
-        import shutil
-        copia = os.path.join(os.path.dirname(CONFIG["parquet_publico"]),
-                             "COMPARACION_VIGENCIA_REPORTE.xlsx")
-        shutil.copyfile(ruta, copia)
-        print(f"   Copia para la app:  {copia}")
-    except Exception as e:
-        print(f"   AVISO: no se pudo dejar la copia para la app: {e}")
     print(f"     General                {len(general):>7,} filas")
     print(f"     Resumen VM2            {len(bloques_vm2):>7,} bloques")
     print(f"     Resumen Avaluos        {len(bloques_aval):>7,} bloques")

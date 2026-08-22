@@ -14,6 +14,16 @@ RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
 RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
 
+# Carpeta de Drive donde se deja el Excel del detalle con identificadores. Es
+# la via para verlo desde fuera: el archivo pesa mas de 100 MB -el tope de
+# GitHub- y lleva numero predial, asi que no puede ir en el repositorio.
+#
+# OJO: este enlace queda a la vista de cualquiera que abra la app. Eso solo es
+# seguro si la carpeta esta restringida a personas concretas; si estuviera en
+# "cualquiera con el enlace", publicarlo aqui equivale a publicar el archivo.
+ENLACE_DETALLE_DRIVE = ("https://drive.google.com/drive/folders/"
+                        "1Kt-LnURIXhQThsZSS-vogcYtu8uBy5_C")
+
 # Donde cada corrida deja el detalle liquidado.
 CARPETA_REPORTE = RAIZ / "results" / "COMPARACION_VIGENCIA"
 
@@ -547,10 +557,11 @@ def excel_predios(d: pd.DataFrame) -> bytes:
         if isinstance(d[c].dtype, pd.CategoricalDtype):
             d[c] = d[c].astype(str)
 
-    dic = pd.DataFrame(
-        [(col, desc, nota) for col, desc, nota in DICCIONARIO_DETALLE
-         if col in d.columns],
-        columns=["COLUMNA", "QUÉ ES", "DE DÓNDE SALE"])
+    # Mismas dos columnas y mismo orden que la hoja Detalle, igual que en el
+    # Excel que arma comparacion_vigencia.py.
+    desc = {c: q for c, q, _ in DICCIONARIO_DETALLE}
+    dic = pd.DataFrame([(c, desc.get(c, "")) for c in d.columns],
+                       columns=["VARIABLE", "DESCRIPCIÓN"])
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine=MOTOR_EXCEL) as xw:
@@ -578,7 +589,7 @@ def excel_predios(d: pd.DataFrame) -> bytes:
                 h.write(0, i, str(col), f_tit)
                 nom = str(col)
                 if nombre == "Diccionario":
-                    fmt, ancho = f_texto, (26 if i == 0 else 60)
+                    fmt, ancho = f_texto, (34 if i == 0 else 72)
                 elif nom.startswith(("VM2", "VALORCONS", "AVALUO", "AVALPRED",
                                      "VTER", "VANEXO", "DIF_")):
                     fmt, ancho = f_pesos, 20
@@ -761,24 +772,27 @@ with hoja_graf:
 with hoja_detalle:
     st.subheader("Detalle de la liquidación")
 
+    st.link_button("📂 Detalle liquidación · Excel completo (Drive)",
+                   ENLACE_DETALLE_DRIVE, type="primary")
+    st.caption(
+        "Una fila por construcción con todo: ID_PREDIO, número predial, ZHF, "
+        "puntaje, área, la columna exacta de la tabla de donde salió el valor "
+        "y el avalúo del predio. Se abre desde cualquier parte, con la cuenta "
+        "que tenga acceso a la carpeta.")
+    st.divider()
+
     @st.cache_data(show_spinner="Leyendo el libro…")
     def leer_archivo(ruta: str, marca_tiempo: float) -> bytes:
         """El archivo tal cual esta en disco, sin tocarle nada."""
         with open(ruta, "rb") as f:
             return f.read()
 
-    # UN SOLO archivo: el detalle liquidado. Sin alternativas ni respaldos: si
-    # no esta, se dice, en vez de entregar callado un libro de agregados que se
-    # parece pero no es lo que se pidio.
+    # Ademas del enlace de arriba: en LOCAL esta el xlsx que dejo la corrida y
+    # se entrega tal cual; en el DEPLOY no esta, y se arma del recorte anonimo
+    # lo que este filtrado.
     detalle = detalle_liquidado_mas_reciente()
-    if detalle is None:
-        st.info(
-            "**No se encontró el detalle de la liquidación.** Se busca el "
-            "`DETALLE_LIQUIDADOS_<fecha>.xlsx` más reciente en "
-            f"`{CARPETA_REPORTE.relative_to(RAIZ)}`. Lo escribe "
-            "`python src/comparacion_vigencia.py` al terminar, con "
-            "`CONFIG['excel_detalle'] = True`.")
-    else:
+
+    if detalle is not None:
         st.download_button(
             "📗 Detalle liquidación",
             data=leer_archivo(str(detalle), detalle.stat().st_mtime),
@@ -788,14 +802,64 @@ with hoja_detalle:
             type="primary", key="dl_detalle_liq",
             help="Una fila por construcción, con el VM2 de las dos vigencias, "
                  "la tabla y la columna exacta de donde salió el valor, y el "
-                 "avalúo del predio. Trae además una hoja Diccionario que "
-                 "explica cada columna.")
+                 "avalúo del predio. Trae además una hoja Diccionario.")
         st.caption(
             f"`{detalle.name}` · "
             f"{_miles(detalle.stat().st_size / 1e6, 1)} MB · generado el "
             f"{pd.Timestamp(detalle.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}"
             f". Es el detalle completo de la corrida: no responde a los "
             f"filtros de la izquierda.")
+    else:
+        st.caption(
+            f"Una fila por construcción, sobre lo que esté filtrado a la "
+            f"izquierda. Sin ID_PREDIO ni número predial: este despliegue es "
+            f"público. El detalle con identificadores solo existe corriendo la "
+            f"app en local.")
+
+        # No se arma nada antes de que lo pidan: son cientos de miles de filas
+        # y st.download_button construye el dato en CADA interaccion.
+        g1, g2 = st.columns([1, 1])
+        formato_d = g1.radio("Formato", ["Excel", "CSV"], horizontal=True,
+                             key="fmt_detalle",
+                             help="El Excel va a unas 1.500 filas por segundo. "
+                                  "El CSV no tiene tope y es mucho más rápido.")
+        tope_d = g2.number_input("Filas al Excel", 500, 50000, 5000, step=500,
+                                 key="tope_detalle",
+                                 disabled=formato_d != "Excel")
+
+        base = dff if formato_d == "CSV" else dff.head(int(tope_d))
+        if formato_d == "Excel" and len(dff) > len(base):
+            st.warning(f"El Excel llevará {entero(len(base))} de las "
+                       f"{entero(len(dff))} filas. Para todas, use el CSV.")
+
+        firma_d = (medida["prefijo"], tuple(sel_familia), tuple(sel_tabla),
+                   tuple(sel_comuna), tuple(sel_actividad), tuple(sel_grupo),
+                   formato_d, int(tope_d), len(dff))
+
+        if st.button(f"🧾 Preparar el {formato_d}", type="primary",
+                     key="prep_detalle",
+                     disabled=formato_d == "Excel" and not MOTOR_EXCEL):
+            with st.spinner(f"Armando el {formato_d} "
+                            f"({entero(len(base))} filas)…"):
+                st.session_state["dl_det"] = {
+                    "firma": firma_d, "n": len(base),
+                    "datos": (excel_predios(base) if formato_d == "Excel"
+                              else base.to_csv(index=False).encode("utf-8-sig")),
+                    "nombre": (f"DETALLE_LIQUIDACION_{V_BASE}_{V_LIQ}"
+                               f".{'xlsx' if formato_d == 'Excel' else 'csv'}"),
+                    "mime": ("application/vnd.openxmlformats-officedocument"
+                             ".spreadsheetml.sheet" if formato_d == "Excel"
+                             else "text/csv")}
+
+        listo_d = st.session_state.get("dl_det")
+        if listo_d and listo_d["firma"] == firma_d:
+            st.download_button(
+                f"📗 Detalle liquidación ({entero(listo_d['n'])} filas · "
+                f"{_miles(len(listo_d['datos']) / 1e6, 1)} MB)",
+                data=listo_d["datos"], file_name=listo_d["nombre"],
+                mime=listo_d["mime"], type="primary", key="dl_det_anon")
+        elif listo_d:
+            st.caption("Cambió la selección: vuelva a preparar la descarga.")
 
     st.divider()
     if os.path.exists(RUTA_DETALLE):
