@@ -47,6 +47,9 @@ CONFIG = {
                               "Tablas_Valor_Consolidado_V1_20260821.xlsx"),
     "comunas_7": ["02", "03", "04", "08", "17", "19", "22"],
     "comunas_10": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
+    # Las cinco que entraron despues. No tienen tabla propia: se liquidan con
+    # las columnas *_10C_*, pero se reportan aparte.
+    "comunas_5": ["05", "06", "13", "16", "18"],
 
     "comunas_act_2024_2025": [1, 2, 3, 4, 8, 9, 10, 11, 12, 17, 19, 22],
     "factor_comercial_act": 0.7,      # comunas actualizadas 2024-2025
@@ -272,6 +275,15 @@ def cargar(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
         return pd.read_parquet(ruta)
 
 
+def grupo_comunas(d: pd.DataFrame) -> pd.Series:
+    """A que grupo pertenece la comuna de cada fila: 10, 7 o 5 comunas."""
+    c = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+    return pd.Series(
+        np.select([c.isin(CONFIG["comunas_7"]), c.isin(CONFIG["comunas_5"])],
+                  ["7 comunas", "5 comunas (extra)"], default="10 comunas"),
+        index=d.index)
+
+
 def preparar(df: pd.DataFrame) -> pd.DataFrame:
     """Deja una fila por construccion con los dos VM2 comparables y su variacion."""
     d = df.copy()
@@ -377,6 +389,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
                                                / d[vig] * 100)
 
     # Llave de los bloques del reporte: tabla + actividad economica de la ZHF.
+    d["GRUPO_COMUNAS"] = grupo_comunas(d)
     d["ACTIVIDAD_ECONOMICA"] = actividad_economica(d)
     d["CLAVE"] = d["TABLA_ORIGEN"] + "_" + d["ACTIVIDAD_ECONOMICA"]
     d["TABLA_VALOR"] = tabla_valor_usada(d)
@@ -938,6 +951,10 @@ DICCIONARIO_DETALLE = [
      "liquidadas. El avaluo de la fila es el del PREDIO y viene repetido en "
      "cada una de sus construcciones"),
     ("COMUNA", "Comuna", "de la base"),
+    ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
+     "10 comunas (01,07,09,10,11,12,14,15,20,21), 7 comunas (02,03,04,08,17,"
+     "19,22) o 5 comunas extra (05,06,13,16,18), que hoy se liquidan con las "
+     "columnas *_10C_*"),
     ("ESTRPRED", "Estrato del predio", "de la base; 0 donde no viene"),
     ("ACTUALIZACION", "Si la comuna se actualizo en 2024-2025", ""),
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",
@@ -1020,10 +1037,35 @@ DICCIONARIO_DETALLE = [
 ]
 
 
+COLUMNAS_EXCEL_DETALLE = [
+    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
+    "COMUNA", "ESTRPRED", "USO_LADM", "CONDICION",
+    "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
+    "ZHF", "TIPOLOGIA_ZHF", "ACTIVIDAD_ECONOMICA", "CLAVE",
+    "PUNTCONS", "ACONCONS", "AREA_CONST", "VTER", "VANEXO",
+    "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
+    "DIF_VALORCONS_CAT", "VARIACION_VALORCONS_CAT_PCT",
+    "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
+    "DIF_VALORCONS_COM", "VARIACION_VALORCONS_COM_PCT",
+    "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "DIF_CAT_ABS", "VARIACION_CAT_PCT",
+    "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS", "VARIACION_COM_PCT",
+    "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
+    "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
+    "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
+    "DIF_AVALUO_COM", "VARIACION_AVALUO_COM_PCT",
+]
+
+
 def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
                            muestra: int | None = None) -> str:
     """El detalle liquidado a Excel, para revisar casos a mano."""
-    d = det.copy()
+    # Solo las columnas de COLUMNAS_EXCEL_DETALLE y en ese orden. El parquet
+    # lleva mas (SENTIDO, RANGO_VARIACION, FUERA_TOLERANCIA, CONSTRUCCION_ID,
+    # AVALPRED) porque los usa el explorador de la app.
+    d = det[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]].copy()
+    faltan = [c for c in COLUMNAS_EXCEL_DETALLE if c not in det.columns]
+    if faltan:
+        print(f"   (al Excel del detalle le faltan columnas: {faltan})")
     if muestra:
         # Repartida por tabla y no las primeras N filas: asi la muestra trae
         # residenciales y edificios, y no solo lo que quedo arriba al ordenar.
@@ -1482,7 +1524,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             d = d.merge(aval[["ID_PREDIO"] + cols_aval], on="ID_PREDIO",
                         how="left", validate="many_to_one")
         cols = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
-                "N_CONST_PREDIO", "COMUNA", "ESTRPRED", "ACTUALIZACION",
+                "N_CONST_PREDIO", "COMUNA", "GRUPO_COMUNAS", "ESTRPRED",
+                "ACTUALIZACION",
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
                 "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF", "ACTIVIDAD_ECONOMICA",
                 "CLAVE",
