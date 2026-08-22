@@ -787,11 +787,9 @@ with hoja_detalle:
         with open(ruta, "rb") as f:
             return f.read()
 
-    # Ademas del enlace de arriba: en LOCAL esta el xlsx que dejo la corrida y
-    # se entrega tal cual; en el DEPLOY no esta, y se arma del recorte anonimo
-    # lo que este filtrado.
+    # Solo el archivo que dejo la corrida. En el deploy no esta, y para eso
+    # queda el enlace de Drive de arriba.
     detalle = detalle_liquidado_mas_reciente()
-
     if detalle is not None:
         st.download_button(
             "📗 Detalle liquidación",
@@ -809,57 +807,6 @@ with hoja_detalle:
             f"{pd.Timestamp(detalle.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}"
             f". Es el detalle completo de la corrida: no responde a los "
             f"filtros de la izquierda.")
-    else:
-        st.caption(
-            f"Una fila por construcción, sobre lo que esté filtrado a la "
-            f"izquierda. Sin ID_PREDIO ni número predial: este despliegue es "
-            f"público. El detalle con identificadores solo existe corriendo la "
-            f"app en local.")
-
-        # No se arma nada antes de que lo pidan: son cientos de miles de filas
-        # y st.download_button construye el dato en CADA interaccion.
-        g1, g2 = st.columns([1, 1])
-        formato_d = g1.radio("Formato", ["Excel", "CSV"], horizontal=True,
-                             key="fmt_detalle",
-                             help="El Excel va a unas 1.500 filas por segundo. "
-                                  "El CSV no tiene tope y es mucho más rápido.")
-        tope_d = g2.number_input("Filas al Excel", 500, 50000, 5000, step=500,
-                                 key="tope_detalle",
-                                 disabled=formato_d != "Excel")
-
-        base = dff if formato_d == "CSV" else dff.head(int(tope_d))
-        if formato_d == "Excel" and len(dff) > len(base):
-            st.warning(f"El Excel llevará {entero(len(base))} de las "
-                       f"{entero(len(dff))} filas. Para todas, use el CSV.")
-
-        firma_d = (medida["prefijo"], tuple(sel_familia), tuple(sel_tabla),
-                   tuple(sel_comuna), tuple(sel_actividad), tuple(sel_grupo),
-                   formato_d, int(tope_d), len(dff))
-
-        if st.button(f"🧾 Preparar el {formato_d}", type="primary",
-                     key="prep_detalle",
-                     disabled=formato_d == "Excel" and not MOTOR_EXCEL):
-            with st.spinner(f"Armando el {formato_d} "
-                            f"({entero(len(base))} filas)…"):
-                st.session_state["dl_det"] = {
-                    "firma": firma_d, "n": len(base),
-                    "datos": (excel_predios(base) if formato_d == "Excel"
-                              else base.to_csv(index=False).encode("utf-8-sig")),
-                    "nombre": (f"DETALLE_LIQUIDACION_{V_BASE}_{V_LIQ}"
-                               f".{'xlsx' if formato_d == 'Excel' else 'csv'}"),
-                    "mime": ("application/vnd.openxmlformats-officedocument"
-                             ".spreadsheetml.sheet" if formato_d == "Excel"
-                             else "text/csv")}
-
-        listo_d = st.session_state.get("dl_det")
-        if listo_d and listo_d["firma"] == firma_d:
-            st.download_button(
-                f"📗 Detalle liquidación ({entero(listo_d['n'])} filas · "
-                f"{_miles(len(listo_d['datos']) / 1e6, 1)} MB)",
-                data=listo_d["datos"], file_name=listo_d["nombre"],
-                mime=listo_d["mime"], type="primary", key="dl_det_anon")
-        elif listo_d:
-            st.caption("Cambió la selección: vuelva a preparar la descarga.")
 
     st.divider()
     if os.path.exists(RUTA_DETALLE):
