@@ -14,10 +14,8 @@ RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
 RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
 
-# El libro del reporte que deja cada corrida en results/.
+# Donde cada corrida deja el detalle liquidado.
 CARPETA_REPORTE = RAIZ / "results" / "COMPARACION_VIGENCIA"
-# Copia de nombre fijo que deja comparacion_vigencia.py al terminar.
-RUTA_REPORTE_FIJA = RAIZ / "output" / "COMPARACION_VIGENCIA_REPORTE.xlsx"
 
 
 def _mas_nuevo(patron):
@@ -36,12 +34,6 @@ def detalle_liquidado_mas_reciente():
     """El DETALLE_LIQUIDADOS_<fecha>.xlsx mas nuevo, o None si no hay."""
     return _mas_nuevo("DETALLE_LIQUIDADOS*.xlsx")
 
-
-def reporte_mas_reciente():
-    """El libro del reporte mas nuevo, o None si no hay ninguno."""
-    # Los de results/ mandan: traen la fecha en el nombre.
-    return (_mas_nuevo("COMPARACION_VIGENCIA_*.xlsx")
-            or (RUTA_REPORTE_FIJA if RUTA_REPORTE_FIJA.exists() else None))
 
 # Las vigencias salen del modulo que genero el parquet, no escritas a mano.
 try:
@@ -775,32 +767,20 @@ with hoja_detalle:
         with open(ruta, "rb") as f:
             return f.read()
 
-    @st.cache_data(show_spinner=False)
-    def hoja_general(ruta: str, marca_tiempo: float):
-        """Solo la hoja General del libro del reporte."""
-        try:
-            from openpyxl import load_workbook
-            libro_x = load_workbook(ruta)
-            if "General" not in libro_x.sheetnames:
-                raise KeyError("General")
-            quitadas = [h for h in libro_x.sheetnames if h != "General"]
-            for h in quitadas:
-                del libro_x[h]
-            buf = io.BytesIO()
-            libro_x.save(buf)
-            return buf.getvalue(), quitadas
-        except Exception:                                # pragma: no cover
-            with open(ruta, "rb") as f:
-                return f.read(), None
-
-    # Se entrega el archivo tal cual lo dejo la corrida, sin volver a armarlo.
+    # UN SOLO archivo: el detalle liquidado. Sin alternativas ni respaldos: si
+    # no esta, se dice, en vez de entregar callado un libro de agregados que se
+    # parece pero no es lo que se pidio.
     detalle = detalle_liquidado_mas_reciente()
-    libro = reporte_mas_reciente()
-
-    if detalle is not None:
-        st.markdown("**Cómo se liquidó cada registro**")
+    if detalle is None:
+        st.info(
+            "**No se encontró el detalle de la liquidación.** Se busca el "
+            "`DETALLE_LIQUIDADOS_<fecha>.xlsx` más reciente en "
+            f"`{CARPETA_REPORTE.relative_to(RAIZ)}`. Lo escribe "
+            "`python src/comparacion_vigencia.py` al terminar, con "
+            "`CONFIG['excel_detalle'] = True`.")
+    else:
         st.download_button(
-            "📗 Ver el detalle de la liquidación",
+            "📗 Detalle liquidación",
             data=leer_archivo(str(detalle), detalle.stat().st_mtime),
             file_name=detalle.name,
             mime=("application/vnd.openxmlformats-officedocument"
@@ -814,36 +794,8 @@ with hoja_detalle:
             f"`{detalle.name}` · "
             f"{_miles(detalle.stat().st_size / 1e6, 1)} MB · generado el "
             f"{pd.Timestamp(detalle.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}"
-            f". No responde a los filtros de la izquierda: es el detalle "
-            f"completo de la corrida.")
-    elif libro is not None:
-        # Sin el detalle queda el libro del reporte, que son los agregados. Se
-        # dice cual es cada cosa para que nadie crea que bajo el otro.
-        datos_general, quitadas = hoja_general(str(libro),
-                                               libro.stat().st_mtime)
-        st.markdown("**Resumen de la liquidación (hoja General)**")
-        st.download_button(
-            "📘 Ver el resumen de la liquidación",
-            data=datos_general,
-            file_name=(libro.name if libro != RUTA_REPORTE_FIJA else
-                       f"COMPARACION_VIGENCIA_"
-                       f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y%m%d}"
-                       f".xlsx"),
-            mime=("application/vnd.openxmlformats-officedocument"
-                  ".spreadsheetml.sheet"),
-            type="primary", key="dl_reporte",
-            help="La hoja General del libro que produce la liquidación.")
-        st.caption(
-            f"El detalle fila a fila no está en este despliegue, así que va el "
-            f"resumen. Sale de `{libro.name}` · "
-            f"{_miles(len(datos_general) / 1024, 0)} KB · generado el "
-            f"{pd.Timestamp(libro.stat().st_mtime, unit='s'):%Y-%m-%d %H:%M}.")
-    else:
-        st.info(
-            "**No se encontró ningún libro de la liquidación.** Se busca el "
-            "`DETALLE_LIQUIDADOS_<fecha>.xlsx` más reciente en "
-            f"`{CARPETA_REPORTE.relative_to(RAIZ)}`. Lo escribe "
-            "`python src/comparacion_vigencia.py` al terminar.")
+            f". Es el detalle completo de la corrida: no responde a los "
+            f"filtros de la izquierda.")
 
     st.divider()
     if os.path.exists(RUTA_DETALLE):
