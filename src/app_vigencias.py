@@ -940,20 +940,12 @@ with hoja_detalle:
 # ---------------------------------------------------------------------
 with hoja_reglas:
     st.subheader("Cómo se asigna la tabla de valor")
-    st.caption("Hoja informativa: es la regla **general**, no un recuento de "
-               "los predios de esta corrida. No responde a los filtros de la "
-               "izquierda. Se descarga con el botón de la hoja Tablas, en la "
-               "pestaña REGLAS del Excel.")
+
 
     st.dataframe(reglas, width="stretch", hide_index=True,
                  column_config={"COMUNAS": st.column_config.TextColumn(
                      width="medium")})
-
-    st.caption("Se entra por el uso de la construcción, se mira en qué grupo "
-               "cae la comuna, luego la condición jurídica y la tipología de "
-               "la ZHF: eso da la columna del Excel de tablas de valor. Dentro "
-               "de esa columna, el VM2 se lee en la fila del puntaje "
-               "(PUNTCONS), que va de 1 a 100.")
+    st.caption( "Se identifica el uso de la construcción, la condición jurídica, la tipología y la ZHF. " "Con esta información se determina la tabla de valor correspondiente a la comuna y se " "selecciona la columna asociada en el archivo de tablas de valor. Posteriormente, el VM² " "se obtiene de la intersección entre dicha columna y la fila correspondiente al puntaje " "de construcción (PUNTCONS), cuyo rango va de 1 a 100." )
 
     st.divider()
     st.markdown("**Grupos de comunas**")
@@ -973,8 +965,6 @@ with hoja_reglas:
     st.markdown("**Qué predios NO se liquidan por tabla**")
     st.markdown(
         """
-Tres razones, y ninguna entra a este reporte: comparar contra un VM2 de tabla
-un valor que no salió de una tabla no mide la tabla.
 
 **1. Van por modelo, no por tabla**
 
