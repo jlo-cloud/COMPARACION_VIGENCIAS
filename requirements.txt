@@ -1,13 +1,25 @@
 # Lo que necesita src/app_vigencias.py para correr en Streamlit Community Cloud.
-# No es el entorno completo del proyecto: la app solo lee el parquet de detalle,
-# no ejecuta la liquidacion (nada de matplotlib ni scikit-learn).
+# No es el entorno completo del proyecto: la app solo lee los parquet, no
+# ejecuta la liquidacion (nada de matplotlib ni scikit-learn).
 # altair no se lista porque viene dentro de streamlit.
-# xlsxwriter si hace falta: es el motor con que se arma el Excel del explorador
-# predio a predio, en la hoja Detalle.
-streamlit>=1.40
-pandas>=2.0
-pyarrow>=14.0
-xlsxwriter>=3.1
-# openpyxl abre el libro del reporte para dejar solo la hoja General,
-# conservando su formato. Sin el, esa descarga entrega el libro entero.
-openpyxl>=3.1
+#
+# VERSIONES FIJAS a proposito. Con ">=" cada reinicio del despliegue puede
+# instalar algo distinto de lo que se probo aqui, y cuando la app falla alla
+# pero corre en local no hay como saber que quedo instalado.
+#
+# Son las versiones que el contenedor del despliegue ya tiene funcionando
+# (Python 3.14). En local corre Python 3.12 con streamlit 1.57 y pyarrow 23,
+# que tambien sirven; se fija lo de alla porque es donde la app tiene que
+# levantar. Para subirlas, se cambian aqui y se vuelve a probar.
+#
+# pyarrow 24 y no la ultima: Streamlit Cloud detecta pyarrow 25 y lo baja el
+# solo por un segfault conocido (apache/arrow#50471). Fijando 24 se evita
+# que instale y desinstale en cada reinicio.
+streamlit==1.62.0
+pandas==3.0.5
+pyarrow==24.0.0
+
+# Motores de Excel: xlsxwriter arma el detalle que se descarga desde la hoja
+# Detalle; openpyxl es el respaldo si aquel no estuviera.
+xlsxwriter==3.2.9
+openpyxl==3.1.5
