@@ -86,9 +86,10 @@ CONFIG = {
     "min_predios_bloque": 5,       # con menos predios el bloque no se abre
     "generar_graficos": True,
     "guardar_detalle": True,
-    # Excel del detalle liquidado, para revisar casos a mano.
-    # defecto: son 311 mil filas y escribirlas toma ~90 segundos.
-    "excel_detalle": False,
+    # Excel del detalle liquidado: una fila por construccion con como se
+    # liquido. Es el DETALLE_LIQUIDADOS_<fecha>.xlsx que entrega la hoja
+    # Detalle de la app. Cuesta ~90 s por corrida y ~57 MB en disco.
+    "excel_detalle": True,
     "excel_detalle_muestra": None,   # None = todas las filas
 }
 
