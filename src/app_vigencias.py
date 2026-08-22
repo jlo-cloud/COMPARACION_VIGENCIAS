@@ -243,6 +243,26 @@ st.markdown(
 # =====================================================================
 # DATOS
 # =====================================================================
+def _a_categoria(d: pd.DataFrame) -> pd.DataFrame:
+    """
+    Las columnas de texto repetido pasan a category: mismo contenido, menos RAM.
+
+    Son columnas con 2 a 55 valores distintos sobre cientos de miles de filas
+    (ACTUALIZACION tiene 2, COMUNA 22), asi que guardar el texto entero en cada
+    fila cuesta 120 MB de mas. Con category la app pasa de 197 MB a 82 MB, que
+    es lo que decide si cabe o no en el contenedor del despliegue.
+
+    OJO: agrupar por una columna categorica NO se comporta igual en pandas 2 y
+    en 3. Por eso los groupby de resumen() y por_grupo() llevan observed=True
+    escrito: sin el, en pandas 2 saldrian filas de grupos que el filtro dejo
+    fuera.
+    """
+    for c in d.select_dtypes(include=["object", "string"]).columns:
+        if d[c].nunique(dropna=False) <= max(64, len(d) // 1000):
+            d[c] = d[c].astype("category")
+    return d
+
+
 @st.cache_data(show_spinner="Leyendo el detalle de la comparación…")
 def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     """Uno de los dos recortes anonimos, con solo las columnas que usa la app."""
@@ -262,7 +282,7 @@ def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     # Grupo de comunas: es con lo que se filtra y se abre, no viene en el parquet.
     d["GRUPO_COMUNAS"] = (d["COMUNA"].map(COMUNA_A_GRUPO)
                           .fillna("sin grupo"))
-    return d
+    return _a_categoria(d)
 
 
 @st.cache_data(show_spinner="Leyendo el detalle predio a predio…")
@@ -276,7 +296,9 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
         if c in d.columns:
             d[c] = d[c].astype(str)
     d["GRUPO_COMUNAS"] = d["COMUNA"].map(COMUNA_A_GRUPO).fillna("sin grupo")
-    return d
+    # ID_PREDIO y el numero predial son unicos por fila: _a_categoria los deja
+    # como estan y solo convierte las columnas que de verdad se repiten.
+    return _a_categoria(d)
 
 
 # Las columnas del detalle que se muestran en la vista corta.
@@ -448,7 +470,7 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
 def por_grupo(d: pd.DataFrame, col: str) -> pd.DataFrame:
     """Los percentiles de cada grupo, uno debajo de otro y en una sola tabla."""
     salida = []
-    for clave, s in d.groupby(col, sort=True):
+    for clave, s in d.groupby(col, sort=True, observed=True):
         if len(s) < min_predios:
             continue
         t = percentiles(s)
@@ -482,7 +504,7 @@ def con_formato(t: pd.DataFrame):
 
 def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     """Una fila por grupo: cuantos predios, las dos medianas y como se mueve."""
-    g = d.groupby(col, sort=True)
+    g = d.groupby(col, sort=True, observed=True)
     t = pd.DataFrame({
         COL_N: g.size(),
         c_base: g[medida["vig"]].median(),
