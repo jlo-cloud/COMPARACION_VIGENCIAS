@@ -966,6 +966,10 @@ DICCIONARIO_DETALLE = [
      "puede ser mayor que 1: entran los predios con TODAS sus construcciones "
      "liquidadas. El avaluo de la fila es el del PREDIO y viene repetido en "
      "cada una de sus construcciones"),
+    ("CON_ANEXO", "1 si el predio tiene anexo, 0 si no",
+     "de VANEXO > 0. El anexo NO se liquida -la T10 no esta aprobada-, asi "
+     "que en los predios con 1 el avaluo lleva ese valor igual en las dos "
+     "vigencias y su variacion sale amortiguada"),
     ("COMUNA", "Comuna", "de la base"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
      "10 comunas (01,07,09,10,11,12,14,15,20,21), 7 comunas (02,03,04,08,17,"
@@ -1543,8 +1547,23 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         if cols_aval:
             d = d.merge(aval[["ID_PREDIO"] + cols_aval], on="ID_PREDIO",
                         how="left", validate="many_to_one")
+        # Predios CON anexo. El anexo no se esta liquidando -la T10 no esta
+        # aprobada, CONFIG["liquidar_anexos"] = False-, asi que su valor entra
+        # al avaluo igual a los dos lados y amortigua la variacion del predio
+        # con una parte que nadie aprobo. Con esta marca la app puede mostrar
+        # solo predios cuyo avaluo esta liquidado entero. Va aqui, antes de
+        # armar el detalle, para que la lleven los tres archivos: el detalle,
+        # su Excel y los dos recortes publicos. Es 0/1 y no el valor porque
+        # VANEXO exacto seria una llave para reidentificar el predio.
+        for marco in (d, aval):
+            if marco is not None and "VANEXO" in getattr(marco, "columns", []):
+                marco["CON_ANEXO"] = (
+                    pd.to_numeric(marco["VANEXO"], errors="coerce").fillna(0)
+                    > 0).astype(int)
+
         cols = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
-                "N_CONST_PREDIO", "COMUNA", "GRUPO_COMUNAS", "ESTRPRED",
+                "N_CONST_PREDIO", "CON_ANEXO",
+                "COMUNA", "GRUPO_COMUNAS", "ESTRPRED",
                 "ACTUALIZACION",
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
                 "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF", "ACTIVIDAD_ECONOMICA",
@@ -1581,18 +1600,6 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Detalle en Excel: {ruta_det}")
 
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
-        # Predios CON anexo. El anexo no se esta liquidando -la T10 no esta
-        # aprobada, CONFIG["liquidar_anexos"] = False-, asi que su valor entra
-        # al avaluo igual a los dos lados y arrastra hacia cero la variacion
-        # del predio. La app filtra por esta marca para poder mirar solo
-        # predios cuyo avaluo entero si esta liquidado. Es 0/1 y no el valor:
-        # VANEXO exacto seria una llave para reidentificar el predio.
-        for marco in (det, aval):
-            if marco is not None and "VANEXO" in getattr(marco, "columns", []):
-                marco["CON_ANEXO"] = (
-                    pd.to_numeric(marco["VANEXO"], errors="coerce").fillna(0)
-                    > 0).astype(int)
-
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
