@@ -867,11 +867,24 @@ def tablas_liquidacion(df_const):
     df_no_conv = pd.read_excel(ruta, sheet_name='NO_CONVENCIONALES')
     clave_col = df_no_conv.columns[0]
 
-    partes_clave = df_no_conv[clave_col].astype(str).str.strip().str.split('_', n=1, expand=True)
-    df_no_conv['DESTANEX'] = partes_clave[0].str.zfill(3)
-    df_no_conv['TIPOANEXO'] = pd.to_numeric(partes_clave[1], errors='coerce')
-    df_no_conv = df_no_conv.dropna(subset=['TIPOANEXO'])
-    df_no_conv['TIPOANEXO'] = df_no_conv['TIPOANEXO'].round(0).astype('int64')
+    # La hoja puede venir SIN FILAS: es lo que pasa mientras no se entregue la
+    # tabla T10, porque consolidar_tablas.py la escribe con encabezados y nada
+    # mas. Con la hoja vacia, str.split(expand=True) devuelve un DataFrame sin
+    # columnas y pedirle la [0] revienta con KeyError. Se arma entonces el
+    # frame vacio con las dos columnas que espera el resto del bloque: los
+    # T10_ANEXOS terminan en VM2 = 0, que es lo correcto cuando no hay tabla
+    # que aplicarles, y el aviso de mas abajo dice cuantos quedaron asi.
+    if df_no_conv.empty:
+        print("⚠️ Hoja NO_CONVENCIONALES sin filas: los anexos T10 quedan en 0 "
+              "(esperado mientras no se entregue esa tabla)")
+        df_no_conv['DESTANEX'] = pd.Series(dtype='object')
+        df_no_conv['TIPOANEXO'] = pd.Series(dtype='int64')
+    else:
+        partes_clave = df_no_conv[clave_col].astype(str).str.strip().str.split('_', n=1, expand=True)
+        df_no_conv['DESTANEX'] = partes_clave[0].str.zfill(3)
+        df_no_conv['TIPOANEXO'] = pd.to_numeric(partes_clave[1], errors='coerce')
+        df_no_conv = df_no_conv.dropna(subset=['TIPOANEXO'])
+        df_no_conv['TIPOANEXO'] = df_no_conv['TIPOANEXO'].round(0).astype('int64')
 
     bloques_anexos = []
 
@@ -897,7 +910,16 @@ def tablas_liquidacion(df_const):
             bloque['VM2_ANEXO'] = valores_col[col].round(0).astype('int64').to_numpy()
             bloques_anexos.append(bloque)
 
-    df_mapeo_anexos = pd.concat(bloques_anexos, ignore_index=True)
+    if bloques_anexos:
+        df_mapeo_anexos = pd.concat(bloques_anexos, ignore_index=True)
+    else:
+        # Ni una columna *_7C / *_10C en la hoja: concat de una lista vacia
+        # lanza "No objects to concatenate", asi que se arma el frame a mano
+        # con los tipos que espera el cruce de mas abajo.
+        df_mapeo_anexos = pd.DataFrame({'DESTANEX': pd.Series(dtype='object'),
+                                        'TIPOANEXO': pd.Series(dtype='int64'),
+                                        'COMUNA': pd.Series(dtype='object'),
+                                        'VM2_ANEXO': pd.Series(dtype='int64')})
     df_mapeo_anexos = df_mapeo_anexos.drop_duplicates(subset=['DESTANEX', 'TIPOANEXO', 'COMUNA'], keep='last')
 
     serie_anexos = df_mapeo_anexos.set_index(['DESTANEX', 'TIPOANEXO', 'COMUNA'])['VM2_ANEXO']
