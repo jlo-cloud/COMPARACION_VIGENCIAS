@@ -192,9 +192,14 @@ REGLAS_TABLA = [
      "T1_RESIDENCIAL_10C_COND_0_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T1, "7C", "Todas",
      "T1_RESIDENCIAL_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
-    (USOS_T2, "10C", "Diferente de 8 y 9",
+    # Edificios no se separa por condicion en ningun grupo de comunas: la
+    # asignacion mira DESTINOCONS 003 y la tipologia -o el estrato-, nunca la
+    # CONDICION. Decia "Diferente de 8 y 9" y no era cierto: hay 3
+    # construcciones con CONDICION 9 que van a T2, y ninguna con la 8 existe.
+    # Lo confirma el comentario de Liquidacion_tablas.py:84.
+    (USOS_T2, "10C", "Todas",
      "T2_EDIFICIOS_10C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
-    (USOS_T2, "7C", "Diferente de 8 y 9",
+    (USOS_T2, "7C", "Todas",
      "T2_EDIFICIOS_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T3, "10C", "NA",
      "T3_COMERCIAL_10C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
