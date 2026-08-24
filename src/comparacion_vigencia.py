@@ -73,7 +73,19 @@ CONFIG = {
                  ("T3_COMERCIAL", "COMERCIAL")],
 
     # Usos que van por MODELO, con la CONDICION que si entra por tabla.
-    "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8},
+    #
+    # Los tres son los que la hoja Reglas de la app lista como "van por
+    # modelo, no por tabla", pero hasta ahora solo estaba el de apartamentos:
+    # las 6.725 construcciones de Comercio_en_PH con CONDICION 9 entraban al
+    # ejercicio con un VM2 de vigencia que no sale de ninguna tabla -es el del
+    # modelo de PH, VALORCONS/ACONCONS-, y el 81% de ellas quedaba por encima
+    # del techo de la tabla contra la que se comparaban. En T3_COMERCIAL_023
+    # eso solo hundia la variacion mediana a -47.9%; sin ellas queda en +0.6%.
+    # La CONDICION 8 si entra por tabla: sus 27 casos se portan como cualquier
+    # otra construccion y ninguno pasa el techo de su tabla.
+    "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8,
+                        "Comercio_en_PH": 8,
+                        "Oficinas_Consultorios_en_PH": 8},
 
     # Regla de admision del predio.
     "solo_predios_completos": True,
