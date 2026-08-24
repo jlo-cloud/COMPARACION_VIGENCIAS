@@ -189,15 +189,16 @@ APERTURAS = {
     "Tabla y actividad juntas (como en el reporte)": "CLAVE",
 }
 
-# El anexo no se esta liquidando: la tabla T10 no esta aprobada, y en
-# comparacion_vigencia.py eso es CONFIG["liquidar_anexos"] = False. En los
-# predios que tienen anexo su valor entra al avaluo igual en las dos
-# vigencias, asi que la variacion del predio sale amortiguada por una parte
-# que nadie ha aprobado. Por eso la app arranca dejandolos fuera: lo que
-# muestra por defecto es avaluo liquidado de punta a punta.
-ANEXOS = {"Sin anexos (lo aprobado)": 0,
-          "Todos": None,
-          "Solo con anexos": 1}
+# Sobre los anexos NO hay filtro, a proposito. La hoja NO_CONVENCIONALES del
+# consolidado -la tabla T10, la de los anexos- viene sin datos, asi que ningun
+# anexo se revalora y su valor entra al avaluo IGUAL en las dos vigencias. La
+# comparacion del predio sigue siendo valida: si el avaluo de un predio con
+# anexo se mueve menos, se mueve menos de verdad, no por un defecto de
+# medicion. Distinto del caso de los usos en PH, donde el valor de 2026 lo
+# ponia un modelo y el de 2027 una tabla: ahi si se comparaban cosas
+# distintas. La columna CON_ANEXO se sigue publicando para el explorador
+# predio a predio, y CONFIG["liquidar_anexos"] sigue en su sitio para cuando
+# entreguen la T10.
 
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
@@ -435,21 +436,6 @@ with st.sidebar:
                    "volver a correr `comparacion_vigencia.py`: el parquet de "
                    "esta medida todavía no trae N_CONST_PREDIO.")
 
-    if "CON_ANEXO" in df.columns:
-        sel_anexo = st.radio(
-            "Anexos del predio", list(ANEXOS), index=0,
-            help="La tabla T10, la del anexo, no está aprobada: el anexo no se "
-                 "liquida y su valor entra al avalúo igual en las dos "
-                 "vigencias. En un predio con anexo, entonces, parte del "
-                 "avalúo no está liquidada y la variación sale amortiguada. "
-                 "Por eso la app arranca en «Sin anexos». Los otros dos "
-                 "valores están para mirar el efecto, no para reportar.")
-    else:
-        sel_anexo = "Todos"
-        st.caption("Para separar los predios con anexo hace falta volver a "
-                   "correr `comparacion_vigencia.py`: el parquet de esta "
-                   "medida todavía no trae CON_ANEXO.")
-
     st.divider()
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
@@ -480,24 +466,10 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
-    if ANEXOS[sel_anexo] is not None and "CON_ANEXO" in d.columns:
-        d = d[d["CON_ANEXO"] == ANEXOS[sel_anexo]]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
 
-
-# Que se esta haciendo con el anexo, dicho en el encabezado. Sin esto el
-# conteo de arriba se lee como si fuera todo lo que hay, y con el filtro en
-# "Sin anexos" -que es como arranca- no lo es.
-NOTA_ANEXO = {
-    0: "Deja fuera los predios con anexo: la T10 no está aprobada, así que "
-       "su avalúo llevaría una parte sin liquidar.",
-    1: "Solo predios con anexo, cuyo avalúo lleva una parte sin liquidar: la "
-       "T10 no está aprobada.",
-    None: "Incluye los predios con anexo, cuyo avalúo lleva una parte sin "
-          "liquidar: la T10 no está aprobada.",
-}[ANEXOS[sel_anexo]]
 
 st.markdown(
     f"""
@@ -507,7 +479,8 @@ st.markdown(
         ({V_BASE}) · <b>{entero(len(df))} {unidades}</b> ·
         {titulo_medida.lower()}, base {etiqueta_base.lower()}. Solo predios con
         todas sus construcciones valoradas por tabla en las dos vigencias.
-        {NOTA_ANEXO}</p>
+        El anexo no se revalora: la T10 no está entregada, así que su valor
+        entra igual en las dos.</p>
     </div>
     """,
     unsafe_allow_html=True,
