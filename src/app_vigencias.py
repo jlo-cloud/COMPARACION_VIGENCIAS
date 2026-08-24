@@ -199,9 +199,18 @@ ANEXOS = {"Sin anexos (lo aprobado)": 0,
           "Todos": None,
           "Solo con anexos": 1}
 
+# La CONDICION juridica de la construccion. La 9 es la propiedad horizontal
+# propiamente dicha, y es el corte que mas se pide: 33.909 de las 389.422
+# construcciones del analisis. Se ofrece como las tres posturas de siempre en
+# vez de una lista de codigos, porque lo que se quiere ver es "solo PH" o "todo
+# menos PH", no la condicion 3 con sus trece casos. Combinado con el filtro de
+# categoria de tabla sale, por ejemplo, todas las residenciales menos la 9.
+CONDICIONES = {"Todas": None, "Solo condición 9": "solo", "Todas menos la 9": "sin"}
+
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
+           "CONDICION",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
            "VARIACION_VALORCONS_CAT_PCT",
            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -434,6 +443,22 @@ with st.sidebar:
                    "correr `comparacion_vigencia.py`: el parquet de esta "
                    "medida todavía no trae CON_ANEXO.")
 
+    if "CONDICION" in df.columns:
+        sel_cond = st.radio(
+            "Condición de la construcción", list(CONDICIONES), index=0,
+            help="La condición 9 es la propiedad horizontal propiamente dicha: "
+                 "33.909 construcciones, el 8,7% del análisis, y 33.851 de "
+                 "ellas residenciales. Con «Categoría de tabla» en "
+                 "T1_RESIDENCIAL y esto en «Todas menos la 9» salen las "
+                 "301.206 residenciales que no son PH. En las medidas de "
+                 "predio la condición es la de su construcción de mayor área, "
+                 "igual que la tabla y la actividad.")
+    else:
+        sel_cond = "Todas"
+        st.caption("Para filtrar por condición hace falta volver a correr "
+                   "`comparacion_vigencia.py`: el parquet de esta medida "
+                   "todavía no trae CONDICION.")
+
     st.divider()
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
@@ -463,6 +488,10 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
     if ANEXOS[sel_anexo] is not None and "CON_ANEXO" in d.columns:
         d = d[d["CON_ANEXO"] == ANEXOS[sel_anexo]]
+    modo_cond = CONDICIONES[sel_cond]
+    if modo_cond and "CONDICION" in d.columns:
+        cond9 = pd.to_numeric(d["CONDICION"], errors="coerce") == 9
+        d = d[cond9] if modo_cond == "solo" else d[~cond9]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
