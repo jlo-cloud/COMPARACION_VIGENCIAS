@@ -163,16 +163,7 @@ def main():
             print(f"❌ Error al guardar resultados intermedios: {str(e)}")
             raise
 
-        # ============================================================
-        # PASO 6: COMPARACIÓN VM2 LIQUIDACIÓN vs VIGENCIA 2026
-        # ============================================================
-        # Compara el VM2 que daría la liquidación contra el que hoy trae la
-        # base catastral. Se le pasa df_liquidacion en memoria: es el mismo
-        # contenido del parquet que se acaba de guardar, y así no se relee
-        # (~77 MB).
-        # NO se relanza la excepción a propósito: la liquidación ya quedó
-        # guardada en el PASO 4, así que un problema del reporte (por ejemplo
-        # el Excel abierto) no debe tumbar toda la corrida. Se avisa y se sigue.
+
         print(f"\n{'='*60}")
         print(f"=== PASO 6: {pasos[6]} ===")
         print(f"{'='*60}")

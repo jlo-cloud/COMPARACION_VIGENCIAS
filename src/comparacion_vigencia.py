@@ -345,6 +345,19 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
             (d["N_CONST_PREDIO"] > 0)
             & (d["N_CONST_CON_TABLA"] == d["N_CONST_PREDIO"])).astype(int)
 
+    # Predios con alguna construccion de destino especial: hoy ese predio no se
+    # valora por tabla, asi que sale entero. Se marca AQUI y no en las reglas
+    # porque esas construcciones salen de la liquidacion con TABLA_ORIGEN =
+    # ESPECIALES, y para cuando se recorta a las familias ya no estan: mirandolo
+    # despues, el predio pareceria normal.
+    if {"DESTINOCONS", "ID_PREDIO"} <= set(d.columns):
+        destino = d["DESTINOCONS"].astype(str).str.strip().str.zfill(3)
+        predios_esp = set(d.loc[destino.isin(CONFIG["destinos_especiales"]),
+                                "ID_PREDIO"])
+        d["PREDIO_DESTINO_ESPECIAL"] = d["ID_PREDIO"].isin(predios_esp).astype(int)
+    else:
+        d["PREDIO_DESTINO_ESPECIAL"] = 0
+
     total = len(d)
     d = d[d["TABLA_ORIGEN"].str.startswith(prefijos)].copy()
     print(f"   Construcciones en {', '.join(prefijos)}: {len(d):,} "
@@ -451,6 +464,11 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         return ~(pd.to_numeric(d[col], errors="coerce") > 0)
 
     reglas = []
+    if "PREDIO_DESTINO_ESPECIAL" in d.columns:
+        reglas.append(("el predio tiene una construccion de destino especial ("
+                       + ", ".join(CONFIG["destinos_especiales"]) + "): no se "
+                       "valora por tabla",
+                       d["PREDIO_DESTINO_ESPECIAL"] == 1))
     if CONFIG["solo_predios_completos"] and "PREDIO_COMPLETO" in d.columns:
         reglas.append(("el predio tiene construcciones sin valor de tabla "
                        "(su valor total saldria incompleto)",
@@ -484,17 +502,11 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             fuera_metodo = ~metodo.isin(validos)
         else:
             fuera_metodo = pd.Series(False, index=d.index)
-        if "DESTINOCONS" in d.columns:
-            destino = d["DESTINOCONS"].astype(str).str.strip().str.zfill(3)
-            es_destino_especial = destino.isin(CONFIG["destinos_especiales"])
-        else:
-            es_destino_especial = pd.Series(False, index=d.index)
+        # ESPECIAL y ESPECIAL_2026 ya no excluyen: las dos marcas vienen del
+        # Excel de construcciones especiales, ajeno al proceso. Lo unico
+        # especial hoy son los predios con destino 020 o 023, y eso se decide
+        # arriba, con el destino de la base.
         reglas += [
-            ("se valora por fuera de tabla por su destino ("
-             + ", ".join(CONFIG["destinos_especiales"]) + ")",
-             es_destino_especial),
-            ("con valor especial en 2026 (ESPECIAL_2026 = 1)",
-             _marca("ESPECIAL_2026")),
             ("predio no liquidado por tabla (METODO_LIQUIDACION INTEGRAL/MIXTO)",
              fuera_metodo),
         ]
