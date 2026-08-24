@@ -192,14 +192,18 @@ REGLAS_TABLA = [
      "T1_RESIDENCIAL_10C_COND_0_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T1, "7C", "Todas",
      "T1_RESIDENCIAL_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
-    # Edificios no se separa por condicion en ningun grupo de comunas: la
-    # asignacion mira DESTINOCONS 003 y la tipologia -o el estrato-, nunca la
-    # CONDICION. Decia "Diferente de 8 y 9" y no era cierto: hay 3
-    # construcciones con CONDICION 9 que van a T2, y ninguna con la 8 existe.
-    # Lo confirma el comentario de Liquidacion_tablas.py:84.
-    (USOS_T2, "10C", "Todas",
+    # Edificios: la restriccion es "diferente de 9". Decia "diferente de 8 y 9",
+    # y la 8 no existe en este uso -ningun Apartamentos_4_y_mas_pisos la trae-,
+    # asi que nombrarla sobraba.
+    #
+    # OJO: la asignacion no comprueba la condicion. Mira DESTINOCONS 003 y la
+    # tipologia de la ZHF -o el estrato si la ZHF no sirve-, y por eso 3 de las
+    # 7.655 construcciones que van a T2 tienen CONDICION 9. Lo dice tambien el
+    # comentario de Liquidacion_tablas.py:84. Para que la regla se cumpla hay
+    # que agregar la comprobacion alli.
+    (USOS_T2, "10C", "Diferente de 9",
      "T2_EDIFICIOS_10C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
-    (USOS_T2, "7C", "Todas",
+    (USOS_T2, "7C", "Diferente de 9",
      "T2_EDIFICIOS_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T3, "10C", "NA",
      "T3_COMERCIAL_10C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
