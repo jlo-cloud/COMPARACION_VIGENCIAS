@@ -191,7 +191,7 @@ APERTURAS = {
 
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
-           "ACTIVIDAD_ECONOMICA", "CLAVE",
+           "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
            "VARIACION_VALORCONS_CAT_PCT",
            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -203,7 +203,7 @@ COLUMNAS = COMUNES + [
     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"]
 
 COLUMNAS_PREDIO = COMUNES + [
-    "N_CONST_PREDIO", "N_TABLAS_PREDIO",
+    "N_TABLAS_PREDIO",
     "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ", "VARIACION_AVALUO_CAT_PCT",
     "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"]
 
@@ -382,6 +382,28 @@ with st.sidebar:
         "Grupo de comunas", list(GRUPOS_FILTRO),
         help="Qué comunas trae cada grupo está en la hoja Reglas.")
 
+    # Cuantas construcciones tiene el predio. El numero es siempre del predio
+    # completo, pero se lee distinto segun la medida: con el valor por m2 un
+    # predio de tres construcciones aporta tres filas, y con el avaluo aporta
+    # una sola. Por eso al elegir "3 construcciones" el conteo de arriba cambia
+    # al cambiar de medida aunque los predios sean los mismos.
+    if "N_CONST_PREDIO" in df.columns:
+        conteos = sorted(int(v) for v in df["N_CONST_PREDIO"].dropna().unique())
+        sel_n_const = st.multiselect(
+            "Construcciones del predio", conteos,
+            format_func=lambda n: ("1 construcción" if n == 1
+                                   else f"{n} construcciones"),
+            help="Deja solo los predios que tengan exactamente ese número de "
+                 "construcciones; se puede marcar más de uno. El número lo "
+                 "trae N_CONST_PREDIO y cuenta las construcciones del predio "
+                 "sin anexos, que en 231 predios es una más de las que "
+                 "aparecen valoradas en el detalle.")
+    else:
+        sel_n_const = []
+        st.caption("Para filtrar por número de construcciones hace falta "
+                   "volver a correr `comparacion_vigencia.py`: el parquet de "
+                   "esta medida todavía no trae N_CONST_PREDIO.")
+
     st.divider()
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
@@ -407,6 +429,8 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
     if sel_grupo:
         d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
+    if sel_n_const and "N_CONST_PREDIO" in d.columns:
+        d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]

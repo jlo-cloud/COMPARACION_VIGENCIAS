@@ -1584,6 +1584,11 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
+                    # Cuantas construcciones tiene el predio de esta fila. Va
+                    # en el recorte publico porque la app filtra por el; no
+                    # abre ninguna puerta que el recorte por predio no tuviera
+                    # ya abierta, que publica esta misma columna.
+                    "N_CONST_PREDIO",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",
                     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
