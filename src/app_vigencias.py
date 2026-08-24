@@ -189,9 +189,19 @@ APERTURAS = {
     "Tabla y actividad juntas (como en el reporte)": "CLAVE",
 }
 
+# El anexo no se esta liquidando: la tabla T10 no esta aprobada, y en
+# comparacion_vigencia.py eso es CONFIG["liquidar_anexos"] = False. En los
+# predios que tienen anexo su valor entra al avaluo igual en las dos
+# vigencias, asi que la variacion del predio sale amortiguada por una parte
+# que nadie ha aprobado. Por eso la app arranca dejandolos fuera: lo que
+# muestra por defecto es avaluo liquidado de punta a punta.
+ANEXOS = {"Sin anexos (lo aprobado)": 0,
+          "Todos": None,
+          "Solo con anexos": 1}
+
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
-           "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO",
+           "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
            "VARIACION_VALORCONS_CAT_PCT",
            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -296,6 +306,11 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
         if c in d.columns:
             d[c] = d[c].astype(str)
     d["GRUPO_COMUNAS"] = d["COMUNA"].map(COMUNA_A_GRUPO).fillna("sin grupo")
+    # El detalle guarda VANEXO -el valor- y no la marca; se deriva aqui para
+    # que el filtro de la barra lateral valga tambien en el explorador.
+    if "CON_ANEXO" not in d.columns and "VANEXO" in d.columns:
+        d["CON_ANEXO"] = (pd.to_numeric(d["VANEXO"], errors="coerce")
+                          .fillna(0) > 0).astype(int)
     # ID_PREDIO y el numero predial son unicos por fila: _a_categoria los deja
     # como estan y solo convierte las columnas que de verdad se repiten.
     return _a_categoria(d)
@@ -404,6 +419,21 @@ with st.sidebar:
                    "volver a correr `comparacion_vigencia.py`: el parquet de "
                    "esta medida todavía no trae N_CONST_PREDIO.")
 
+    if "CON_ANEXO" in df.columns:
+        sel_anexo = st.radio(
+            "Anexos del predio", list(ANEXOS), index=0,
+            help="La tabla T10, la del anexo, no está aprobada: el anexo no se "
+                 "liquida y su valor entra al avalúo igual en las dos "
+                 "vigencias. En un predio con anexo, entonces, parte del "
+                 "avalúo no está liquidada y la variación sale amortiguada. "
+                 "Por eso la app arranca en «Sin anexos». Los otros dos "
+                 "valores están para mirar el efecto, no para reportar.")
+    else:
+        sel_anexo = "Todos"
+        st.caption("Para separar los predios con anexo hace falta volver a "
+                   "correr `comparacion_vigencia.py`: el parquet de esta "
+                   "medida todavía no trae CON_ANEXO.")
+
     st.divider()
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
@@ -431,10 +461,24 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
+    if ANEXOS[sel_anexo] is not None and "CON_ANEXO" in d.columns:
+        d = d[d["CON_ANEXO"] == ANEXOS[sel_anexo]]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
 
+
+# Que se esta haciendo con el anexo, dicho en el encabezado. Sin esto el
+# conteo de arriba se lee como si fuera todo lo que hay, y con el filtro en
+# "Sin anexos" -que es como arranca- no lo es.
+NOTA_ANEXO = {
+    0: "Deja fuera los predios con anexo: la T10 no está aprobada, así que "
+       "su avalúo llevaría una parte sin liquidar.",
+    1: "Solo predios con anexo, cuyo avalúo lleva una parte sin liquidar: la "
+       "T10 no está aprobada.",
+    None: "Incluye los predios con anexo, cuyo avalúo lleva una parte sin "
+          "liquidar: la T10 no está aprobada.",
+}[ANEXOS[sel_anexo]]
 
 st.markdown(
     f"""
@@ -443,7 +487,8 @@ st.markdown(
         <p>La liquidación ({V_LIQ}) contra lo que cobra hoy la base
         ({V_BASE}) · <b>{entero(len(df))} {unidades}</b> ·
         {titulo_medida.lower()}, base {etiqueta_base.lower()}. Solo predios con
-        todas sus construcciones valoradas por tabla en las dos vigencias.</p>
+        todas sus construcciones valoradas por tabla en las dos vigencias.
+        {NOTA_ANEXO}</p>
     </div>
     """,
     unsafe_allow_html=True,

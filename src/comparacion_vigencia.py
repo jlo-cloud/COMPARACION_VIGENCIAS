@@ -1581,6 +1581,18 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Detalle en Excel: {ruta_det}")
 
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
+        # Predios CON anexo. El anexo no se esta liquidando -la T10 no esta
+        # aprobada, CONFIG["liquidar_anexos"] = False-, asi que su valor entra
+        # al avaluo igual a los dos lados y arrastra hacia cero la variacion
+        # del predio. La app filtra por esta marca para poder mirar solo
+        # predios cuyo avaluo entero si esta liquidado. Es 0/1 y no el valor:
+        # VANEXO exacto seria una llave para reidentificar el predio.
+        for marco in (det, aval):
+            if marco is not None and "VANEXO" in getattr(marco, "columns", []):
+                marco["CON_ANEXO"] = (
+                    pd.to_numeric(marco["VANEXO"], errors="coerce").fillna(0)
+                    > 0).astype(int)
+
         publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
@@ -1588,7 +1600,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     # en el recorte publico porque la app filtra por el; no
                     # abre ninguna puerta que el recorte por predio no tuviera
                     # ya abierta, que publica esta misma columna.
-                    "N_CONST_PREDIO",
+                    "N_CONST_PREDIO", "CON_ANEXO",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",
                     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -1599,7 +1611,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # A nivel predio, la tabla y la actividad son las de la construccion mayor.
         publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
-                           "N_CONST_PREDIO", "N_TABLAS_PREDIO",
+                           "N_CONST_PREDIO", "N_TABLAS_PREDIO", "CON_ANEXO",
                            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                            "VARIACION_VALORCONS_CAT_PCT",
                            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
