@@ -153,19 +153,58 @@ COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
 USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
+USOS_T3 = ("Bodegas_Comerciales_Grandes_Almacenes (016), "
+           "Estacion_de_servicio (021), Clubes_Casinos (024), Comercio (025), "
+           "Comercio_en_PH (028), Pensiones_y_Residencias (038), "
+           "Plaza_Mercado (039), Restaurantes (041), Talleres (049)")
+USOS_T4 = ("Salon_Comunal (009), Bodegas_Comerciales (017), "
+           "Bodegas_Comerciales_en_PH (018), Industrias (047), "
+           "Industrias_en_PH (048)")
 
-# (uso, grupo, condicion juridica, patron de la columna).
+# Las tipologias de la ZHF van POR REGLA y no en una lista global: las
+# residenciales son 011-016, las comerciales 021-023 y las industriales
+# 031-033. Con una sola lista, comercial e industrial saldrian con las
+# tipologias equivocadas.
+TIPOLOGIAS_RESIDENCIAL = ["011", "012", "013", "014", "015", "016"]
+TIPOLOGIAS_COMERCIAL = ["021", "022", "023"]
+TIPOLOGIAS_INDUSTRIAL = ["031", "032", "033"]
+
+# Que pasa cuando la ZHF no cae en las tipologias de su familia.
+EXC_RESIDENCIAL = ("Si las tres últimas posiciones de la ZHF son diferentes a "
+                   "011-016, se emplea el estrato socioeconómico del predio "
+                   "(ESTRPRED) y se asigna la tabla según la comuna y la "
+                   "condición jurídica.")
+EXC_COMERCIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
+                 "con T3_COMERCIAL_021 para esas comunas. Si termina en algo "
+                 "distinto de 011-016 y 021-023, la tabla es "
+                 "T3_COMERCIAL_022.")
+EXC_INDUSTRIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
+                  "con T4_INDUSTRIAL_031 para esas comunas. Si termina en algo "
+                  "distinto de 011-016 y 031-033, la tabla es "
+                  "T4_INDUSTRIAL_032.")
+
+# (uso, grupo, condicion juridica, patron de la columna, tipologias, excepcion).
 # {t} donde va la tipologia de la ZHF.
 REGLAS_TABLA = [
     (USOS_T1, "10C", "9",
-     "T1_RESIDENCIAL_10C_COND_9_{t}"),
-    (USOS_T1, "10C", "Diferente de 9", "T1_RESIDENCIAL_10C_COND_0_{t}"),
-    (USOS_T1, "7C", "Todas", "T1_RESIDENCIAL_7C_{t}"),
-    (USOS_T2, "10C", "Diferente de 8 y 9", "T2_EDIFICIOS_10C_{t}"),
-    (USOS_T2, "7C", "Diferente de 8 y 9", "T2_EDIFICIOS_7C_{t}"),
+     "T1_RESIDENCIAL_10C_COND_9_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T1, "10C", "Diferente de 9",
+     "T1_RESIDENCIAL_10C_COND_0_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T1, "7C", "Todas",
+     "T1_RESIDENCIAL_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T2, "10C", "Diferente de 8 y 9",
+     "T2_EDIFICIOS_10C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T2, "7C", "Diferente de 8 y 9",
+     "T2_EDIFICIOS_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T3, "10C", "NA",
+     "T3_COMERCIAL_10C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
+    (USOS_T3, "7C", "NA",
+     "T3_COMERCIAL_7C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
+    (USOS_T4, "10C", "NA",
+     "T4_INDUSTRIAL_10C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
+    (USOS_T4, "7C", "NA",
+     "T4_INDUSTRIAL_7C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
 ]
-
-TIPOLOGIAS_ZHF = ["011", "012", "013", "014", "015", "016"]
 
 
 def reglas_asignacion() -> pd.DataFrame:
@@ -174,9 +213,10 @@ def reglas_asignacion() -> pd.DataFrame:
               "COMUNAS": ", ".join(GRUPOS_COMUNAS[grupo]),
               "CONDICIÓN JURÍDICA": condicion,
               "TIPOLOGÍA ZHF": t,
-              "REFERENCIA TABLA": patron.format(t=t)}
-             for uso, grupo, condicion, patron in REGLAS_TABLA
-             for t in TIPOLOGIAS_ZHF]
+              "REFERENCIA TABLA": patron.format(t=t),
+              "EXCEPCIONES": excepcion}
+             for uso, grupo, condicion, patron, tipologias, excepcion in REGLAS_TABLA
+             for t in tipologias]
     return pd.DataFrame(filas)
 
 
@@ -1026,8 +1066,9 @@ with hoja_reglas:
 
 
     st.dataframe(reglas, width="stretch", hide_index=True,
-                 column_config={"COMUNAS": st.column_config.TextColumn(
-                     width="medium")})
+                 column_config={
+                     "COMUNAS": st.column_config.TextColumn(width="medium"),
+                     "EXCEPCIONES": st.column_config.TextColumn(width="large")})
     st.caption( "Se identifica el uso de la construcción, la condición jurídica, la tipología y la ZHF. " "Con esta información se determina la tabla de valor correspondiente a la comuna y se " "selecciona la columna asociada en el archivo de tablas de valor. Posteriormente, el VM² " "se obtiene de la intersección entre dicha columna y la fila correspondiente al puntaje " "de construcción (PUNTCONS), cuyo rango va de 1 a 100." )
 
     st.divider()
