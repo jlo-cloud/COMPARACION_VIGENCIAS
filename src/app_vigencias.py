@@ -199,12 +199,6 @@ ANEXOS = {"Sin anexos (lo aprobado)": 0,
           "Todos": None,
           "Solo con anexos": 1}
 
-# Las tablas vienen en pareja: T1_RESIDENCIAL_011 y T1_RESIDENCIAL_011_9. La
-# segunda es la que aplica a la condicion 9. Quien usa la app pide verlas por
-# separado despues de elegir la categoria, y marcarlas una por una en "Tabla de
-# valor" es justo lo que se queria evitar.
-VARIANTES = {"Todas": None, "Solo las _9": True, "Sin las _9": False}
-
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
@@ -390,22 +384,22 @@ with st.sidebar:
                        for t in df["TABLA_ORIGEN"].unique() if "_" in t})
     sel_familia = st.multiselect("Categoría de tabla", familias)
 
-    sel_variante = st.radio(
-        "Variante de la tabla", list(VARIANTES), index=0, horizontal=True,
-        help="Cada tabla tiene su pareja terminada en _9, la que aplica a la "
-             "condición 9. Esto las separa de una vez, sin marcarlas una por "
-             "una: recorta lo que se ofrece abajo en «Tabla de valor» y "
-             "también lo que entra al reporte.")
+    # Cada tabla tiene su pareja terminada en _9, la de la condicion 9.
+    # Marcando esto se deja solo esa mitad: recorta la lista que se ofrece
+    # abajo en "Tabla de valor" y tambien lo que entra al reporte, para no
+    # tener que marcar las tablas una por una.
+    solo_9 = st.checkbox(
+        "Condición 9", value=False,
+        help="Deja solo las tablas terminadas en _9, las de la condición 9. "
+             "Sin marcar entran todas.")
 
     # Las tablas que se ofrecen dependen de la familia elegida, para no dar a
     # escoger entre 40 codigos cuando ya se acoto a residencial.
     de_la_familia = (df["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))
                      if sel_familia else slice(None))
     tablas = sorted(df.loc[de_la_familia, "TABLA_ORIGEN"].unique())
-    # Y la variante recorta esa misma lista, que es lo que se pidio al usarla.
-    if VARIANTES[sel_variante] is not None:
-        tablas = [x for x in tablas
-                  if str(x).endswith("_9") == VARIANTES[sel_variante]]
+    if solo_9:
+        tablas = [x for x in tablas if str(x).endswith("_9")]
     sel_tabla = st.multiselect("Tabla de valor", tablas)
 
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
@@ -471,9 +465,8 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
     if sel_tabla:
         d = d[d["TABLA_ORIGEN"].isin(sel_tabla)]
-    if VARIANTES[sel_variante] is not None:
-        con_9 = d["TABLA_ORIGEN"].astype(str).str.endswith("_9")
-        d = d[con_9] if VARIANTES[sel_variante] else d[~con_9]
+    if solo_9:
+        d = d[d["TABLA_ORIGEN"].astype(str).str.endswith("_9")]
     if sel_comuna:
         d = d[d["COMUNA"].isin(sel_comuna)]
     if sel_actividad:
