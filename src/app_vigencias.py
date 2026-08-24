@@ -199,13 +199,11 @@ ANEXOS = {"Sin anexos (lo aprobado)": 0,
           "Todos": None,
           "Solo con anexos": 1}
 
-# La CONDICION juridica de la construccion. La 9 es la propiedad horizontal
-# propiamente dicha, y es el corte que mas se pide: 33.909 de las 389.422
-# construcciones del analisis. Se ofrece como las tres posturas de siempre en
-# vez de una lista de codigos, porque lo que se quiere ver es "solo PH" o "todo
-# menos PH", no la condicion 3 con sus trece casos. Combinado con el filtro de
-# categoria de tabla sale, por ejemplo, todas las residenciales menos la 9.
-CONDICIONES = {"Todas": None, "Solo condición 9": "solo", "Todas menos la 9": "sin"}
+# Las tablas vienen en pareja: T1_RESIDENCIAL_011 y T1_RESIDENCIAL_011_9. La
+# segunda es la que aplica a la condicion 9. Quien usa la app pide verlas por
+# separado despues de elegir la categoria, y marcarlas una por una en "Tabla de
+# valor" es justo lo que se queria evitar.
+VARIANTES = {"Todas": None, "Solo las _9": True, "Sin las _9": False}
 
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
@@ -392,11 +390,22 @@ with st.sidebar:
                        for t in df["TABLA_ORIGEN"].unique() if "_" in t})
     sel_familia = st.multiselect("Categoría de tabla", familias)
 
+    sel_variante = st.radio(
+        "Variante de la tabla", list(VARIANTES), index=0, horizontal=True,
+        help="Cada tabla tiene su pareja terminada en _9, la que aplica a la "
+             "condición 9. Esto las separa de una vez, sin marcarlas una por "
+             "una: recorta lo que se ofrece abajo en «Tabla de valor» y "
+             "también lo que entra al reporte.")
+
     # Las tablas que se ofrecen dependen de la familia elegida, para no dar a
     # escoger entre 40 codigos cuando ya se acoto a residencial.
     de_la_familia = (df["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))
                      if sel_familia else slice(None))
     tablas = sorted(df.loc[de_la_familia, "TABLA_ORIGEN"].unique())
+    # Y la variante recorta esa misma lista, que es lo que se pidio al usarla.
+    if VARIANTES[sel_variante] is not None:
+        tablas = [x for x in tablas
+                  if str(x).endswith("_9") == VARIANTES[sel_variante]]
     sel_tabla = st.multiselect("Tabla de valor", tablas)
 
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
@@ -443,22 +452,6 @@ with st.sidebar:
                    "correr `comparacion_vigencia.py`: el parquet de esta "
                    "medida todavía no trae CON_ANEXO.")
 
-    if "CONDICION" in df.columns:
-        sel_cond = st.radio(
-            "Condición de la construcción", list(CONDICIONES), index=0,
-            help="La condición 9 es la propiedad horizontal propiamente dicha: "
-                 "33.909 construcciones, el 8,7% del análisis, y 33.851 de "
-                 "ellas residenciales. Con «Categoría de tabla» en "
-                 "T1_RESIDENCIAL y esto en «Todas menos la 9» salen las "
-                 "301.206 residenciales que no son PH. En las medidas de "
-                 "predio la condición es la de su construcción de mayor área, "
-                 "igual que la tabla y la actividad.")
-    else:
-        sel_cond = "Todas"
-        st.caption("Para filtrar por condición hace falta volver a correr "
-                   "`comparacion_vigencia.py`: el parquet de esta medida "
-                   "todavía no trae CONDICION.")
-
     st.divider()
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
@@ -478,6 +471,9 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
     if sel_tabla:
         d = d[d["TABLA_ORIGEN"].isin(sel_tabla)]
+    if VARIANTES[sel_variante] is not None:
+        con_9 = d["TABLA_ORIGEN"].astype(str).str.endswith("_9")
+        d = d[con_9] if VARIANTES[sel_variante] else d[~con_9]
     if sel_comuna:
         d = d[d["COMUNA"].isin(sel_comuna)]
     if sel_actividad:
@@ -488,10 +484,6 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
     if ANEXOS[sel_anexo] is not None and "CON_ANEXO" in d.columns:
         d = d[d["CON_ANEXO"] == ANEXOS[sel_anexo]]
-    modo_cond = CONDICIONES[sel_cond]
-    if modo_cond and "CONDICION" in d.columns:
-        cond9 = pd.to_numeric(d["CONDICION"], errors="coerce") == 9
-        d = d[cond9] if modo_cond == "solo" else d[~cond9]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
