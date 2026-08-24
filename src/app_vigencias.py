@@ -199,10 +199,6 @@ ANEXOS = {"Sin anexos (lo aprobado)": 0,
           "Todos": None,
           "Solo con anexos": 1}
 
-# Las tres posturas frente a la condicion 9. El valor es lo que tiene que dar
-# TABLA_ORIGEN.endswith("_9"), y None es "no filtrar".
-COND_9 = {"Todas": None, "Solo la 9": True, "Excepto la 9": False}
-
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
@@ -388,25 +384,26 @@ with st.sidebar:
                        for t in df["TABLA_ORIGEN"].unique() if "_" in t})
     sel_familia = st.multiselect("Categoría de tabla", familias)
 
-    # Cada tabla tiene su pareja terminada en _9, la de la condicion 9. Las
-    # tres respuestas son excluyentes -no se puede estar dentro y fuera de la
-    # 9 a la vez-, asi que van en un solo control: con dos casillas sueltas
-    # marcar las dos daria un reporte vacio que parece un error de la app.
-    # Recorta la lista que se ofrece abajo en "Tabla de valor" y tambien lo
-    # que entra al reporte, para no marcar las tablas una por una.
-    sel_c9 = st.radio("Condición 9", list(COND_9), index=0, horizontal=True,
-                      help="Las tablas de la condición 9 son las que terminan "
-                           "en _9. «Solo la 9» deja esas; «Excepto la 9», las "
-                           "demás.")
+    # Cada tabla tiene su pareja terminada en _9, la de la condicion 9. Las dos
+    # casillas SUMAN, no se encadenan: cada una admite un grupo. Sin marcar
+    # ninguna entran todas -es el arranque- y marcando las dos, tambien, que es
+    # lo que se pidio al marcarlas. Asi ninguna combinacion deja el reporte
+    # vacio, que con dos filtros en cadena seria lo que pasaria.
+    c9_si = st.checkbox("Condición 9", value=False,
+                        help="Las tablas que terminan en _9.")
+    c9_no = st.checkbox("Excepto la 9", value=False,
+                        help="Las demás tablas. Con las dos marcadas, o con "
+                             "ninguna, entran todas.")
+    # True = solo las _9, False = solo las demas, None = no filtrar.
+    filtro_9 = c9_si if c9_si != c9_no else None
 
     # Las tablas que se ofrecen dependen de la familia elegida, para no dar a
     # escoger entre 40 codigos cuando ya se acoto a residencial.
     de_la_familia = (df["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))
                      if sel_familia else slice(None))
     tablas = sorted(df.loc[de_la_familia, "TABLA_ORIGEN"].unique())
-    if COND_9[sel_c9] is not None:
-        tablas = [x for x in tablas
-                  if str(x).endswith("_9") == COND_9[sel_c9]]
+    if filtro_9 is not None:
+        tablas = [x for x in tablas if str(x).endswith("_9") == filtro_9]
     sel_tabla = st.multiselect("Tabla de valor", tablas)
 
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
@@ -472,9 +469,9 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
     if sel_tabla:
         d = d[d["TABLA_ORIGEN"].isin(sel_tabla)]
-    if COND_9[sel_c9] is not None:
+    if filtro_9 is not None:
         es_9 = d["TABLA_ORIGEN"].astype(str).str.endswith("_9")
-        d = d[es_9] if COND_9[sel_c9] else d[~es_9]
+        d = d[es_9] if filtro_9 else d[~es_9]
     if sel_comuna:
         d = d[d["COMUNA"].isin(sel_comuna)]
     if sel_actividad:
