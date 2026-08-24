@@ -35,6 +35,8 @@ HOJAS = [
     'T2_EDIFICIOS_10C',
     'T3_COMERCIAL_7C',
     'T3_COMERCIAL_10C',
+    'T4_INDUSTRIAL_7C',
+    'T4_INDUSTRIAL_10C'
 ]
 
 # Nombres posibles de cada columna (en minuscula, sin acentos) - hojas NC

@@ -67,10 +67,13 @@ CONFIG = {
     "vigencia_base": 2026,
     "vigencia_liq": 2027,
 
-    # Familias de tablas que entran al reporte, en orden.
+    # Familias de tablas que entran al reporte, en orden. Una familia cuya
+    # tabla no se haya entregado no aparece: sus construcciones se caen por
+    # "sin VM2 de tabla" y no hay que tocar nada cuando llegue.
     "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"),
                  ("T2_EDIFICIOS", "EDIFICIOS"),
-                 ("T3_COMERCIAL", "COMERCIAL")],
+                 ("T3_COMERCIAL", "COMERCIAL"),
+                 ("T4_INDUSTRIAL", "INDUSTRIAL")],
 
     # Usos que van por MODELO, con la CONDICION que si entra por tabla.
     #
@@ -95,6 +98,14 @@ CONFIG = {
 
     # Solo entran las construcciones cuyo valor sale de tabla en las dos vigencias.
     "solo_valor_de_tabla": True,
+
+    # Lo que de verdad se valora POR FUERA DE TABLA, por su destino: 023 son
+    # los centros comerciales grandes y 020 su pareja. Antes esto se leia de la
+    # marca ESPECIAL, que viene de un Excel de construcciones especiales ajeno
+    # al proceso: marcaba 32.915 construcciones cuando los destinos especiales
+    # son 3.070. Se mira el destino, que es el dato de la base, y se liquida
+    # todo lo demas que tenga tabla.
+    "destinos_especiales": ("020", "023"),
     # Metodos de liquidacion 2026 que si son "por tabla".
     "metodos_de_tabla": ("TABLA + TERRENO", "TABLA SIN TERRENO"),
 
@@ -473,9 +484,15 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             fuera_metodo = ~metodo.isin(validos)
         else:
             fuera_metodo = pd.Series(False, index=d.index)
+        if "DESTINOCONS" in d.columns:
+            destino = d["DESTINOCONS"].astype(str).str.strip().str.zfill(3)
+            es_destino_especial = destino.isin(CONFIG["destinos_especiales"])
+        else:
+            es_destino_especial = pd.Series(False, index=d.index)
         reglas += [
-            ("valorada por fuera de tabla en la vigencia (ESPECIAL = 1)",
-             _marca("ESPECIAL")),
+            ("se valora por fuera de tabla por su destino ("
+             + ", ".join(CONFIG["destinos_especiales"]) + ")",
+             es_destino_especial),
             ("con valor especial en 2026 (ESPECIAL_2026 = 1)",
              _marca("ESPECIAL_2026")),
             ("predio no liquidado por tabla (METODO_LIQUIDACION INTEGRAL/MIXTO)",
