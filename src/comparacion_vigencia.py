@@ -547,7 +547,8 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
          g["TABLA_ORIGEN"].nunique().rename("N_TABLAS_PREDIO")],
         axis=1)
     # Mismos nombres que a nivel construccion, pero de la construccion dominante.
-    for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM"):
+    for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM",
+              "CONDICION"):
         if c in principal.columns:
             uni[c] = principal[c]
     uni = uni.reset_index()
@@ -1620,6 +1621,11 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     # abre ninguna puerta que el recorte por predio no tuviera
                     # ya abierta, que publica esta misma columna.
                     "N_CONST_PREDIO", "CON_ANEXO",
+                    # La condicion juridica: la 9 es la propiedad horizontal
+                    # propiamente dicha. Va al recorte porque es el corte que
+                    # mas se pide, y no dice mas de lo que ya dice USO_LADM,
+                    # que va desde el principio.
+                    "CONDICION",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",
                     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -1631,6 +1637,9 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
                            "N_CONST_PREDIO", "N_TABLAS_PREDIO", "CON_ANEXO",
+                           # Como la tabla y la actividad: la de la
+                           # construccion de mayor area del predio.
+                           "CONDICION",
                            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                            "VARIACION_VALORCONS_CAT_PCT",
                            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
