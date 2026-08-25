@@ -3,6 +3,18 @@ import numpy as np
 from io import StringIO
 
 
+def _sin_uso_ladm(d):
+    """
+    Quita USO_LADM antes de cruzar con la tabla de nombres de este modulo.
+
+    Las entregas export_*_homologado ya traen esa columna, y los merge de abajo
+    la traen tambien -de la tabla de nombres, que es la que manda aqui-. Con las
+    dos, el merge produce USO_LADM_x / USO_LADM_y y el nombre simple deja de
+    existir: es el KeyError 'USO_LADM' al contar los sin homologar.
+    """
+    return d.drop(columns=['USO_LADM'], errors='ignore')
+
+
 def aplicar_homologacion(df):
     """
     Procesa construcciones de 2025 (comunas 01, 09, 10, 11, 12)
@@ -221,7 +233,7 @@ def aplicar_homologacion(df):
     print(f"Urbano Convencionales: {len(df_conv)} total, {len(df_conv_homologadas)} homologadas, {len(df_conv_sin_homologar)} sin homologar")
 
     # Merge solo las homologadas
-    df_conv_homologadas = pd.merge(df_conv_homologadas, conv, on="DESTINOCONS", how="left")
+    df_conv_homologadas = pd.merge(_sin_uso_ladm(df_conv_homologadas), conv, on="DESTINOCONS", how="left")
     
     # if len(df_conv_sin_homologar) > 0:
     #     df_conv_sin_homologar["DESTANEX"] = df_no_conv_sin_homologar["DESTANEX_2025"]
@@ -275,7 +287,7 @@ def aplicar_homologacion(df):
     print(f"Urbano No convencionales: {len(df_no_conv)} total, {len(df_no_conv_homologadas)} homologadas, {len(df_no_conv_sin_homologar)} sin homologar")
     
     # Merge solo las homologadas
-    df_no_conv_homologadas = pd.merge(df_no_conv_homologadas, no_conv, on="DESTANEX", how="left")
+    df_no_conv_homologadas = pd.merge(_sin_uso_ladm(df_no_conv_homologadas), no_conv, on="DESTANEX", how="left")
     
     # Para las sin homologar: mantener DESTANEX_2025 como DESTANEX (sin transformar)
     # if len(df_no_conv_sin_homologar) > 0:
@@ -458,10 +470,10 @@ def cruce_uso_ladm(df):
     df_no_conv['DESTANEX'] = df_no_conv['DESTANEX_2025'].round(0).astype(int)
     
     # Merge convencionales (usando DESTINOCONS_2025)
-    df_conv = pd.merge(df_conv, conv, on="DESTINOCONS_2025", how="left")
+    df_conv = pd.merge(_sin_uso_ladm(df_conv), conv, on="DESTINOCONS_2025", how="left")
     
     # Merge no convencionales (usando DESTANEX_2025)
-    df_no_conv = pd.merge(df_no_conv, no_conv, on="DESTANEX_2025", how="left")
+    df_no_conv = pd.merge(_sin_uso_ladm(df_no_conv), no_conv, on="DESTANEX_2025", how="left")
     
     # Concatenar resultados
     df = pd.concat([df_conv, df_no_conv], ignore_index=True)
@@ -734,7 +746,7 @@ def homologar_rural(df):
         )
 
     # Merge solo homologadas
-    df_conv_homologadas = pd.merge(df_conv_homologadas, conv, on="DESTINOCONS", how="left")
+    df_conv_homologadas = pd.merge(_sin_uso_ladm(df_conv_homologadas), conv, on="DESTINOCONS", how="left")
     
     # Unir
     df_conv = pd.concat([df_conv_homologadas, df_conv_sin_homologar], ignore_index=True, join='outer')
@@ -796,7 +808,7 @@ def homologar_rural(df):
         print("   🔎 SIN HOMOLOGAR [RURAL NO CONV] · top DESTANEX_2025:")
         print(df_no_conv_sin_homologar['DESTANEX_2025'].value_counts(dropna=False).head(20).to_string())
 
-    df_no_conv_homologadas = pd.merge(df_no_conv_homologadas, no_conv, on="DESTANEX", how="left")
+    df_no_conv_homologadas = pd.merge(_sin_uso_ladm(df_no_conv_homologadas), no_conv, on="DESTANEX", how="left")
     
     df_no_conv = pd.concat([df_no_conv_homologadas, df_no_conv_sin_homologar], ignore_index=True, join='outer')
     
