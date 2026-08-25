@@ -148,14 +148,18 @@ def procesar_construcciones(base_path=None):
     """
 
     if base_path is None:
-        base_path = Path(__file__).resolve().parent.parent / "input"
+        base_path = Path(__file__).resolve().parent.parent / "input" / "export_liq"
     else:
         base_path = Path(base_path)
 
+    # Los nombres de la entrega traen ANEXO y CONSTRUCCION, no "convencional".
+    # El patron viejo era r"convencional" y tenia dos problemas: no casa con
+    # ninguno de estos archivos, y ademas casaba con "no_convencional", asi que
+    # 'conv' podia quedarse con el archivo equivocado sin que nada avisara.
     file_patterns = {
-        "predio": r"predio_",
-        "conv": r"convencional",
-        "no_conv": r"no_convencional"
+        "predio": r"export_predio_zhf",
+        "conv": r"construccion",          # CONSTRUCCION -> convencional
+        "no_conv": r"anexo",              # ANEXO        -> no convencional
     }
 
     dataframes = {k: None for k in file_patterns}
@@ -176,10 +180,14 @@ def procesar_construcciones(base_path=None):
         print("⚠️ No se encontraron archivos en la carpeta.")
 
     for name, pattern in file_patterns.items():
-        matched_files = [
-            f for f in files
-            if re.search(pattern, os.path.basename(f), re.IGNORECASE)
-        ]
+        # Ordenado por nombre DESCENDENTE: los export de predio empiezan por la
+        # fecha (20260804_, 20260728_), asi que el primero es el mas reciente.
+        # Antes se tomaba matched_files[0] del glob, que iba en orden
+        # ascendente y se habria quedado con la entrega vieja.
+        matched_files = sorted(
+            (f for f in files
+             if re.search(pattern, os.path.basename(f), re.IGNORECASE)),
+            key=lambda f: os.path.basename(f), reverse=True)
 
         if matched_files:
             try:
@@ -190,6 +198,32 @@ def procesar_construcciones(base_path=None):
         else:
             print(f"⚠️ No se encontró archivo para '{name}'")
 
+    # --- ZHF de la entrega anterior, pegada como ZHF_ANTERIOR ---------------
+    # Sirve para ver que predios cambiaron de zona homogenea. Viene de
+    # export_predio_<fecha>, que es OTRO archivo: el patron pide la fecha
+    # pegada a "export_predio_" y por eso no casa con los
+    # <fecha>_export_predio_zhf_<vigencia>, que son el predio principal.
+    predios = sorted(
+        (f for f in files
+         if re.search(r"export_predio_\d{8}", os.path.basename(f), re.IGNORECASE)),
+        key=lambda f: os.path.basename(f), reverse=True)
+    if dataframes["predio"] is not None and predios:
+        anterior = predios[0]
+        try:
+            prev = leer_archivo(anterior)[["ID_PREDIO", "ZHF"]].copy()
+            prev = (prev.rename(columns={"ZHF": "ZHF_ANTERIOR"})
+                        .drop_duplicates("ID_PREDIO"))
+            dataframes["predio"] = dataframes["predio"].merge(
+                prev, on="ID_PREDIO", how="left", validate="many_to_one")
+            hay = dataframes["predio"]["ZHF_ANTERIOR"].notna().sum()
+            print(f"✅ ZHF_ANTERIOR desde {os.path.basename(anterior)}: "
+                  f"{hay:,} de {len(dataframes['predio']):,} predios la traen")
+        except Exception as e:
+            print(f"⚠️ No se pudo agregar ZHF_ANTERIOR desde "
+                  f"{os.path.basename(anterior)}: {e}")
+    elif dataframes["predio"] is not None:
+        print("⚠️ No hay export_predio_<fecha>: no se agrega ZHF_ANTERIOR")
+
     for k, v in dataframes.items():
         print(f"📊 {k}: {'OK' if v is not None else 'None'}")
 
@@ -198,6 +232,32 @@ def procesar_construcciones(base_path=None):
         dataframes["conv"],
         dataframes["no_conv"]
     )
+def renombrar_destinos(d):
+    """
+    Deja DESTINOCONS_2025 y DESTANEX_2025 listos para Homologacion, sin pisar
+    los que la entrega ya trae.
+
+    La entrega export_*_homologado incluye esas dos columnas ya calculadas, y
+    son los codigos que Homologacion.py espera de verdad: sus reglas preguntan
+    por 411, 412, 415, 125... que solo aparecen ahi. El DESTINOCONS crudo trae
+    1, 3, 8, 12, 25. Difieren en 248.723 de 792.603 construcciones -8 pasa a
+    411, 25 a 112, 12 a 3-.
+
+    Antes las exportaciones no las traian y se renombraba el crudo a ese
+    nombre. Hacerlo ahora deja DOS columnas iguales, y df['DESTINOCONS_2025']
+    devuelve un DataFrame en vez de una Serie: es el TypeError "arg must be a
+    list, tuple, 1-d array, or Series".
+    """
+    mapa = {}
+    if 'DESTANEX_2025' not in d.columns and 'DESTANEX' in d.columns:
+        mapa['DESTANEX'] = 'DESTANEX_2025'
+    if 'DESTINOCONS_2025' not in d.columns and 'DESTINOCONS' in d.columns:
+        mapa['DESTINOCONS'] = 'DESTINOCONS_2025'
+    if mapa:
+        print(f"   (columnas renombradas al vuelo: {mapa})")
+    return d.rename(columns=mapa) if mapa else d
+
+
 def cruces_const_predio(df_predio, df_conv, df_noconv):
 
 
@@ -428,8 +488,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     urbano_25['CONDICION'] = urbano_25['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(str)
     
     # Renombrar para las funciones de homologación
-    urbano_24 = urbano_24.rename(columns={'DESTANEX': 'DESTANEX_2025', 'DESTINOCONS': 'DESTINOCONS_2025'})
-    urbano_25 = urbano_25.rename(columns={'DESTANEX': 'DESTANEX_2025', 'DESTINOCONS': 'DESTINOCONS_2025'})
+    urbano_24 = renombrar_destinos(urbano_24)
+    urbano_25 = renombrar_destinos(urbano_25)
     
     cols = ['DESTANEX_2025', 'DESTINOCONS_2025']
 
@@ -454,8 +514,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     urbano_25['CONDICION'] = urbano_25['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(str)
 
     # Renombrar para las funciones de homologación
-    urbano_24 = urbano_24.rename(columns={'DESTANEX': 'DESTANEX_2025', 'DESTINOCONS': 'DESTINOCONS_2025'})
-    urbano_25 = urbano_25.rename(columns={'DESTANEX': 'DESTANEX_2025', 'DESTINOCONS': 'DESTINOCONS_2025'})
+    urbano_24 = renombrar_destinos(urbano_24)
+    urbano_25 = renombrar_destinos(urbano_25)
 
 
     # Convertir a numérico
@@ -488,7 +548,7 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
 
     if len(rural) > 0:
         # Preparar columnas rural igual que urbano
-        rural = rural.rename(columns={'DESTANEX': 'DESTANEX_2025', 'DESTINOCONS': 'DESTINOCONS_2025'})
+        rural = renombrar_destinos(rural)
         rural['DESTINOCONS_2025'] = pd.to_numeric(rural['DESTINOCONS_2025'], errors='coerce')
         rural['DESTANEX_2025'] = pd.to_numeric(rural['DESTANEX_2025'], errors='coerce')
         rural['CONDICION'] = rural['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(str)

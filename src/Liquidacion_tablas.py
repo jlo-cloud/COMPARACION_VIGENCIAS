@@ -52,6 +52,21 @@ def tablas_liquidacion(df_const):
     df_const['ACT_ECON'] = _tipologia.str[:2]       # '01'
     df_const['TIPO_SEGUN_ACT'] = _tipologia.str[2:]  # '3'
     df_const['ACTIVIDAD'] = _tipologia.str[1:]      # '13'
+
+    # La tipologia de la ENTREGA ANTERIOR, con la misma regla, mas la marca de
+    # cambio. Es lo que el equipo de tipologias necesita para ver de un golpe
+    # que predios se movieron de zona. ZHF_ANTERIOR la pega
+    # tabla_construccion.py desde export_predio_<fecha>; si no llega, las dos
+    # columnas salen vacia y en cero sin romper nada.
+    if 'ZHF_ANTERIOR' in df_const.columns:
+        _zhf_ant = df_const['ZHF_ANTERIOR'].astype(str).str.strip()
+        _tip_ant = _zhf_ant.str[-3:].where(_zhf_ant.str.len() >= 11, '')
+    else:
+        _tip_ant = pd.Series('', index=df_const.index)
+    df_const['TIPOLOGIA_ZHF_ANTERIOR'] = _tip_ant
+    # Comparacion literal: cuenta como cambio tanto pasar de una tipologia a
+    # otra como ganarla o perderla. Con las dos vacias queda en 0.
+    df_const['CAMBIO_TIPOLOGIA'] = (_tip_ant != _tipologia).astype(int)
         # Transformar valores
     # Primero aseguramos que los valores sean numéricos
 
