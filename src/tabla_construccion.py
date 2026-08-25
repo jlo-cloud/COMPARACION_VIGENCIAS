@@ -656,8 +656,12 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     del df_predio_usop, df_const, df_conv, df_noconv
     gc.collect()
 
-    #df_const_predio_clean = generar_reporte_inconsistencias(df_const_predio)
-    df_const_predio_clean = df_const_predio.copy()
+    # Activado: genera el reporte y devuelve la base SIN los predios
+    # inconsistentes, que es lo pedido -no se liquidan hasta que los ajusten-.
+    # Con los criterios de hoy son ~64.000 predios, el 8.8%. Para volver a
+    # correr sin descontar, comente la primera linea y descomente la segunda.
+    df_const_predio_clean = generar_reporte_inconsistencias(df_const_predio)
+    # df_const_predio_clean = df_const_predio.copy()
 
     print(f'PREDIOS DESCONTADOS POR INCONSISTENCIAS {df_const_predio['ID_PREDIO'].nunique()-df_const_predio_clean['ID_PREDIO'].nunique()}')
 

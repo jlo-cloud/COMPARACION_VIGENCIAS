@@ -677,7 +677,7 @@ def _formatear(ruta, df_tablas, df_nc_out, df_control):
     try:
         wb.save(ruta)
     except PermissionError:
-        raise SystemExit(f"No se pudo guardar '{ruta}'. Cierrelo en Excel y "
+        raise RuntimeError(f"No se pudo guardar '{ruta}'. Cierrelo en Excel y "
                          f"vuelva a ejecutar.")
 
 
@@ -695,7 +695,7 @@ def consolidar_tablas(ruta_entrada=None, ruta_salida=None) -> str:
 
     entrada = Path(ruta_entrada) if ruta_entrada else consolidado_mas_reciente()
     if entrada is None or not entrada.exists():
-        raise SystemExit(
+        raise RuntimeError(
             f"No se encontro ningun Consolidado_<fecha>.xlsx en "
             f"{CARPETA_ENTRADA}. Deje ahi el libro que entrega el equipo de "
             f"tablas y vuelva a ejecutar.")
@@ -738,7 +738,7 @@ def consolidar_tablas(ruta_entrada=None, ruta_salida=None) -> str:
             df_nc_out.to_excel(writer, index=False, sheet_name=HOJA_NC)
             df_control.to_excel(writer, index=False, sheet_name=HOJA_CTRL)
     except PermissionError:
-        raise SystemExit(f"No se pudo escribir '{salida}'. Cierrelo en Excel y "
+        raise RuntimeError(f"No se pudo escribir '{salida}'. Cierrelo en Excel y "
                          f"vuelva a ejecutar.")
 
     print("Aplicando formato...")
