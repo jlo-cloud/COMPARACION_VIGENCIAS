@@ -3,6 +3,28 @@ import numpy as np
 from datetime import datetime
 import os
 
+# Motivos que ADEMAS de reportarse descuentan el predio de la liquidacion.
+#
+# "Sin ZHF" reporta y NO descuenta: las tres familias tienen camino alterno
+# cuando la ZHF no sirve -residencial y edificios deciden por ESTRPRED,
+# comercial cae a T3_COMERCIAL_022 e industrial a T4_INDUSTRIAL_032-, y de
+# hecho las 31.282 construcciones sin ZHF que hay en el reporte se liquidaron
+# todas, ninguna quedo sin valor. Se reportan para pedir la correccion del
+# dato, no para sacar el predio. Las coordenadas, igual: no participan en la
+# asignacion de tabla.
+#
+# Los otros cuatro si impiden liquidar: sin uso no hay tabla que asignar, sin
+# puntaje no hay fila que consultar, sin area el valor sale en cero, y el
+# conflicto de uso contra condicion es un dato que hay que corregir en la base
+# antes de poder valorar el predio.
+MOTIVOS_QUE_DESCUENTAN = {
+    'Sin USO_LADM',
+    'USO_LADM inconsistente',
+    'Sin puntaje',
+    'Sin área',
+}
+
+
 def generar_reporte_inconsistencias(
     df,
     validar_coordenadas=True,
@@ -25,12 +47,26 @@ def generar_reporte_inconsistencias(
     if validar_zhf:
 
         def es_zhf_invalido(zhf):
+            """
+            Sin ZHF utilizable: nulo, cero, o menos de 6 digitos.
+
+            Antes se exigian 11 caracteres exactos, y no funcionaba: el ZHF
+            llega como ENTERO, asi que los que empiezan por cero pierden esas
+            posiciones -08634801 se guarda como 8634801- y quedaban marcados
+            sin tener nada malo. Ademas hay 299.388 filas de 13 digitos, que
+            tampoco median 11. Con la regla vieja caian 329.774 predios; sin
+            ZHF de verdad son 46.609, los que traen 0.
+            """
             if pd.isna(zhf):
                 return True
             zhf_str = str(zhf).strip()
+            if zhf_str.endswith('.0'):          # por si llega como flotante
+                zhf_str = zhf_str[:-2]
             if zhf_str in ['', 'nan', 'None']:
                 return True
-            return len(zhf_str) != 11
+            if not zhf_str.isdigit():
+                return True
+            return int(zhf_str) == 0 or len(zhf_str) < 6
 
         sin_zhf = df[df['ZHF'].apply(es_zhf_invalido)].copy()
         sin_zhf['MOTIVO_INCONSISTENCIA'] = 'Sin ZHF o ZHF inválido'
@@ -98,17 +134,55 @@ def generar_reporte_inconsistencias(
             'detalle': sin_uso_ladm.drop_duplicates('ID_PREDIO')
         }
 
-        # USO_LADM inconsistente
-        uso_ph = df[
-            df['USO_LADM'].notna() &
-            df['USO_LADM'].astype(str).str.contains('_PH', na=False) &
-            (~df['CONDICION'].isin([8, 9]))
-        ].copy()
+        # USO_LADM inconsistente, en las DOS direcciones. Antes solo se miraba
+        # la primera, que son 12 casos; la segunda son miles y nadie la veia.
+        #
+        # Los ANEXOS quedan fuera de esta validacion: el anexo no trae uso
+        # propio, asi que su USO_LADM no dice nada sobre que condicion deberia
+        # tener y compararlos solo produce ruido.
+        es_anexo = pd.to_numeric(df['DESTANEX'], errors='coerce').fillna(0) > 0
+        uso_txt = df['USO_LADM'].astype(str)
+        tiene_ph = uso_txt.str.contains('_PH', case=False, na=False)
+        cond_num = pd.to_numeric(df['CONDICION'], errors='coerce').fillna(0)
 
-        uso_ph['MOTIVO_INCONSISTENCIA'] = 'USO _PH sin CONDICION 8 o 9'
+        # En las 7 comunas el residencial NO se separa por condicion: el
+        # consolidado trae T1_RESIDENCIAL_7C_011..016 y ninguna columna
+        # COND_9. Alli una condicion 9 mal puesta no desvia el valor a ningun
+        # lado -las 20.605 construcciones de PH de ese grupo se valoran con la
+        # misma tabla que las demas-, asi que se reporta pero NO se descuenta
+        # el predio. En las 10 comunas si hay COND_9 y la condicion equivocada
+        # manda la construccion a la tabla de PH: eso si impide liquidar bien.
+        try:
+            from tabla_construccion import COMUNAS_7
+        except Exception:                                    # pragma: no cover
+            COMUNAS_7 = ['02', '03', '04', '08', '17', '19', '22']
+        es_7c = (df['COMUNA'].astype(str).str.strip().str.zfill(2)
+                 .isin(COMUNAS_7))
 
-        for predio in uso_ph['ID_PREDIO'].unique():
+        # a) el uso dice PH pero la condicion no es de PH
+        falla_a = tiene_ph & ~cond_num.isin([8, 9])
+        # b) el uso NO dice PH pero viene con condicion 9, donde eso cambia
+        #    la tabla que le toca
+        falla_b = ~tiene_ph & (cond_num == 9) & ~es_7c
+        # c) lo mismo en las 7 comunas, donde no cambia nada: solo se reporta
+        falla_c = ~tiene_ph & (cond_num == 9) & es_7c
+
+        uso_ph = df[df['USO_LADM'].notna() & ~es_anexo &
+                    (falla_a | falla_b | falla_c)].copy()
+
+        uso_ph['MOTIVO_INCONSISTENCIA'] = np.select(
+            [falla_a[uso_ph.index], falla_b[uso_ph.index]],
+            ['USO _PH sin CONDICION 8 o 9', 'USO sin _PH con CONDICION 9'],
+            default='USO sin _PH con CONDICION 9 (7 comunas, no afecta el valor)')
+
+        # El predio se descuenta solo si su inconsistencia cambia la tabla.
+        pesa = uso_ph['MOTIVO_INCONSISTENCIA'] != (
+            'USO sin _PH con CONDICION 9 (7 comunas, no afecta el valor)')
+        for predio in uso_ph.loc[pesa, 'ID_PREDIO'].unique():
             predios_con_inconsistencias.setdefault(predio, []).append('USO_LADM inconsistente')
+        for predio in uso_ph.loc[~pesa, 'ID_PREDIO'].unique():
+            predios_con_inconsistencias.setdefault(predio, []).append(
+                'USO_LADM inconsistente sin efecto')
 
         inconsistencias['USO_INCONSISTENTE'] = {
             'total': len(uso_ph),
@@ -169,8 +243,14 @@ def generar_reporte_inconsistencias(
     # ------------------------------------------------------------------
     # 5️⃣ DATAFRAME LIMPIO
     # ------------------------------------------------------------------
-    lista_predios = list(predios_con_inconsistencias.keys())
-    df_limpio = df[~df['ID_PREDIO'].isin(lista_predios)].copy()
+    a_descontar = [pid for pid, motivos in predios_con_inconsistencias.items()
+                   if any(m in MOTIVOS_QUE_DESCUENTAN for m in motivos)]
+    solo_reporte = len(predios_con_inconsistencias) - len(a_descontar)
+    df_limpio = df[~df['ID_PREDIO'].isin(a_descontar)].copy()
+    print("")
+    print(f"   Predios con alguna inconsistencia : {len(predios_con_inconsistencias):,}")
+    print(f"   De esos, se descuentan            : {len(a_descontar):,}")
+    print(f"   Solo se reportan (siguen)         : {solo_reporte:,}")
 
     # ------------------------------------------------------------------
     # 6️⃣ EXPORTAR EXCEL
@@ -181,7 +261,15 @@ def generar_reporte_inconsistencias(
 
     total_predios = df['ID_PREDIO'].nunique()
 
-    with pd.ExcelWriter(archivo, engine='openpyxl') as writer:
+    # xlsxwriter y no openpyxl: openpyxl escribe celda por celda y con
+    # decenas de miles de filas por ~70 columnas la corrida se cuelga.
+    motor = 'xlsxwriter'
+    try:
+        import xlsxwriter  # noqa: F401
+    except ImportError:
+        motor = 'openpyxl'
+
+    with pd.ExcelWriter(archivo, engine=motor) as writer:
 
         resumen = [{
             'Tipo': k,
