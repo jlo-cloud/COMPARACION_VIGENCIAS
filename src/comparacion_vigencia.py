@@ -244,6 +244,9 @@ def nombres_series(prefijo: str) -> tuple[str, str, str]:
 COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM",
             "TABLA_ORIGEN", "TIPOLOGIA_ZHF", "ZHF", "COMUNA", "ESTRPRED",
             "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
+            # ESPECIAL ya viene mas abajo en esta misma lista: la leia la regla
+            # de exclusion que se retiro. Se conserva ahi y ahora se usa solo
+            # para subirla a nivel predio y mostrarla en el detalle.
             "PUNTCONS",
             "ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
             "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "VANEXO",
@@ -268,22 +271,27 @@ REGLAS = [
      "Construcciones residenciales ubicadas en zonas con actividad economica "
      "residencial", "Tipologias 011 a 016"),
     ("", "", "Construcciones residenciales ubicadas en zonas con actividad "
-     "economica diferente a residencial", "Estratos 1 a 6"),
+     "economica diferente a residencial",
+     "Estratos 1 a 6; sin estrato o cero, la tabla del estrato 6"),
     ("T2_EDIFICIOS", "Apartamentos_4_y_mas_pisos (003)",
      "Construcciones con uso edificios ubicadas en zonas con actividad "
      "economica residencial", "Tipologias 011 a 016"),
     ("", "", "Construcciones con uso edificios ubicadas en zonas con actividad "
-     "economica diferente a residencial", "Estratos 1 a 6"),
+     "economica diferente a residencial",
+     "Estratos 1 a 6; sin estrato o cero, la tabla del estrato 6"),
     ("T3_COMERCIAL",
      "Bodegas_Comerciales_Grandes_Almacenes (016), Estacion_de_servicio (021), "
      "Clubes_Casinos (024), Comercio (025), Oficinas (028), Plaza_Mercado (039), "
-     "Restaurantes (041), Talleres (049)",
+     "Restaurantes (041), Restaurantes_en_PH (042), Talleres (049)",
      "Construcciones comerciales ubicadas en zonas con actividad economica "
      "comercial", "Tipologias 021 a 023"),
     ("", "", "Construcciones comerciales ubicadas en zonas con actividad "
      "economica residencial", "Tipologia 021"),
     ("", "", "Construcciones comerciales ubicadas en zonas diferentes a la "
      "actividad economica residencial y comercial", "Tipologia 022"),
+    ("T3_COMERCIAL_023", "Pensiones_y_Residencias (038)",
+     "Tabla fija: no depende de la zona ni del estrato",
+     "T3_COMERCIAL_023 en todas las comunas"),
     ("T4_INDUSTRIAL",
      "Salon_Comunal (009), Bodegas_Comerciales_en_PH (018), Industrias (047), "
      "Industrias_en_PH (048)",
@@ -367,6 +375,21 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         d["PREDIO_DESTINO_ESPECIAL"] = d["ID_PREDIO"].isin(predios_esp).astype(int)
     else:
         d["PREDIO_DESTINO_ESPECIAL"] = 0
+
+    # La marca ESPECIAL de la base de convencionales, subida a nivel PREDIO: si
+    # UNA sola de sus construcciones viene marcada, el predio queda marcado y la
+    # marca baja a todas sus construcciones.
+    #
+    # NO excluye ni cambia la liquidacion: es informativa, para poder identificar
+    # esos predios en el detalle. Se calcula aqui, antes de recortar a las
+    # familias, para que cuente tambien las construcciones especiales que salen
+    # con TABLA_ORIGEN = ESPECIALES y no llegarian al recorte.
+    if {"ESPECIAL", "ID_PREDIO"} <= set(d.columns):
+        marcada = pd.to_numeric(d["ESPECIAL"], errors="coerce").fillna(0) == 1
+        predios_marcados = set(d.loc[marcada, "ID_PREDIO"])
+        d["PREDIO_ESPECIAL"] = d["ID_PREDIO"].isin(predios_marcados).astype(int)
+    else:
+        d["PREDIO_ESPECIAL"] = 0
 
     total = len(d)
     d = d[d["TABLA_ORIGEN"].str.startswith(prefijos)].copy()
@@ -1040,8 +1063,23 @@ DICCIONARIO_DETALLE = [
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",
      "0.7 en comunas actualizadas 2024-2025, 0.6 en las demas"),
     ("USO_LADM", "Uso de la construccion", "de la base"),
-    ("CONDICION", "Condicion de la construccion (9 = PH, 8 = ...)",
+    # La descripcion decia "(9 = PH, 8 = ...)": el marcador de posicion se
+    # estaba yendo tal cual a la hoja Diccionario del entregable. Aqui solo
+    # se afirma lo que el propio proceso sostiene -8 y 9 son PH, 0 no lo
+    # es-; los codigos 2, 3, 4 y 5 se nombran sin atribuirles significado.
+    ("CONDICION",
+     "Condicion juridica del predio, digito 22 del numero predial nacional. "
+     "8 y 9 son propiedad horizontal (la 9 es la que separa las columnas "
+     "COND_9 de las COND_0 en el grupo de 10 comunas); 0 es el predio sin "
+     "propiedad horizontal. En este corte aparecen ademas los codigos 2, 3, "
+     "4 y 5",
      "de la base; define si un uso va por tabla o por modelo"),
+    ("N_TABLAS_PREDIO",
+     "Tablas de valor distintas que usan las construcciones del predio. "
+     "Si es mayor que 1, el predio se clasifica por la construccion de "
+     "mayor area",
+     "solo en el grano por PREDIO; sale de TABLA_ORIGEN.nunique() por "
+     "predio y es lo que cuenta los predios mixtos"),
     ("TABLA_ORIGEN", "Tabla de valor que le asigno la liquidacion",
      "nombre normalizado: no distingue el grupo de comunas ni la condicion"),
     ("TABLA_VALOR", "Columna EXACTA del Excel de tablas de la que salio el VM2",
@@ -1055,6 +1093,14 @@ DICCIONARIO_DETALLE = [
      "de export_predio_<fecha>, la exportacion previa de predios"),
     ("TIPOLOGIA_ZHF_ANTERIOR", "Tipologia de la ZHF en la entrega anterior",
      "los ultimos 3 digitos de ZHF_ANTERIOR, con la misma regla"),
+    ("ESPECIAL", "1 si la construccion viene marcada como especial",
+     "de la base de convencionales, tal como llega. No cambia como se liquida: "
+     "es informativa"),
+    ("PREDIO_ESPECIAL", "1 si ALGUNA construccion del predio es especial",
+     "la marca ESPECIAL subida a nivel predio: basta con que una construccion "
+     "venga marcada para que el predio quede marcado, y el 1 aparece en todas "
+     "sus construcciones. Cuenta tambien las especiales que no llegan al "
+     "reporte. Tampoco cambia como se liquida"),
     ("CAMBIO_TIPOLOGIA", "1 si la tipologia cambio, 0 si no, SIN COMPARACION "
      "si no se puede comparar",
      "1 y 0 solo cuando las DOS tipologias existen. Si a alguna le falta "
@@ -1130,7 +1176,11 @@ COLUMNAS_EXCEL_DETALLE = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
     "COMUNA", "ESTRPRED", "USO_LADM", "CONDICION",
     "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
-    "ZHF", "TIPOLOGIA_ZHF", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
+    "ZHF", "TIPOLOGIA_ZHF",
+    # ZHF_ANTERIOR va tambien al Excel, no solo al parquet: sin el codigo
+    # completo no se puede verificar de donde salio TIPOLOGIA_ZHF_ANTERIOR.
+    "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
+    "ESPECIAL", "PREDIO_ESPECIAL",
     "ACTIVIDAD_ECONOMICA", "CLAVE",
     "PUNTCONS", "ACONCONS", "AREA_CONST", "VTER", "VANEXO",
     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
@@ -1638,6 +1688,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
                 "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF",
                 "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
+                "ESPECIAL", "PREDIO_ESPECIAL",
                 "ACTIVIDAD_ECONOMICA", "CLAVE",
                 "PUNTCONS", "ACONCONS", "AREA_CONST",
                 "VTER", "VANEXO",

@@ -229,7 +229,8 @@ def tablas_liquidacion(df_const):
             (df_const['TIPOLOGIA_ZHF'] == '016')
         ),
 
-        # Estrato fallback - 6 condiciones
+        # Estrato fallback. Orden: zona (tipologia) -> estrato -> sin
+        # estrato o cero, la tabla del estrato 6.
         (
             df_const['DESTINOCONS'].isin(["004","012","013","063"]) &
             (df_const['CONDICION'] == 9) &
@@ -273,7 +274,10 @@ def tablas_liquidacion(df_const):
             # Esta es la sexta del grupo y le corresponde T1_RESIDENCIAL_016_9:
             # decia ESTRPRED == 1, que ya lo habia tomado la primera condicion,
             # asi que el estrato 6 en PH se quedaba sin esta rama.
-            (df_const['ESTRPRED'] == 6)
+            # EXCEPCION, ultimo eslabon del orden zona -> estrato -> 6:
+            # el predio SIN estrato -nulo o cero- se liquida con la tabla
+            # del estrato 6. Con `== 6` a secas caia en SIN TABLA.
+            (df_const['ESTRPRED'].isna() | df_const['ESTRPRED'].isin([0, 6]))
         ),
 
 
@@ -314,7 +318,9 @@ def tablas_liquidacion(df_const):
         ),
 
 
-        # --- BLOQUE ESTRATO (sin ZHF válida) ---
+        # --- BLOQUE ESTRATO (sin ZHF valida) ---
+        # Orden: zona (tipologia) -> estrato -> sin estrato o cero, la
+        # tabla del estrato 6.
         (
             df_const['DESTINOCONS'].isin(["001","004","012","013","063"]) &
             (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) &
@@ -347,7 +353,10 @@ def tablas_liquidacion(df_const):
         (
             df_const['DESTINOCONS'].isin(["001","004","012","013","063"]) &
             (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) &
-            (df_const['ESTRPRED']==6)
+            # EXCEPCION, ultimo eslabon del orden zona -> estrato -> 6:
+            # el predio SIN estrato -nulo o cero- se liquida con la tabla
+            # del estrato 6. Con `== 6` a secas caia en SIN TABLA.
+            (df_const['ESTRPRED'].isna() | df_const['ESTRPRED'].isin([0, 6]))
         ),
         
         # -------------------------------------------
@@ -362,24 +371,25 @@ def tablas_liquidacion(df_const):
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'] == '015')),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'] == '016')),
 
-        # Estrato fallback
+        # Estrato fallback. Orden: zona (tipologia) -> estrato -> sin
+        # estrato o cero, la tabla del estrato 6.
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 1)),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 2)),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 3)),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 4)),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 5)),
-        (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'] == 6)),
+        (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF'].isna() | ~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])) & (df_const['ESTRPRED'].isna() | df_const['ESTRPRED'].isin([0, 6]))),
 
         # -------------------------------------------
         # 5. COMERCIAL T3
         # -------------------------------------------
         (
-            df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","049","028"]) &
+            df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","042","049","028"]) &
             df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016'])
         ),
 
         (
-            df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","049","028"]) &
+            df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","042","049","028"]) &
             df_const['TIPOLOGIA_ZHF'].notna() &
             (~df_const['TIPOLOGIA_ZHF'].isin(['011','012','013','014','015','016','021','022','023']))
         ),
@@ -415,9 +425,9 @@ def tablas_liquidacion(df_const):
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF']=="015")),
         (df_const['DESTINOCONS'].isin(["003"]) & (df_const['TIPOLOGIA_ZHF']=="016")),
 
-        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="021")),
-        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="022")),
-        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="023")),
+        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","042","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="021")),
+        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","042","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="022")),
+        (df_const['DESTINOCONS'].isin(["016","021","024","025","039","041","042","049","028"]) & (df_const['TIPOLOGIA_ZHF']=="023")),
 
         (df_const['DESTINOCONS'].isin(["009","018","047","048"]) & (df_const['TIPOLOGIA_ZHF']=="031")),
         (df_const['DESTINOCONS'].isin(["009","018","047","048"]) & (df_const['TIPOLOGIA_ZHF']=="032")),
@@ -447,10 +457,18 @@ def tablas_liquidacion(df_const):
         # Unidad deportiva
         df_const['DESTINOCONS'].isin(["071"]),
         
-        #pensiones y residencias
-        df_const['DESTINOCONS'].isin(["038"]) & df_const['COMUNA'].isin(['01','09','10','11','12']),
-
-        df_const['DESTINOCONS'].isin(["038"]) & df_const['COMUNA'].isin(['03','22']),
+        # PENSIONES Y RESIDENCIAS (038) -> T3_COMERCIAL_023, TODAS las comunas.
+        #
+        # Definido por el equipo de tablas. Es COMERCIAL y va a la 023 fija: no
+        # depende de la tipologia de la ZHF ni del grupo de comunas, por eso es
+        # UNA sola condicion y no entra en las listas de destinos comerciales
+        # de arriba, que si se reparten por tipologia 021/022/023.
+        #
+        # Antes eran dos ramas con las listas de comunas viejas -023 para
+        # 01/09/10/11/12 y T9_HOTELES para 03/22-, asi que en las demas comunas
+        # caia en SIN TABLA. Con esta condicion unica ya no queda ninguna
+        # comuna por fuera.
+        df_const['DESTINOCONS'].isin(["038"]),
 
         df_const['DESTINOCONS'].isin(["017"])
      
@@ -532,9 +550,8 @@ def tablas_liquidacion(df_const):
         'T11_CCOMERCIALES',
         'T12_PARQUEADEROS',
         'T13_UNIDAD_DEPORTIVA',
-        #pensiones
+        # pensiones y residencias (038), tabla fija en todas las comunas
         'T3_COMERCIAL_023',
-        'T9_HOTELES',
         'T4_INDUSTRIAL_032'
     ]
                 
