@@ -28,6 +28,19 @@ def tablas_liquidacion(df_const):
 
     ruta_especiales = "./input/ESPECIALES/20260303_PREDIOS_ESPECIALES_ACT_2025.xlsx" ### Ojo aqui
 
+    # ¿Se aplican los ESPECIALES del Excel? Hoy NO: el archivo que hay es el de
+    # 2025 y los especiales de este año no se han entregado. Aplicar los del año
+    # pasado marcaba 1.076 construcciones en 700 predios con un VM2_ESP_2026
+    # propio, que despues se comparaba contra el VM2 de tabla: dos metodos
+    # distintos, el mismo error que teniamos con los locales en PH.
+    #
+    # Lo unico especial hoy son los predios con DESTINOCONS 020 o 023, que
+    # salen por otra via -CONFIG["destinos_especiales"] en
+    # comparacion_vigencia.py- y no dependen de este archivo.
+    #
+    # Cuando entreguen los del año: se pone True y se cambia ruta_especiales.
+    APLICAR_ESPECIALES_EXCEL = False
+
 
     print(f'Tipo de columnas df const {df_const.dtypes}')
   
@@ -624,6 +637,20 @@ def tablas_liquidacion(df_const):
         df_const['VIM2_ESPECIAL'] = df_const['VIM2_ESPECIAL'].fillna(0)
         df_const['INTEGRAL_ESP_2026'] = df_const['INTEGRAL_ESP_2026'].fillna(0).astype(int)
         df_const['ORIGEN'] = df_const['ORIGEN'].fillna('NORMAL')
+
+        # El cruce se hace igual -para que el conteo de arriba siga sirviendo de
+        # control- pero si el interruptor esta apagado no se aplica nada: todo
+        # lo que depende de VIM2_ESPECIAL queda en cero, y con ello
+        # ESPECIAL_2026, VM2_ESP_2026 y ORIGEN_ESPECIAL.
+        if not APLICAR_ESPECIALES_EXCEL:
+            cruzaron = int((df_const['VIM2_ESPECIAL'] > 0).sum())
+            df_const['VIM2_ESPECIAL'] = 0.0
+            df_const['INTEGRAL_ESP_2026'] = 0
+            df_const['ORIGEN'] = 'NORMAL'
+            print(f"   ⚠️ ESPECIALES DEL EXCEL APAGADOS: se descartan los "
+                  f"{cruzaron:,} cruces del archivo de 2025. Los especiales de "
+                  f"este año no se han entregado; lo unico especial hoy es el "
+                  f"destino 020/023.")
 
 
         no_registros_post_merge = len(df_const)
