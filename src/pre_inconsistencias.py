@@ -18,6 +18,7 @@ import os
 # conflicto de uso contra condicion es un dato que hay que corregir en la base
 # antes de poder valorar el predio.
 MOTIVOS_QUE_DESCUENTAN = {
+    'Sin ZHF comercial/industrial',
     'Sin USO_LADM',
     'USO_LADM inconsistente',
     'Sin puntaje',
@@ -69,9 +70,33 @@ def generar_reporte_inconsistencias(
             return int(zhf_str) == 0 or len(zhf_str) < 6
 
         sin_zhf = df[df['ZHF'].apply(es_zhf_invalido)].copy()
-        sin_zhf['MOTIVO_INCONSISTENCIA'] = 'Sin ZHF o ZHF inválido'
 
-        for predio in sin_zhf['ID_PREDIO'].unique():
+        # Sin ZHF NO pesa igual segun la familia:
+        #
+        # - Residencial y edificios tienen con que suplirla: cuando la ZHF no
+        #   sirve, la tabla la decide el ESTRPRED del predio. Se liquidan bien,
+        #   asi que solo se reportan para pedir la correccion del dato.
+        # - Comercial e industrial NO tienen con que suplirla. Su respaldo era
+        #   caer a una tabla fija -T3_COMERCIAL_022, T4_INDUSTRIAL_032-, que da
+        #   el mismo VM2 sin importar donde este el predio ni su estrato. Sin
+        #   zona no hay como valorarlos, asi que el predio se descuenta.
+        #
+        # Los destinos son los mismos que usa Liquidacion_tablas.py para armar
+        # TABLA_ORIGEN, ya homologados y como entero.
+        DESTINOS_COMERCIAL = [16, 21, 24, 25, 28, 39, 41, 49]
+        DESTINOS_INDUSTRIAL = [9, 18, 47, 48]
+        _dest = pd.to_numeric(sin_zhf['DESTINOCONS'], errors='coerce').fillna(0)
+        es_com_ind = _dest.isin(DESTINOS_COMERCIAL + DESTINOS_INDUSTRIAL)
+
+        sin_zhf['MOTIVO_INCONSISTENCIA'] = np.where(
+            es_com_ind,
+            'Sin ZHF en comercial o industrial: no hay con que suplirla',
+            'Sin ZHF o ZHF inválido')
+
+        for predio in sin_zhf.loc[es_com_ind, 'ID_PREDIO'].unique():
+            predios_con_inconsistencias.setdefault(predio, []).append(
+                'Sin ZHF comercial/industrial')
+        for predio in sin_zhf.loc[~es_com_ind, 'ID_PREDIO'].unique():
             predios_con_inconsistencias.setdefault(predio, []).append('Sin ZHF')
 
         inconsistencias['SIN_ZHF'] = {
