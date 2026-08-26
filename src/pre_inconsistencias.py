@@ -83,7 +83,7 @@ def generar_reporte_inconsistencias(
         #
         # Los destinos son los mismos que usa Liquidacion_tablas.py para armar
         # TABLA_ORIGEN, ya homologados y como entero.
-        DESTINOS_COMERCIAL = [16, 21, 24, 25, 28, 39, 41, 49]
+        DESTINOS_COMERCIAL = [16, 21, 24, 25, 28, 39, 41, 42, 49]
         DESTINOS_INDUSTRIAL = [9, 18, 47, 48]
         _dest = pd.to_numeric(sin_zhf['DESTINOCONS'], errors='coerce').fillna(0)
         es_com_ind = _dest.isin(DESTINOS_COMERCIAL + DESTINOS_INDUSTRIAL)

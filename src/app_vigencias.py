@@ -153,10 +153,13 @@ COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
 USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
+# Pensiones_y_Residencias (038) NO va aqui: no se reparte por tipologia
+# 021/022/023 como los demas comerciales, sino que tiene tabla FIJA
+# T3_COMERCIAL_023 en todas las comunas. Va en USOS_T3_FIJO, mas abajo.
 USOS_T3 = ("Bodegas_Comerciales_Grandes_Almacenes (016), "
            "Estacion_de_servicio (021), Clubes_Casinos (024), Comercio (025), "
-           "Comercio_en_PH (028), Pensiones_y_Residencias (038), "
-           "Plaza_Mercado (039), Restaurantes (041), Talleres (049)")
+           "Comercio_en_PH (028), Plaza_Mercado (039), Restaurantes (041), "
+           "Restaurantes_en_PH (042), Talleres (049)")
 USOS_T4 = ("Salon_Comunal (009), Bodegas_Comerciales (017), "
            "Bodegas_Comerciales_en_PH (018), Industrias (047), "
            "Industrias_en_PH (048)")
@@ -170,14 +173,22 @@ TIPOLOGIAS_COMERCIAL = ["021", "022", "023"]
 TIPOLOGIAS_INDUSTRIAL = ["031", "032", "033"]
 
 # Que pasa cuando la ZHF no cae en las tipologias de su familia.
-EXC_RESIDENCIAL = ("Si las tres últimas posiciones de la ZHF son diferentes a "
-                   "011-016, se emplea el estrato socioeconómico del predio "
-                   "(ESTRPRED) y se asigna la tabla según la comuna y la "
-                   "condición jurídica.")
+EXC_RESIDENCIAL = ("El orden es: PRIMERO LA ZONA. Si las tres últimas posiciones "
+                   "de la ZHF son 011-016, esa tipología decide la tabla. Si son "
+                   "diferentes -o la ZHF no sirve- se emplea el estrato "
+                   "socioeconómico del predio (ESTRPRED) y se asigna la tabla "
+                   "según la comuna y la condición jurídica. Si no tiene zona y "
+                   "además no tiene estrato o viene en cero, se liquida con la "
+                   "tabla del estrato 6.")
 EXC_COMERCIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
                  "con T3_COMERCIAL_021 para esas comunas. Si termina en algo "
                  "distinto de 011-016 y 021-023, la tabla es "
                  "T3_COMERCIAL_022.")
+# Pensiones_y_Residencias (038): es comercial, pero con tabla fija.
+USOS_T3_FIJO = "Pensiones_y_Residencias (038)"
+EXC_T3_FIJO = ("No depende de la ZHF ni del estrato: siempre "
+               "T3_COMERCIAL_023, en todas las comunas.")
+
 EXC_INDUSTRIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
                   "con T4_INDUSTRIAL_031 para esas comunas. Si termina en algo "
                   "distinto de 011-016 y 031-033, la tabla es "
@@ -209,6 +220,12 @@ REGLAS_TABLA = [
      "T3_COMERCIAL_10C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
     (USOS_T3, "7C", "NA",
      "T3_COMERCIAL_7C_{t}", TIPOLOGIAS_COMERCIAL, EXC_COMERCIAL),
+    # Tabla fija: el patron no lleva {t} y la lista de tipologias es un
+    # unico "NA", para que reglas_asignacion() saque UNA fila por grupo.
+    (USOS_T3_FIJO, "10C", "NA",
+     "T3_COMERCIAL_10C_023", ["NA"], EXC_T3_FIJO),
+    (USOS_T3_FIJO, "7C", "NA",
+     "T3_COMERCIAL_7C_023", ["NA"], EXC_T3_FIJO),
     (USOS_T4, "10C", "NA",
      "T4_INDUSTRIAL_10C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
     (USOS_T4, "7C", "NA",

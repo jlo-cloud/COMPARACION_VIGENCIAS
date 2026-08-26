@@ -152,14 +152,20 @@ def procesar_construcciones(base_path=None):
     else:
         base_path = Path(base_path)
 
-    # Los nombres de la entrega traen ANEXO y CONSTRUCCION, no "convencional".
-    # El patron viejo era r"convencional" y tenia dos problemas: no casa con
-    # ninguno de estos archivos, y ademas casaba con "no_convencional", asi que
-    # 'conv' podia quedarse con el archivo equivocado sin que nada avisara.
+    # Los nombres cambian de una entrega a otra: unas traen
+    # "export_construccion_homologado" y "export_anexos_homologado", otras
+    # "construccion_convencional" y "construccion_no_convencional". Los
+    # patrones cubren las dos formas.
+    #
+    # ORDEN IMPORTANTE: no_conv va primero y su archivo se descarta de los
+    # candidatos a conv. "convencional" tambien casa con "no_convencional" y
+    # "construccion" casa con los dos, asi que sin esto 'conv' se quedaba con
+    # el archivo equivocado -y ordenando por nombre descendente le tocaba
+    # justamente el no convencional- sin que nada avisara.
     file_patterns = {
         "predio": r"export_predio_zhf",
-        "conv": r"construccion",          # CONSTRUCCION -> convencional
-        "no_conv": r"anexo",              # ANEXO        -> no convencional
+        "no_conv": r"no.?convencional|anexo",
+        "conv": r"convencional|construccion",
     }
 
     dataframes = {k: None for k in file_patterns}
@@ -179,6 +185,7 @@ def procesar_construcciones(base_path=None):
     else:
         print("⚠️ No se encontraron archivos en la carpeta.")
 
+    usados = set()
     for name, pattern in file_patterns.items():
         # Ordenado por nombre DESCENDENTE: los export de predio empiezan por la
         # fecha (20260804_, 20260728_), asi que el primero es el mas reciente.
@@ -186,8 +193,11 @@ def procesar_construcciones(base_path=None):
         # ascendente y se habria quedado con la entrega vieja.
         matched_files = sorted(
             (f for f in files
-             if re.search(pattern, os.path.basename(f), re.IGNORECASE)),
+             if re.search(pattern, os.path.basename(f), re.IGNORECASE)
+             and f not in usados),
             key=lambda f: os.path.basename(f), reverse=True)
+        if matched_files:
+            usados.add(matched_files[0])
 
         if matched_files:
             try:
@@ -234,28 +244,18 @@ def procesar_construcciones(base_path=None):
     )
 def renombrar_destinos(d):
     """
-    Deja DESTINOCONS_2025 y DESTANEX_2025 listos para Homologacion, sin pisar
-    los que la entrega ya trae.
+    Renombra el destino crudo a las columnas que espera Homologacion.
 
-    La entrega export_*_homologado incluye esas dos columnas ya calculadas, y
-    son los codigos que Homologacion.py espera de verdad: sus reglas preguntan
-    por 411, 412, 415, 125... que solo aparecen ahi. El DESTINOCONS crudo trae
-    1, 3, 8, 12, 25. Difieren en 248.723 de 792.603 construcciones -8 pasa a
-    411, 25 a 112, 12 a 3-.
+    DESTINOCONS -> DESTINOCONS_2025 y DESTANEX -> DESTANEX_2025. Las entregas
+    llegan CRUDAS, sin homologar, porque la homologacion la hace
+    Homologacion.py; USO_LADM tampoco viene, lo pone ese modulo al cruzar con
+    su tabla de nombres.
 
-    Antes las exportaciones no las traian y se renombraba el crudo a ese
-    nombre. Hacerlo ahora deja DOS columnas iguales, y df['DESTINOCONS_2025']
-    devuelve un DataFrame en vez de una Serie: es el TypeError "arg must be a
-    list, tuple, 1-d array, or Series".
+    Existe como funcion y no como tres renames sueltos porque el reparto la
+    llama tres veces: urbano_24, urbano_25 y rural.
     """
-    mapa = {}
-    if 'DESTANEX_2025' not in d.columns and 'DESTANEX' in d.columns:
-        mapa['DESTANEX'] = 'DESTANEX_2025'
-    if 'DESTINOCONS_2025' not in d.columns and 'DESTINOCONS' in d.columns:
-        mapa['DESTINOCONS'] = 'DESTINOCONS_2025'
-    if mapa:
-        print(f"   (columnas renombradas al vuelo: {mapa})")
-    return d.rename(columns=mapa) if mapa else d
+    return d.rename(columns={"DESTINOCONS": "DESTINOCONS_2025",
+                             "DESTANEX": "DESTANEX_2025"})
 
 
 def cruces_const_predio(df_predio, df_conv, df_noconv):
@@ -461,19 +461,36 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     .str.zfill(2)
     )
     
-    actualizacion_2024 = ['02','03','04','08','17','19','22']
+    # Las comunas de la actualizacion 2024 son COMUNAS_7, arriba en este mismo
+    # archivo. Antes habia una segunda lista identica declarada aqui: dos copias
+    # del mismo dato es como se desincronizan.
     actualizacion_2025 = ['01','03','09','10','11','12','22']
-    # 2024
-    urbano_24 = urbano[
-        (urbano['COMUNA'].isin(actualizacion_2024)) |
-        (
-            (urbano['COMUNA'].isin(actualizacion_2025)) &
-            (urbano['VIGEPRED'] == '2026-01-01 00:00:00')
 
-        )
-    ].copy()
+    # EL CORTE ES SOLO POR COMUNA:
+    #   comuna actualizada    -> ya viene homologada, solo se le pone USO_LADM
+    #   comuna sin actualizar -> hay que traducirle el destino
+    #
+    # Antes se exigia ademas VIGEPRED == '2026-01-01 00:00:00'. Esa igualdad
+    # exacta sobre texto excluia a los predios de vigencia 2027 -los MAS
+    # actualizados, no los menos- y les traducia un destino que ya estaba en la
+    # codificacion nueva: aplicar_homologacion mapea 3->12 y 5->13, asi que
+    # salian con el destino equivocado. Y siendo texto, bastaba con que un
+    # export trajera la fecha sin la hora para que la condicion fuera falsa en
+    # todas las filas y se retradujeran las 436.000 construcciones de estas
+    # comunas sin que nada avisara.
+    #
+    # Cortar solo por comuna cuesta 3 predios: el 121852 y el 122303 de la
+    # comuna 09, que traen destino 114 de la codificacion vieja, y el 305368 de
+    # la 12. No se liquidan mal, se descartan: cruce_uso_ladm solo procesa
+    # convencionales de destino 1 a 76 y anexos por encima de 76, asi que lo que
+    # no encaja se cae y queda contado en "descartadas (no 1-76 ni anexo>76)",
+    # que pasa de 6 a 10 construcciones.
+    #
+    # Las comunas 03 y 22 estan en las dos actualizaciones; la union las deja
+    # una sola vez.
+    COMUNAS_ACTUALIZADAS = sorted(set(COMUNAS_7) | set(actualizacion_2025))
 
-    # 2025 → lo contrario exacto
+    urbano_24 = urbano[urbano['COMUNA'].isin(COMUNAS_ACTUALIZADAS)].copy()
     urbano_25 = urbano.drop(urbano_24.index).copy()
 
     print("Total urbano:", len(urbano))
