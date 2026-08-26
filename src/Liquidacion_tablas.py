@@ -64,9 +64,20 @@ def tablas_liquidacion(df_const):
     else:
         _tip_ant = pd.Series('', index=df_const.index)
     df_const['TIPOLOGIA_ZHF_ANTERIOR'] = _tip_ant
-    # Comparacion literal: cuenta como cambio tanto pasar de una tipologia a
-    # otra como ganarla o perderla. Con las dos vacias queda en 0.
-    df_const['CAMBIO_TIPOLOGIA'] = (_tip_ant != _tipologia).astype(int)
+
+    # Tres estados, no dos. Solo se dice 1 o 0 cuando las DOS tipologias
+    # existen; si a alguna le falta -vacia o en cero- no hay con que comparar
+    # y se marca SIN COMPARACION.
+    #
+    # Antes era 1/0 literal y la cifra salia inflada: de las 29.701 marcadas
+    # como cambio, unas 18.800 no habian cambiado de tipologia sino que la
+    # habian GANADO -antes vacia, ahora con valor-, y el equipo de tipologias
+    # habria salido a buscar reclasificaciones que no existen.
+    _VACIAS = ['', '0', '000', 'nan', 'None']
+    _falta = _tip_ant.isin(_VACIAS) | _tipologia.isin(_VACIAS)
+    df_const['CAMBIO_TIPOLOGIA'] = np.where(
+        _falta, 'SIN COMPARACIÓN',
+        np.where(_tip_ant != _tipologia, '1', '0'))
         # Transformar valores
     # Primero aseguramos que los valores sean numéricos
 

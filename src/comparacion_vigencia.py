@@ -1038,9 +1038,11 @@ DICCIONARIO_DETALLE = [
      "de export_predio_<fecha>, la exportacion previa de predios"),
     ("TIPOLOGIA_ZHF_ANTERIOR", "Tipologia de la ZHF en la entrega anterior",
      "los ultimos 3 digitos de ZHF_ANTERIOR, con la misma regla"),
-    ("CAMBIO_TIPOLOGIA", "1 si la tipologia cambio entre las dos entregas",
-     "TIPOLOGIA_ZHF distinta de TIPOLOGIA_ZHF_ANTERIOR. Cuenta tanto pasar de "
-     "una tipologia a otra como ganarla o perderla"),
+    ("CAMBIO_TIPOLOGIA", "1 si la tipologia cambio, 0 si no, SIN COMPARACION "
+     "si no se puede comparar",
+     "1 y 0 solo cuando las DOS tipologias existen. Si a alguna le falta "
+     "-vacia o en cero- no hay con que comparar y dice SIN COMPARACION: no es "
+     "un cambio, es que antes o ahora no habia dato"),
     ("ACTIVIDAD_ECONOMICA", "Actividad de la ZHF donde esta la construccion",
      "residencial 011-016, comercial 021-023, industrial 031-033, el resto "
      "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF"),
