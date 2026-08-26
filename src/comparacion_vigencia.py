@@ -93,6 +93,15 @@ CONFIG = {
     # Regla de admision del predio.
     "solo_predios_completos": True,
 
+    # Solo predios SIN anexo. El anexo no se revalora -la T10 no se ha
+    # entregado y CONFIG["liquidar_anexos"] es False-, asi que en un predio con
+    # anexo el valor construido total y el avaluo llevan una parte identica a
+    # los dos lados: las dos vigencias no son comparables. Son 79.795 predios y
+    # 100.166 construcciones, y su variacion mediana sale en +6.81% contra
+    # +21.65% de los que no tienen, justamente por esa parte inmovil.
+    # Cuando entreguen la T10 y liquidar_anexos pase a True, esto vuelve a False.
+    "solo_predios_sin_anexo": True,
+
     # ¿Se liquida tambien el ANEXO? Hoy NO: la tabla T10 no esta aprobada.
     "liquidar_anexos": False,
 
@@ -470,6 +479,14 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                        + ", ".join(CONFIG["destinos_especiales"]) + "): no se "
                        "valora por tabla",
                        d["PREDIO_DESTINO_ESPECIAL"] == 1))
+    if CONFIG["solo_predios_sin_anexo"] and "VANEXO" in d.columns:
+        # VANEXO es el total del PREDIO, repetido en cada una de sus
+        # construcciones, asi que mirar la fila basta para saber si el predio
+        # tiene anexo.
+        anexo = pd.to_numeric(d["VANEXO"], errors="coerce").fillna(0)
+        reglas.append(("el predio tiene anexo: su valor no se revalora, asi "
+                       "que el valor construido total y el avaluo no son "
+                       "comparables", anexo > 0))
     if CONFIG["solo_predios_completos"] and "PREDIO_COMPLETO" in d.columns:
         reglas.append(("el predio tiene construcciones sin valor de tabla "
                        "(su valor total saldria incompleto)",
