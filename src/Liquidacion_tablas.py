@@ -595,79 +595,79 @@ def tablas_liquidacion(df_const):
     # CRUCE DE ARCHIVO DE ESPECIALES
     # ============================================================================
 
-        print("\n📂 Cargando archivo de especiales...")
+        # El Excel de especiales SOLO se abre si el interruptor esta encendido.
+        # Antes se leia SIEMPRE y despues se descartaba lo leido: la corrida
+        # dependia de un archivo cuyos valores no usaba, y sin el se caia. Con
+        # APLICAR_ESPECIALES_EXCEL = False no se abre nada y las tres columnas
+        # se crean con su valor neutro, que es donde terminaban de todos modos.
+        no_registros_antes_merge = len(df_const)
 
-        df_especiales = pd.read_excel(ruta_especiales,sheet_name='Construcciones_especiales')
+        if APLICAR_ESPECIALES_EXCEL:
+            print("\n📂 Cargando archivo de especiales...")
 
-        print(f'OJOOOOOOOOOOOOOOO AQUI {df_especiales.dtypes}')
-        #df_const['ID_PREDIO'] = df_const['ID_PREDIO'].astype(str)
-        df_especiales['ID_PREDIO'] = df_especiales['ID_PREDIO'].round(0).astype(int).astype(str)
-        df_especiales['DESTINOCONS'] = df_especiales['DESTINOCONS'].astype(str).str.zfill(3)
-        df_especiales['DESTANEX'] = df_especiales['DESTANEX'].astype(str).str.zfill(3)
-        df_const['CONSTRUCCION_ID'] = df_const['CONSTRUCCION_ID'].astype(str)
+            df_especiales = pd.read_excel(ruta_especiales,sheet_name='Construcciones_especiales')
+
+            print(f'OJOOOOOOOOOOOOOOO AQUI {df_especiales.dtypes}')
+            #df_const['ID_PREDIO'] = df_const['ID_PREDIO'].astype(str)
+            df_especiales['ID_PREDIO'] = df_especiales['ID_PREDIO'].round(0).astype(int).astype(str)
+            df_especiales['DESTINOCONS'] = df_especiales['DESTINOCONS'].astype(str).str.zfill(3)
+            df_especiales['DESTANEX'] = df_especiales['DESTANEX'].astype(str).str.zfill(3)
+            df_const['CONSTRUCCION_ID'] = df_const['CONSTRUCCION_ID'].astype(str)
           
       
 
-        print(f"   ✓ Archivo cargado: {len(df_especiales):,} registros")
+            print(f"   ✓ Archivo cargado: {len(df_especiales):,} registros")
 
-        # Verificar columnas necesarias
-        columnas_requeridas = ['ID_PREDIO','DESTINOCONS','DESTANEX','USO_LADM','PUNTCONS','TIPOANEXO','ACONCONS','ACONANEX','VIM2_ESPECIAL', 'ORIGEN', 'INTEGRAL_ESP_2026']
+            # Verificar columnas necesarias
+            columnas_requeridas = ['ID_PREDIO','DESTINOCONS','DESTANEX','USO_LADM','PUNTCONS','TIPOANEXO','ACONCONS','ACONANEX','VIM2_ESPECIAL', 'ORIGEN', 'INTEGRAL_ESP_2026']
 
 
-        for col in columnas_requeridas:
-            if col not in df_especiales.columns:
-                print(f"   ⚠️ Advertencia: Columna '{col}' no encontrada en archivo de especiales")
+            for col in columnas_requeridas:
+                if col not in df_especiales.columns:
+                    print(f"   ⚠️ Advertencia: Columna '{col}' no encontrada en archivo de especiales")
 
-        print(f"\n   📋 Columnas encontradas: {list(df_especiales.columns)}")
+            print(f"\n   📋 Columnas encontradas: {list(df_especiales.columns)}")
         
-        df_const['LLAVE'] = np.where(
-        df_const['DESTINOCONS'] != '000',
-        df_const['ID_PREDIO'].astype(str) +
-        df_const['DESTINOCONS'] +
-        df_const['ACONCONS'].round(0).astype(int).astype(str) +
-        df_const['PUNTCONS'].astype(str),
+            df_const['LLAVE'] = np.where(
+            df_const['DESTINOCONS'] != '000',
+            df_const['ID_PREDIO'].astype(str) +
+            df_const['DESTINOCONS'] +
+            df_const['ACONCONS'].round(0).astype(int).astype(str) +
+            df_const['PUNTCONS'].astype(str),
         
-        df_const['ID_PREDIO'].astype(str) +
-        df_const['DESTANEX'] +
-        df_const['ACONANEX'].round(0).astype(int).astype(str) +
-        df_const['TIPOANEXO'].astype(str)
-    )
+            df_const['ID_PREDIO'].astype(str) +
+            df_const['DESTANEX'] +
+            df_const['ACONANEX'].round(0).astype(int).astype(str) +
+            df_const['TIPOANEXO'].astype(str)
+        )
         
-        no_registros_antes_merge = len(df_const)
 
-        df_especiales['LLAVE'] = np.where(
-        df_especiales['DESTINOCONS'] != '000',
-        df_especiales['ID_PREDIO'].astype(str) +
-        df_especiales['DESTINOCONS'] +
-        df_especiales['ACONCONS'].round(0).astype(int).astype(str) +
-        df_especiales['PUNTCONS'].astype(str),
+            df_especiales['LLAVE'] = np.where(
+            df_especiales['DESTINOCONS'] != '000',
+            df_especiales['ID_PREDIO'].astype(str) +
+            df_especiales['DESTINOCONS'] +
+            df_especiales['ACONCONS'].round(0).astype(int).astype(str) +
+            df_especiales['PUNTCONS'].astype(str),
         
-        df_especiales['ID_PREDIO'].astype(str) +
-        df_especiales['DESTANEX'] +
-        df_especiales['ACONANEX'].round(0).astype(int).astype(str) +
-        df_especiales['TIPOANEXO'].astype(str))
+            df_especiales['ID_PREDIO'].astype(str) +
+            df_especiales['DESTANEX'] +
+            df_especiales['ACONANEX'].round(0).astype(int).astype(str) +
+            df_especiales['TIPOANEXO'].astype(str))
 
-        df_especiales.to_excel('./output/df_especiales.xlsx')
+            df_especiales.to_excel('./output/df_especiales.xlsx')
                                                                                             
-        df_const = pd.merge(df_const,df_especiales[['LLAVE', 'VIM2_ESPECIAL','INTEGRAL_ESP_2026','ORIGEN']],on='LLAVE', how='left')
+            df_const = pd.merge(df_const,df_especiales[['LLAVE', 'VIM2_ESPECIAL','INTEGRAL_ESP_2026','ORIGEN']],on='LLAVE', how='left')
 
-        df_const['VIM2_ESPECIAL'] = df_const['VIM2_ESPECIAL'].fillna(0)
-        df_const['INTEGRAL_ESP_2026'] = df_const['INTEGRAL_ESP_2026'].fillna(0).astype(int)
-        df_const['ORIGEN'] = df_const['ORIGEN'].fillna('NORMAL')
-
-        # El cruce se hace igual -para que el conteo de arriba siga sirviendo de
-        # control- pero si el interruptor esta apagado no se aplica nada: todo
-        # lo que depende de VIM2_ESPECIAL queda en cero, y con ello
-        # ESPECIAL_2026, VM2_ESP_2026 y ORIGEN_ESPECIAL.
-        if not APLICAR_ESPECIALES_EXCEL:
-            cruzaron = int((df_const['VIM2_ESPECIAL'] > 0).sum())
+            df_const['VIM2_ESPECIAL'] = df_const['VIM2_ESPECIAL'].fillna(0)
+            df_const['INTEGRAL_ESP_2026'] = df_const['INTEGRAL_ESP_2026'].fillna(0).astype(int)
+            df_const['ORIGEN'] = df_const['ORIGEN'].fillna('NORMAL')
+        else:
             df_const['VIM2_ESPECIAL'] = 0.0
             df_const['INTEGRAL_ESP_2026'] = 0
             df_const['ORIGEN'] = 'NORMAL'
-            print(f"   ⚠️ ESPECIALES DEL EXCEL APAGADOS: se descartan los "
-                  f"{cruzaron:,} cruces del archivo de 2025. Los especiales de "
-                  f"este año no se han entregado; lo unico especial hoy es el "
-                  f"destino 020/023.")
+            print("   ⚠️ ESPECIALES DEL EXCEL APAGADOS: no se abre el archivo. "
+                  "Los especiales de este año no se han entregado; lo unico "
+                  "especial hoy es el destino 020/023.")
 
 
         no_registros_post_merge = len(df_const)
