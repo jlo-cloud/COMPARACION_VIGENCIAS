@@ -1063,16 +1063,10 @@ DICCIONARIO_DETALLE = [
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",
      "0.7 en comunas actualizadas 2024-2025, 0.6 en las demas"),
     ("USO_LADM", "Uso de la construccion", "de la base"),
-    # La descripcion decia "(9 = PH, 8 = ...)": el marcador de posicion se
-    # estaba yendo tal cual a la hoja Diccionario del entregable. Aqui solo
-    # se afirma lo que el propio proceso sostiene -8 y 9 son PH, 0 no lo
-    # es-; los codigos 2, 3, 4 y 5 se nombran sin atribuirles significado.
+    # Solo se dice DE DONDE sale. El significado de cada codigo no esta
+    # documentado y el entregable no es el sitio para deducirlo.
     ("CONDICION",
-     "Condicion juridica del predio, digito 22 del numero predial nacional. "
-     "8 y 9 son propiedad horizontal (la 9 es la que separa las columnas "
-     "COND_9 de las COND_0 en el grupo de 10 comunas); 0 es el predio sin "
-     "propiedad horizontal. En este corte aparecen ademas los codigos 2, 3, "
-     "4 y 5",
+     "Condicion juridica del predio, digito 22 del numero predial nacional",
      "de la base; define si un uso va por tabla o por modelo"),
     ("N_TABLAS_PREDIO",
      "Tablas de valor distintas que usan las construcciones del predio. "

@@ -269,12 +269,40 @@ def main():
     print(f"⏱️  Tiempo total de ejecución: {tiempo_total} segundos ({tiempo_total/60:.2f} minutos)")
 
     crono.resumen()  # ⏱️ desglose por paso y sub-bloque
-    print(f"\n📁 Archivos generados:")
-    print(f"   - ./output/LIQUIDACION_TABLAS.parquet")
-    print(f"   - ./results/REVISION_LIQUIDACION_{fecha_actual}.xlsx")
-    print(f"   - ./results/LIQUIDACION_FINAL/CONSTRUCCIONES_{fecha_actual}.txt")
-    if archivo_comparacion:
-        print(f"   - {archivo_comparacion}")
+    # Lo que se anuncia sale de LO QUE QUEDO EN DISCO, no de una lista escrita
+    # a mano. Antes se nombraban REVISION_LIQUIDACION_<fecha>.xlsx y
+    # LIQUIDACION_FINAL/CONSTRUCCIONES_<fecha>.txt, que los genera el PASO 5
+    # -hoy comentado-, asi que el resumen mandaba a buscar dos archivos que no
+    # existian. Recorriendo las carpetas de salida y filtrando por fecha de
+    # modificacion se imprime lo que ESTA corrida escribio, y la lista no se
+    # puede volver a desactualizar cuando se prenda o apague un paso.
+    carpetas_salida = [
+        './input/tablas/output',            # PASO 0
+        './output',                         # parquets y reportes
+        './results/LIQUIDACION_TABLAS',     # diagnosticos de tabla
+        './results/COMPARACION_VIGENCIA',   # entregable de la comparacion
+        './results/LIQUIDACION_FINAL',      # PASO 5, cuando se reactive
+    ]
+    generados = []
+    for carpeta in carpetas_salida:
+        for raiz, _, archivos in os.walk(carpeta):
+            for nombre in archivos:
+                if nombre.startswith('~$'):      # bloqueos que deja Excel
+                    continue
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    if os.path.getmtime(ruta) >= inicio:
+                        generados.append(ruta)
+                except OSError:
+                    pass
+
+    print("")
+    print("📁 Archivos generados:")
+    if generados:
+        for ruta in sorted(generados, key=os.path.getmtime):
+            print(f"   - {ruta.replace(os.sep, '/')}")
+    else:
+        print("   (ninguno: revise los avisos de arriba)")
     
     print(f"\n✅ Proceso completado exitosamente.")
     print(f"{'='*60}\n")
