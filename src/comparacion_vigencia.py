@@ -8,8 +8,48 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# El estilo de graficos y el escritor de Excel salen de comparacion_ofertas.py.
-from comparacion_ofertas import VIZ, _estilo_ejes, _png_tamano
+
+VIZ = {
+    "surface": "#fcfcfb",
+    "ink": "#0b0b0b",
+    "ink_2": "#52514e",
+    "muted": "#898781",
+    "grid": "#e1e0d9",
+    "axis": "#c3c2b7",
+    "serie_1": "#2a78d6",
+    "serie_2": "#eb6834",
+}
+
+
+def _estilo_ejes(ax, titulo="", subtitulo="", xlabel="", ylabel=""):
+    """Aplica el estilo comun a los graficos de comparacion de vigencia."""
+    ax.set_facecolor(VIZ["surface"])
+    ax.grid(True, color=VIZ["grid"], linewidth=0.8, linestyle="-", zorder=0)
+    ax.set_axisbelow(True)
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+    for lado in ("left", "bottom"):
+        ax.spines[lado].set_color(VIZ["axis"])
+        ax.spines[lado].set_linewidth(1.0)
+    ax.tick_params(colors=VIZ["muted"], labelsize=9, length=0)
+    for t in ax.get_xticklabels() + ax.get_yticklabels():
+        t.set_color(VIZ["ink_2"])
+    if titulo:
+        ax.set_title(titulo, color=VIZ["ink"], fontsize=13, fontweight="600",
+                     loc="left", pad=32 if subtitulo else 10)
+    if subtitulo:
+        ax.annotate(subtitulo, xy=(0, 1), xycoords="axes fraction",
+                    xytext=(0, 8), textcoords="offset points",
+                    color=VIZ["ink_2"], fontsize=9.5, va="bottom", ha="left")
+    ax.set_xlabel(xlabel, color=VIZ["ink_2"], fontsize=10)
+    ax.set_ylabel(ylabel, color=VIZ["ink_2"], fontsize=10)
+
+
+def _png_tamano(ruta: str) -> tuple[int, int]:
+    """Lee el ancho y alto de un PNG sin depender de Pillow."""
+    with open(ruta, "rb") as f:
+        cab = f.read(24)
+    return int.from_bytes(cab[16:20], "big"), int.from_bytes(cab[20:24], "big")
 
 try:  # pragma: no cover
     from perf import crono
@@ -46,13 +86,11 @@ CONFIG = {
     "factor_catastral": 0.7,
 
     # --- Catastral <-> comercial de la VIGENCIA -------------------------------
-    # Lo resuelve tabla_valor_vigente() al arrancar: el consolidado mas nuevo
-    # de input/tablas/output/, el mismo que leyo la liquidacion.
+    # Se resuelve al arrancar con el consolidado vigente.
     "excel_tablas_valor": None,
     "comunas_7": ["02", "03", "04", "08", "17", "19", "22"],
     "comunas_10": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
-    # Las cinco que entraron despues. No tienen tabla propia: se liquidan con
-    # las columnas *_10C_*, pero se reportan aparte.
+    # Comunas adicionales del reporte.
     "comunas_5": ["05", "06", "13", "16", "18"],
 
     "comunas_act_2024_2025": [1, 2, 3, 4, 8, 9, 10, 11, 12, 17, 19, 22],
@@ -67,25 +105,18 @@ CONFIG = {
     "vigencia_base": 2026,
     "vigencia_liq": 2027,
 
-    # Familias de tablas que entran al reporte, en orden. Una familia cuya
-    # tabla no se haya entregado no aparece: sus construcciones se caen por
-    # "sin VM2 de tabla" y no hay que tocar nada cuando llegue.
+    # Familias incluidas en el reporte.
     "familias": [("T1_RESIDENCIAL", "RESIDENCIAL"),
                  ("T2_EDIFICIOS", "EDIFICIOS"),
                  ("T3_COMERCIAL", "COMERCIAL"),
-                 ("T4_INDUSTRIAL", "INDUSTRIAL")],
+                 ("T4_INDUSTRIAL", "INDUSTRIAL"),
+                 ("T5_INSTITUCIONAL_ED", "INSTITUCIONAL_ED"),
+                 ("T6_INSTITUCIONAL_SA", "INSTITUCIONAL_SA"),
+                 ("T9_HOTELES", "HOTELES"),
+                 ("T11_CCOMERCIALES", "CCOMERCIALES"),
+                 ("T13_UNIDAD_DEPORTIVA", "UNIDAD_DEPORTIVA")],
 
-    # Usos que van por MODELO, con la CONDICION que si entra por tabla.
-    #
-    # Los tres son los que la hoja Reglas de la app lista como "van por
-    # modelo, no por tabla", pero hasta ahora solo estaba el de apartamentos:
-    # las 6.725 construcciones de Comercio_en_PH con CONDICION 9 entraban al
-    # ejercicio con un VM2 de vigencia que no sale de ninguna tabla -es el del
-    # modelo de PH, VALORCONS/ACONCONS-, y el 81% de ellas quedaba por encima
-    # del techo de la tabla contra la que se comparaban. En T3_COMERCIAL_023
-    # eso solo hundia la variacion mediana a -47.9%; sin ellas queda en +0.6%.
-    # La CONDICION 8 si entra por tabla: sus 27 casos se portan como cualquier
-    # otra construccion y ninguno pasa el techo de su tabla.
+    # Usos que se comparan por modelo según condición.
     "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8,
                         "Comercio_en_PH": 8,
                         "Oficinas_Consultorios_en_PH": 8},
@@ -218,8 +249,13 @@ def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
 
     comuna = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     grupo = np.where(comuna.isin(CONFIG["comunas_7"]), "7C", "10C")
-    return pd.Series([mapa.get(k, "") for k in zip(d["TABLA_ORIGEN"], grupo)],
-                     index=d.index, dtype=object)
+    valores = []
+    for tabla, grupo_comuna in zip(d["TABLA_ORIGEN"], grupo):
+        valor = mapa.get((tabla, grupo_comuna), "")
+        if not valor:
+            valor = mapa.get((tabla, "17C"), "")
+        valores.append(valor)
+    return pd.Series(valores, index=d.index, dtype=object)
 
 
 def factor_comercial(d: pd.DataFrame) -> pd.Series:

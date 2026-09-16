@@ -36,7 +36,12 @@ HOJAS = [
     'T3_COMERCIAL_7C',
     'T3_COMERCIAL_10C',
     'T4_INDUSTRIAL_7C',
-    'T4_INDUSTRIAL_10C'
+    'T4_INDUSTRIAL_10C',
+    'T5_INSTITUCIONAL_ED_17C',
+    'T6_INSTITUCIONAL_SA_17C',
+    'T9_HOTELES_17C',
+    'T11_CCOMERCIALES_17C',
+    'T13_UNIDAD_DEPORTIVA_17C',
 ]
 
 # Nombres posibles de cada columna (en minuscula, sin acentos) - hojas NC
@@ -80,6 +85,23 @@ def consolidado_mas_reciente():
                        if not f.name.startswith("~$")),
                       key=lambda f: f.stat().st_mtime, reverse=True)
     return hallados[0] if hallados else None
+
+
+def consolidado_necesita_actualizacion():
+    """Indica si la entrada es mas nueva por vigencia o por modificacion real."""
+    entrada = consolidado_mas_reciente()
+    salida = tabla_valor_vigente()
+    if entrada is None or salida is None:
+        return entrada, salida, entrada is not None
+
+    fecha_entrada = re.search(r'(\d{8})', entrada.stem)
+    fecha_salida = re.search(r'(\d{8})', salida.stem)
+    fecha_mas_nueva = (entrada.stat().st_mtime > salida.stat().st_mtime)
+    if not fecha_entrada or not fecha_salida:
+        return entrada, salida, fecha_mas_nueva
+
+    vigencia_mas_nueva = fecha_entrada.group(1) > fecha_salida.group(1)
+    return entrada, salida, vigencia_mas_nueva or fecha_mas_nueva
 
 
 # =============================================================================
@@ -446,10 +468,9 @@ def leer_convencionales(xls) -> pd.DataFrame:
     print("=" * 60)
 
     todas = {}
-    for nombre_hoja in HOJAS:
-        if nombre_hoja not in xls.sheet_names:
-            print(f"AVISO: hoja '{nombre_hoja}' no encontrada, se salta.\n")
-            continue
+    hojas_disponibles = [nombre for nombre in xls.sheet_names
+                         if re.match(r'^T\d+_', str(nombre), re.IGNORECASE)]
+    for nombre_hoja in hojas_disponibles:
         print(f"Hoja: '{nombre_hoja}'")
         todas.update(procesar_hoja(xls, nombre_hoja))
         print()
@@ -482,13 +503,13 @@ FAMILIAS = {
     'T3_COMERCIAL_10C':           'E74C3C',
     'T4_INDUSTRIAL_7C':           '7D3C98',   # violeta
     'T4_INDUSTRIAL_10C':          '9B59B6',
-    'T5_INSTITUCIONAL_ED_7C':     'B7950B',   # mostaza
-    'T6_INSTITUCIONAL_SA_7C':     '148F77',   # esmeralda
-    'T7_INSTITUCIONAL_SER_7C':    '5D6D7E',   # gris azulado
-    'T8_INSTITUCIONAL_IG_7C':     '76448A',
-    'T9_HOTELES_7C':              'AD1457',   # rosa fuerte
-    'T11_CCOMERCIALES_7C':        '922B21',
-    'T13_UNIDAD_DEPORTIVA_7C':    '1D8348',   # verde bosque
+    'T5_INSTITUCIONAL_ED_17C':    'B7950B',   # mostaza
+    'T6_INSTITUCIONAL_SA_17C':    '148F77',   # esmeralda
+    'T7_INSTITUCIONAL_SER_17C':   '5D6D7E',   # gris azulado
+    'T8_INSTITUCIONAL_IG_17C':    '76448A',
+    'T9_HOTELES_17C':             'AD1457',   # rosa fuerte
+    'T11_CCOMERCIALES_17C':       '922B21',
+    'T13_UNIDAD_DEPORTIVA_17C':   '1D8348',   # verde bosque
 }
 
 # Fraccion de blanco mezclada: indice 0 = estrato 1 (mas claro) ... 5 = estrato 6

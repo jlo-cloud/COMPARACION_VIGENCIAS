@@ -1,4 +1,4 @@
-
+#streamlit run src/app_vigencias.py
 
 import io
 import os
@@ -14,13 +14,6 @@ RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
 RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
 
-# Carpeta de Drive donde se deja el Excel del detalle con identificadores. Es
-# la via para verlo desde fuera: el archivo pesa mas de 100 MB -el tope de
-# GitHub- y lleva numero predial, asi que no puede ir en el repositorio.
-#
-# OJO: este enlace queda a la vista de cualquiera que abra la app. Eso solo es
-# seguro si la carpeta esta restringida a personas concretas; si estuviera en
-# "cualquiera con el enlace", publicarlo aqui equivale a publicar el archivo.
 ENLACE_DETALLE_DRIVE = ("https://drive.google.com/drive/folders/"
                         "1Kt-LnURIXhQThsZSS-vogcYtu8uBy5_C")
 
@@ -91,7 +84,7 @@ def _miles(v: float, decimales: int) -> str:
     return (f"{v:,.{decimales}f}"
             .replace(",", " ").replace(".", ",").replace(" ", "."))
 
-# La misma paleta de los PNG del reporte (VIZ en comparacion_ofertas.py):
+    # La misma paleta de los PNG del reporte.
 # azul = liquidacion, naranja = el valor contra el que se compara.
 AZUL, NARANJA = "#2a78d6", "#eb6834"
 
