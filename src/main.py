@@ -5,28 +5,16 @@ from datetime import datetime
 from tqdm import tqdm  # ✅ Barra de progreso
 
 # Importar funciones modulares
-from consolidar_tablas import consolidar_tablas, tabla_valor_vigente
+from consolidar_tablas import (consolidar_tablas, consolidado_necesita_actualizacion,
+                               tabla_valor_vigente)
 from tabla_construccion import procesar_construcciones, cruces_const_predio
 from Liquidacion_tablas import tablas_liquidacion
 from Liquidacion_final import liquidacion_completa
-# APAGADO por ahora: comparacion contra la base de ofertas del mercado.
-# El modulo sigue funcionando; para reactivarlo, descomente esta linea y el
-# bloque del PASO 6-A mas abajo. Se puede correr suelto con:
-#     python src/comparacion_ofertas.py
-# from comparacion_ofertas import comparacion_ofertas
 from comparacion_vigencia import comparacion_vigencia
 from perf import crono  # ⏱️ medición de tiempos
 
 
 def main():
-    """
-    Proceso de liquidación ajustado:
-    1. Procesar construcciones (tabla_construccion.py)
-    2. Aplicar tablas de liquidación (Liquidacion_tablas.py)
-    3. Liquidación completa (Liquidacion_final.py)
-    4. Comparación VM2 liquidación vs ofertas (comparacion_ofertas.py)
-    """
-
     inicio = time.time()
     crono.inicio("LIQUIDACION (main)")  # ⏱️
 
@@ -44,30 +32,28 @@ def main():
     print("=== INICIO DEL PROCESO DE LIQUIDACIÓN ===")
     print("="*60 + "\n")
     
-    # Crear directorios necesarios
     os.makedirs('./output', exist_ok=True)
     os.makedirs('./results', exist_ok=True)
     os.makedirs('./results/LIQUIDACION_FINAL', exist_ok=True)
 
     
-    # Crear barra de progreso
     with tqdm(total=len(pasos), desc="Progreso general", ncols=100, 
               bar_format="{l_bar}{bar} | {n_fmt}/{total_fmt} pasos") as pbar:
         
-        # ============================================================
-        # PASO 0: CONSOLIDAR TABLAS DE VALOR
-        # ============================================================
-        # Del Consolidado_<fecha>.xlsx que deja el equipo de tablas en
-        # input/tablas/input/ sale el consolidado que lee la liquidacion. Si
-        # falla, se sigue con el que ya estuviera: no tiene sentido tumbar la
-        # corrida por no poder rearmar un archivo que quiza no cambio.
         print(f"\n{'='*60}")
         print(f"=== PASO 0: {pasos[0]} ===")
         print(f"{'='*60}")
         try:
-            ruta_tablas = consolidar_tablas()
-            print(f"✅ Tablas de valor consolidadas")
-            print(f"   - {ruta_tablas}")
+            entrada_tablas, vigente, necesita_actualizar = consolidado_necesita_actualizacion()
+            if necesita_actualizar:
+                ruta_tablas = consolidar_tablas(entrada_tablas)
+                print(f"✅ Tablas de valor consolidadas")
+                print(f"   - {ruta_tablas}")
+            elif vigente is not None:
+                print("✅ Tablas de valor vigentes; no se requiere consolidar de nuevo")
+                print(f"   - {vigente}")
+            else:
+                raise RuntimeError("No hay un consolidado de tablas vigente")
         except Exception as e:
             vigente = tabla_valor_vigente()
             print(f"⚠️ No se pudieron consolidar las tablas: {e}")
@@ -77,9 +63,6 @@ def main():
         pbar.update(1)
         crono.marca("PASO 0: consolidar tablas")  # ⏱️
 
-        # ============================================================
-        # PASO 1: GENERAR BASE DE CONSTRUCCIONES
-        # ============================================================
         print(f"\n{'='*60}")
         print(f"=== PASO 1: {pasos[1]} ===")
         print(f"{'='*60}")
@@ -100,9 +83,6 @@ def main():
             print(f"❌ Error en generación de construcciones: {str(e)}")
             raise
         
-        # ============================================================
-        # PASO 2: CRUCES PREDIO - CONSTRUCCIÓN
-        # ============================================================
         print(f"\n{'='*60}")
         print(f"=== PASO 2: {pasos[2]} ===")
         print(f"{'='*60}")
@@ -119,9 +99,6 @@ def main():
             print(f"❌ Error en cruces: {str(e)}")
             raise
    
-        # ============================================================
-        # PASO 3: APLICAR TABLAS DE LIQUIDACIÓN
-        # ============================================================
         print(f"\n{'='*60}")
         print(f"=== PASO 3: {pasos[3]} ===")
         print(f"{'='*60}")
@@ -138,21 +115,12 @@ def main():
             print(f"❌ Error en tablas de liquidación: {str(e)}")
             raise
         
-        # ============================================================
-        # PASO 4: GUARDAR RESULTADOS INTERMEDIOS
-        # ============================================================
         print(f"\n{'='*60}")
         print(f"=== PASO 4: {pasos[4]} ===")
         print(f"{'='*60}")
         try:
             fecha_actual = datetime.now().strftime('%Y%m%d')
             
-            # Guardar archivo de liquidación con tablas
-            #archivo_liquidacion = f'./output/{fecha_actual}_LIQUIDACION_TABLAS.txt'
-            #df_liquidacion.to_csv(archivo_liquidacion, sep="|", index=False)
-            #print(f"✅ Archivo intermedio guardado: {archivo_liquidacion}")
-            
-            # Opcional: Guardar también en formato parquet para mejor rendimiento
             archivo_parquet = './output/LIQUIDACION_TABLAS.parquet'
             df_liquidacion.to_parquet(archivo_parquet, index=False)
             print(f"✅ Archivo parquet guardado: {archivo_parquet}")
@@ -182,54 +150,6 @@ def main():
             print(f"   (la liquidación SÍ quedó guardada; puede reintentar solo")
             print(f"    la comparación con: python src/comparacion_vigencia.py)")
 
-        # ============================================================
-        # PASO 6-A: COMPARACIÓN VM2 LIQUIDACIÓN vs OFERTAS  [APAGADO]
-        # ============================================================
-        # Descomentar este bloque y el import de arriba para reactivarlo.
-        # print(f"\n{'='*60}")
-        # print(f"=== PASO 6-A: Comparar VM2 liquidación vs ofertas ===")
-        # print(f"{'='*60}")
-        # try:
-        #     df_ofertas = comparacion_ofertas(df_liquidacion)
-        #     print(f"✅ Comparación con ofertas generada")
-        #     print(f"   - Ofertas comparadas: {len(df_ofertas):,}")
-        #     crono.marca("PASO 6-A: comparacion_ofertas")  # ⏱️
-        # except Exception as e:
-        #     print(f"⚠️ La comparación con ofertas no se pudo generar: {str(e)}")
-
-        # # ============================================================
-        # # PASO 5: LIQUIDACIÓN COMPLETA Y ARCHIVO FINAL
-        # # ============================================================
-        # print(f"\n{'='*60}")
-        # print(f"=== PASO 5: {pasos[5]} ===")
-        # print(f"{'='*60}")
-        # try:
-        #     df_predio_final = liquidacion_completa(
-        #         df_liquidacion, 
-        #         './input/',
-        #         generar_excel= 1#### AQUI 
-        #     )
-            
-        #     if df_predio_final is not None:
-        #         print(f"✅ Liquidación completa finalizada")
-        #         print(f"   - Predios procesados: {len(df_predio_final):,}")
-                
-        #         # Estadísticas de liquidación
-        #         if 'MARCA_LIQUIDACION' in df_predio_final.columns:
-        #             print("\n📊 Estadísticas de liquidación:")
-        #             stats = df_predio_final['MARCA_LIQUIDACION'].value_counts()
-        #             for marca, count in stats.items():
-        #                 porcentaje = (count / len(df_predio_final)) * 100
-        #                 print(f"   - {marca}: {count:,} ({porcentaje:.2f}%)")
-                
-        #         # Estadísticas de variación de avalúo
-        #         if 'VAR_AVALUO' in df_predio_final.columns:
-        #             var_avaluo = df_predio_final['VAR_AVALUO'].dropna()
-        #             if len(var_avaluo) > 0:
-        #                 print("\n📈 Estadísticas de variación de avalúo:")
-        #                 print(f"   - Promedio: {var_avaluo.mean():.2f}%")
-        #                 print(f"   - Mediana: {var_avaluo.median():.2f}%")
-        #                 print(f"   - Mínimo: {var_avaluo.min():.2f}%")
         #                 print(f"   - Máximo: {var_avaluo.max():.2f}%")
                 
         #         # Estadísticas de avalúo total

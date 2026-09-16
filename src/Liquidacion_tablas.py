@@ -875,8 +875,20 @@ def tablas_liquidacion(df_const):
     ruta = str(ruta_tabla)
     print(f"Tablas de valor: {ruta_tabla.name}")
 
-    # Grupos de comunas usados tanto en CONVENCIONALES como en NO_CONVENCIONALES
-    grupos_comunas = {'7': comunas_7, '10': comunas_10}
+    # Grupos de comunas usados tanto en CONVENCIONALES como en NO_CONVENCIONALES.
+    # Mantener la regla previa para T1/T2/T3/T4 (7C / 10C) y, para la nueva
+    # entrega, usar un bloque unico de 17 comunas para:
+    #   T5_INSTITUCIONAL_ED, T6_INSTITUCIONAL_SA, T9_HOTELES,
+    #   T11_CCOMERCIALES, T13_UNIDAD_DEPORTIVA.
+    comunas_17 = sorted(set(comunas_7) | set(comunas_10))
+    grupos_comunas = {'7': comunas_7, '10': comunas_10, '17': comunas_17}
+    TABLAS_17C = {
+        'T5_INSTITUCIONAL_ED',
+        'T6_INSTITUCIONAL_SA',
+        'T9_HOTELES',
+        'T11_CCOMERCIALES',
+        'T13_UNIDAD_DEPORTIVA',
+    }
 
     # Cargar hoja CONVENCIONALES
     df_tablas = pd.read_excel(ruta, sheet_name='CONVENCIONALES')
@@ -905,7 +917,15 @@ def tablas_liquidacion(df_const):
         if idx_comunas is None:
             continue
 
-        grupo = f'COMUNAS_{num_comunas}'
+        # Regla nueva: las tablas institucionales, hoteles, comerciales y
+        # deportivas vienen por 17 comunas juntas; el resto sigue por 7C/10C.
+        # Esto conserva la logica antigua para las tablas existentes y solo
+        # reagrupa las nuevas entregas.
+        tabla_sin_comunas = '_'.join(partes[:idx_comunas] + partes[idx_comunas+1:])
+        if tabla_sin_comunas in TABLAS_17C or num_comunas == '17':
+            grupo = 'COMUNAS_17'
+        else:
+            grupo = f'COMUNAS_{num_comunas}'
 
         partes_sin_comunas = partes[:idx_comunas] + partes[idx_comunas+1:]
 
@@ -1028,7 +1048,8 @@ def tablas_liquidacion(df_const):
     lista_mapping = []
     for tabla, grupos_valores in valores_por_tabla.items():
         for clave_grupo, lista_valores in grupos_valores.items():
-            comunas = {'COMUNAS_7': comunas_7, 'COMUNAS_10': comunas_10}[clave_grupo]
+            num_comunas = clave_grupo.removeprefix('COMUNAS_')
+            comunas = grupos_comunas[num_comunas]
             for puntcons, valor in enumerate(lista_valores, start=1):
                 for comuna in comunas:
                     lista_mapping.append({

@@ -2,35 +2,12 @@ import pandas as pd
 import numpy as np
 import re
 
-# ---------------------------------------------------------------------------
-# Interruptor global: la liquidacion va SOLO POR TABLA.
-# En False el archivo de especiales no cambia ningun valor:
-#   - no pisa el VM2 que salio de la tabla (Liquidacion_final.py)
-#   - no saca a los parqueaderos T12 de LIQ_PARQUEADERO (Liquidacion_final.py)
-#   - no fuerza la rama 2.1 del avaluo (aqui abajo)
-# La marca ESPECIAL_2026 se sigue calculando para trazabilidad y para los
-# reportes de comparacion. Poner en True para volver a liquidar con especiales.
-# ---------------------------------------------------------------------------
+# False: liquidacion solo por tablas. True: aplica especiales.
 LIQUIDAR_CON_ESPECIALES = False
 
 
 def calcular_avaluo_2026(df_predio_total):
-    """
-    Calcula el avalúo comercial 2026 según el método de liquidación
-    
-    Reglas:
-    - MIXTO: 0 (debe revisarse manualmente)
-    - INTEGRAL: Solo construcción + anexos (SIN terreno, ya está incluido)
-    - INFORMALIDAD: Solo construcción + anexos (SIN terreno por informalidad)
-    - SOLO TERRENO: Solo terreno (cuando no hay construcción)
-    - TABLA + TERRENO: Terreno + construcción + anexos (método tradicional)
-    
-    Args:
-        df_predio_total: DataFrame con información de predios
-    
-    Returns:
-        df_predio_total: DataFrame con AVALUO_COM_2026 calculado
-    """
+    """Calcula el avalúo comercial de referencia de 2026 por predio."""
     
     print("\n💰 Calculando avalúo comercial 2026...")
     
