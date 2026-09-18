@@ -636,7 +636,8 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
     for p in PERCENTILES:
         pv, pl = float(v.quantile(p / 100)), float(l.quantile(p / 100))
         filas.append({"PERCENTIL": f"{p}%",
-                      COL_NUM: int(round(p / 100 * len(s))),
+                      "__COUNT__": int(round(p / 100 * len(s))),
+                      "PUNTAJE": pv,
                       c_base: pv, c_liq: pl,
                       c_dif: pl - pv,
                       c_var: (pl / pv - 1) if pv else None})
@@ -661,7 +662,11 @@ def con_formato(t: pd.DataFrame):
     """La tabla lista para mostrar. Devuelve un Styler: la columna sigue siendo numerica y se puede ordenar."""
     reglas = {}
     for col in t.columns:
-        if col == c_dif:                         # pesos, con signo
+        if col == "__COUNT__":
+            continue
+        if col == "PUNTAJE":
+            reglas[col] = pesos
+        elif col == c_dif:                         # pesos, con signo
             reglas[col] = pesos_signo
         elif col in (c_base, c_liq):
             reglas[col] = pesos
@@ -854,7 +859,8 @@ with hoja_tablas:
     st.caption(f"En cada corte: cuánto vale en la vigencia {V_BASE}, cuánto "
                f"valdría en la {V_LIQ}, cuántos pesos de diferencia hay entre "
                f"los dos y qué proporción representa esa diferencia.")
-    st.dataframe(con_formato(total), width="stretch", hide_index=True)
+    total_visible = total.drop(columns=["__COUNT__"], errors="ignore")
+    st.dataframe(con_formato(total_visible), width="stretch", hide_index=True)
 
 
 
@@ -868,9 +874,10 @@ with hoja_graf:
         """Bajo el titulo va SOLO el conteo: es corto y nunca se corta."""
         if t.empty:
             return []
-        return [f"{entero(int(t[COL_NUM].iloc[-1]))} {unidades} comparadas"
+        count = t["__COUNT__"].iloc[-1] if "__COUNT__" in t.columns else t[COL_NUM].iloc[-1]
+        return [f"{entero(int(count))} {unidades} comparadas"
                 if grano == "construccion" else
-                f"{entero(int(t[COL_NUM].iloc[-1]))} {unidades} comparados"]
+                f"{entero(int(count))} {unidades} comparados"]
 
     def frase(t: pd.DataFrame) -> str:
         """La lectura del grafico en una frase, para el caption de DEBAJO."""
