@@ -292,7 +292,7 @@ APERTURAS = {
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
-           "CONDICION",
+           "CONDICION", "ESPECIAL", "PREDIO_ESPECIAL", "PUNTCONS",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
            "VARIACION_VALORCONS_CAT_PCT",
            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -444,10 +444,11 @@ with st.sidebar:
     st.caption("Se aplican a todas las hojas. Vacío = todo.")
 
     excluir_predios_especiales = st.checkbox(
-        "Excluir predios especiales",
+        "Excluir construcciones especiales",
         value=False,
-        help="Quita los predios cuya marca de especial vale 1. Si la columna "
-             "no existe en el parquet actual, no hace nada."
+        help="En Valor por m² excluye construcciones con ESPECIAL=1; en "
+             "Valor total construido y Avalúo excluye predios con "
+             "PREDIO_ESPECIAL=1."
     )
 
     etiqueta_medida = st.radio(
@@ -580,9 +581,12 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     if "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].le(max_construcciones)]
     if excluir_predios_especiales:
+        columnas_especiales = (
+            ("PREDIO_ESPECIAL", "PREDIO_DESTINO_ESPECIAL")
+            if grano == "predio" else ("ESPECIAL", "ESPECIAL_2026")
+        )
         col_especial = next(
-            (c for c in ("PREDIO_ESPECIAL", "PREDIO_DESTINO_ESPECIAL",
-                         "ESPECIAL_2026") if c in d.columns),
+            (c for c in columnas_especiales if c in d.columns),
             None,
         )
         if col_especial is not None:
