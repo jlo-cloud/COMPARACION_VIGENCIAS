@@ -533,10 +533,21 @@ with st.sidebar:
              "columna. Con «Comuna», por ejemplo, sale una fila y un gráfico "
              "por cada comuna.")
     col_apertura = APERTURAS[etiqueta_apertura]
+    max_n_const = (
+        int(df["N_CONST_PREDIO"].dropna().max())
+        if "N_CONST_PREDIO" in df.columns and not df["N_CONST_PREDIO"].dropna().empty
+        else 5000
+    )
+    max_n_const = int(max_n_const)
     min_predios = st.number_input(
-        f"Mínimo de {unidades} por grupo", 1, 5000, 5,
-        help=f"Los grupos con menos {unidades} de los que se pidan aquí no se "
-             f"muestran: con tan pocos casos una mediana no dice nada.")
+        "Máximo de construcciones",
+        min_value=1,
+        max_value=max_n_const,
+        value=min(5, max_n_const),
+        help=(f"Los grupos con menos {unidades} de los que se pidan aquí no se "
+              f"muestran: con tan pocos casos una mediana no dice nada. "
+              f"Máximo actual: {max_n_const}.")
+    )
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     """Los filtros de la barra lateral, aplicados a lo que se le pase."""
