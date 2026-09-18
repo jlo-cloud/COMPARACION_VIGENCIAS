@@ -443,6 +443,13 @@ with st.sidebar:
     st.header("⚙️ Filtros")
     st.caption("Se aplican a todas las hojas. Vacío = todo.")
 
+    excluir_predios_especiales = st.checkbox(
+        "Excluir predios especiales",
+        value=False,
+        help="Quita los predios cuya marca de especial vale 1. Si la columna "
+             "no existe en el parquet actual, no hace nada."
+    )
+
     etiqueta_medida = st.radio(
         "Medida", list(MEDIDAS), index=0,
         help="El valor por m² es de cada CONSTRUCCIÓN; el valor construido "
@@ -566,6 +573,14 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
+    if excluir_predios_especiales:
+        col_especial = next(
+            (c for c in ("PREDIO_ESPECIAL", "PREDIO_DESTINO_ESPECIAL",
+                         "ESPECIAL_2026") if c in d.columns),
+            None,
+        )
+        if col_especial is not None:
+            d = d[pd.to_numeric(d[col_especial], errors="coerce").ne(1)]
     # La medida de avaluo puede venir vacia si se corrio la comparacion sin las
     # columnas de terreno; mejor decirlo que mostrar una hoja en blanco.
     return d[d[medida["vig"]].notna() & d[medida["liq"]].notna()]
