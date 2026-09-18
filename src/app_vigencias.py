@@ -131,6 +131,8 @@ GRUPOS_COMUNAS = {
     "7C": ["02", "03", "04", "08", "17", "19", "22"],
     "10C": ["01", "05", "06", "07", "09", "10", "11", "12", "13", "14", "15",
             "16", "18", "20", "21"],
+    "17C": ["01", "02", "03", "04", "07", "08", "09", "10", "11", "12",
+            "14", "15", "17", "19", "20", "21", "22"],
 }
 
 # Los tres grupos en que se reparten las 22 comunas.
@@ -156,6 +158,13 @@ USOS_T3 = ("Bodegas_Comerciales_Grandes_Almacenes (016), "
 USOS_T4 = ("Salon_Comunal (009), Bodegas_Comerciales (017), "
            "Bodegas_Comerciales_en_PH (018), Industrias (047), "
            "Industrias_en_PH (048)")
+USOS_T5 = "Educación y formación institucional (050, 051, 055, 068, 070)"
+USOS_T6 = "Salud y servicios institucionales (054, 067)"
+USOS_T9 = "Hoteles (030, 031)"
+USOS_T11 = "Centros comerciales (019, 022, 043)"
+USOS_T13 = "Unidad deportiva (071)"
+USOS_T10 = "Anexos y no convencionales"
+USOS_T12 = "Parqueaderos (006, 007, 008, 027, 036, 037)"
 
 # Las tipologias de la ZHF van POR REGLA y no en una lista global: las
 # residenciales son 011-016, las comerciales 021-023 y las industriales
@@ -181,6 +190,13 @@ EXC_COMERCIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
 USOS_T3_FIJO = "Pensiones_y_Residencias (038)"
 EXC_T3_FIJO = ("No depende de la ZHF ni del estrato: siempre "
                "T3_COMERCIAL_023, en todas las comunas.")
+EXC_T5 = "Se liquida con T5_INSTITUCIONAL_ED_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T6 = "Se liquida con T6_INSTITUCIONAL_SA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T9 = "Se liquida con T9_HOTELES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T11 = "Se liquida con T11_CCOMERCIALES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T13 = "Se liquida con T13_UNIDAD_DEPORTIVA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T10 = "La T10 no se revaloriza en esta vigencia: el anexo entra igual en ambas vigencias porque la tabla no está aprobada."
+EXC_T12 = "La T12 se liquida por regla propia de parqueaderos; no entra en la lógica de ZHF ni de estrato."
 
 EXC_INDUSTRIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
                   "con T4_INDUSTRIAL_031 para esas comunas. Si termina en algo "
@@ -223,6 +239,20 @@ REGLAS_TABLA = [
      "T4_INDUSTRIAL_10C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
     (USOS_T4, "7C", "NA",
      "T4_INDUSTRIAL_7C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
+    (USOS_T5, "17C", "NA",
+     "T5_INSTITUCIONAL_ED_17C", ["NA"], EXC_T5),
+    (USOS_T6, "17C", "NA",
+     "T6_INSTITUCIONAL_SA_17C", ["NA"], EXC_T6),
+    (USOS_T9, "17C", "NA",
+     "T9_HOTELES_17C", ["NA"], EXC_T9),
+    (USOS_T10, "17C", "NA",
+     "T10_ANEXOS", ["NA"], EXC_T10),
+    (USOS_T11, "17C", "NA",
+     "T11_CCOMERCIALES_17C", ["NA"], EXC_T11),
+    (USOS_T12, "17C", "NA",
+     "T12_PARQUEADEROS", ["NA"], EXC_T12),
+    (USOS_T13, "17C", "NA",
+     "T13_UNIDAD_DEPORTIVA_17C", ["NA"], EXC_T13),
 ]
 
 
