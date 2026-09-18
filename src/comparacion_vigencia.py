@@ -1765,6 +1765,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     # mas se pide, y no dice mas de lo que ya dice USO_LADM,
                     # que va desde el principio.
                     "CONDICION",
+                    "PUNTCONS",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",
                     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
