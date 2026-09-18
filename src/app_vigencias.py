@@ -533,6 +533,21 @@ with st.sidebar:
                    "esta medida todavía no trae N_CONST_PREDIO.")
 
     st.divider()
+    max_n_const = (
+        int(df["N_CONST_PREDIO"].dropna().max())
+        if "N_CONST_PREDIO" in df.columns and not df["N_CONST_PREDIO"].dropna().empty
+        else 5000
+    )
+    max_n_const = int(max_n_const)
+    max_construcciones = st.number_input(
+        "Máximo de construcciones",
+        min_value=1,
+        max_value=max_n_const,
+        value=max_n_const,
+        help="Deja solo los predios con esa cantidad máxima de construcciones "
+             "o menos. El valor inicial es el máximo real observado."
+    )
+
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(APERTURAS), index=0,
         help="Con lo que se elija aquí se parten las tablas y los gráficos: "
@@ -540,21 +555,10 @@ with st.sidebar:
              "columna. Con «Comuna», por ejemplo, sale una fila y un gráfico "
              "por cada comuna.")
     col_apertura = APERTURAS[etiqueta_apertura]
-    max_n_const = (
-        int(df["N_CONST_PREDIO"].dropna().max())
-        if "N_CONST_PREDIO" in df.columns and not df["N_CONST_PREDIO"].dropna().empty
-        else 5000
-    )
-    max_n_const = int(max_n_const)
     min_predios = st.number_input(
-        "Máximo de construcciones",
-        min_value=1,
-        max_value=max_n_const,
-        value=min(5, max_n_const),
-        help=(f"Los grupos con menos {unidades} de los que se pidan aquí no se "
-              f"muestran: con tan pocos casos una mediana no dice nada. "
-              f"Máximo actual: {max_n_const}.")
-    )
+        f"Mínimo de {unidades} por grupo", 1, 5000, 5,
+        help=f"Los grupos con menos {unidades} de los que se pidan aquí no se "
+             f"muestran: con tan pocos casos una mediana no dice nada.")
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     """Los filtros de la barra lateral, aplicados a lo que se le pase."""
@@ -573,6 +577,8 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
+    if "N_CONST_PREDIO" in d.columns:
+        d = d[d["N_CONST_PREDIO"].le(max_construcciones)]
     if excluir_predios_especiales:
         col_especial = next(
             (c for c in ("PREDIO_ESPECIAL", "PREDIO_DESTINO_ESPECIAL",
@@ -635,9 +641,17 @@ def percentiles(s: pd.DataFrame) -> pd.DataFrame:
     filas = []
     for p in PERCENTILES:
         pv, pl = float(v.quantile(p / 100)), float(l.quantile(p / 100))
+        if "PUNTCONS" in s.columns:
+            puntaje = pd.to_numeric(s["PUNTCONS"], errors="coerce").dropna()
+            if not puntaje.empty:
+                valor_puntaje = float(puntaje.quantile(p / 100))
+            else:
+                valor_puntaje = float(p)
+        else:
+            valor_puntaje = float(p)
         filas.append({"PERCENTIL": f"{p}%",
                       "__COUNT__": int(round(p / 100 * len(s))),
-                      "PUNTAJE": pv,
+                      "PUNTAJE": int(round(valor_puntaje)),
                       c_base: pv, c_liq: pl,
                       c_dif: pl - pv,
                       c_var: (pl / pv - 1) if pv else None})
@@ -665,7 +679,7 @@ def con_formato(t: pd.DataFrame):
         if col == "__COUNT__":
             continue
         if col == "PUNTAJE":
-            reglas[col] = pesos
+            reglas[col] = entero
         elif col == c_dif:                         # pesos, con signo
             reglas[col] = pesos_signo
         elif col in (c_base, c_liq):
