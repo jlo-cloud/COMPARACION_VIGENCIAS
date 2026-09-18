@@ -643,7 +643,8 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     una_vez = [c for c in ("VTER", col_anexo, "AVALPRED", "F_COMERCIAL",
                            "COMUNA", "GRUPO_COMUNAS", "ACTUALIZACION",
                            "ESTRPRED", "NUMERO_PREDIAL_NACIONAL",
-                           "N_CONST_PREDIO", "METODO_LIQUIDACION")
+                           "N_CONST_PREDIO", "PREDIO_ESPECIAL",
+                           "METODO_LIQUIDACION")
                if c in d.columns]
 
     g = d.groupby("ID_PREDIO", sort=False)
@@ -1760,6 +1761,13 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     # abre ninguna puerta que el recorte por predio no tuviera
                     # ya abierta, que publica esta misma columna.
                     "N_CONST_PREDIO", "CON_ANEXO",
+                    # Marca de la construccion: corresponde a la columna P
+                    # del detalle y es la que usa el filtro de la app.
+                    "ESPECIAL",
+                    # Marca de predio especial: la app la usa para el filtro
+                    # "Excluir predios especiales"; como es la misma para todas
+                    # las construcciones del predio, queda disponible aqui.
+                    "PREDIO_ESPECIAL",
                     # La condicion juridica: la 9 es la propiedad horizontal
                     # propiamente dicha. Va al recorte porque es el corte que
                     # mas se pide, y no dice mas de lo que ya dice USO_LADM,
@@ -1777,6 +1785,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
                            "N_CONST_PREDIO", "N_TABLAS_PREDIO", "CON_ANEXO",
+                           "PREDIO_ESPECIAL",
                            # Como la tabla y la actividad: la de la
                            # construccion de mayor area del predio.
                            "CONDICION",
