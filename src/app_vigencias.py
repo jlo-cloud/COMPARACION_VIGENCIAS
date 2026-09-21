@@ -74,6 +74,11 @@ def pesos_signo(v, decimales: int = 0) -> str:
     return ("+" if v >= 0 else "-") + pesos(abs(v), decimales)
 
 
+def coma(v: float, decimales: int = 2) -> str:
+    """Un decimal con coma, como se escribe aca: 0,7 y no 0.7."""
+    return f"{v:.{decimales}f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
 def entero(v) -> str:
     """206875 -> '206.875'"""
     return "" if v is None or pd.isna(v) else _miles(v, 0)
@@ -145,7 +150,34 @@ GRUPOS_FILTRO = {
 # comuna -> grupo, para armar la columna con la que se filtra y se abre.
 COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
 
-USOS_T1 = ("Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
+# --- Factor de valor comercial ---------------------------------------------
+# El comercial de la vigencia es el catastral dividido por este factor. Sale de
+# CONFIG["comunas_act_2024_2025"], ["factor_comercial_act"] y
+# ["factor_comercial_resto"] de comparacion_vigencia.py: si alla cambia, hay que
+# cambiarlo aqui tambien. El parquet ya trae la columna ACTUALIZACION con lo
+# mismo; esto es para poder mostrar la tabla sin depender de que haya datos.
+COMUNAS_ACT_2024_2025 = ["01", "02", "03", "04", "08", "09", "10", "11", "12",
+                         "17", "19", "22"]
+FACTOR_COMERCIAL_ACT = 0.7      # comunas actualizadas en 2024-2025
+FACTOR_COMERCIAL_RESTO = 0.6    # las demas
+FACTOR_COMERCIAL_TERRENO = 0.7  # el terreno no distingue comuna
+
+
+def factores_comerciales() -> pd.DataFrame:
+    """Una fila por comuna: su grupo, si se actualizo y por cuanto se divide."""
+    filas = [{"COMUNA": c,
+              "GRUPO DE COMUNAS": COMUNA_A_GRUPO.get(c, "sin grupo"),
+              "ACTUALIZACIÓN": ("ACT 2024-2025" if c in COMUNAS_ACT_2024_2025
+                                else "SIN ACTUALIZAR"),
+              "FACTOR COMERCIAL": (FACTOR_COMERCIAL_ACT
+                                   if c in COMUNAS_ACT_2024_2025
+                                   else FACTOR_COMERCIAL_RESTO)}
+             for c in sorted(COMUNA_A_GRUPO)]
+    return pd.DataFrame(filas)
+
+
+USOS_T1 = ("Apartamentos_4_y_mas_pisos_en_PH (001), Barracas (004), "
+           "Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
 # Pensiones_y_Residencias (038) NO va aqui: no se reparte por tipologia
@@ -743,6 +775,7 @@ res = resumen(dff, col_apertura)
 total = percentiles(dff)
 abierto = por_grupo(dff, col_apertura)
 reglas = reglas_asignacion()
+factores = factores_comerciales()
 
 # El reparto de la variacion.
 # en el rango de su propia variacion, no se comparan distribuciones.
@@ -1177,6 +1210,25 @@ with hoja_reglas:
                           for g, c in GRUPOS_FILTRO.items()))
     st.caption("Las 5 comunas extra no tienen tabla propia: hoy se liquidan "
                "leyendo las mismas columnas *_10C_* del grupo de 10.")
+
+    st.divider()
+    st.markdown("**Factor de valor comercial por comuna**")
+    st.dataframe(factores, width="stretch", hide_index=True,
+                 column_config={
+                     "COMUNA": st.column_config.TextColumn(width="small"),
+                     "ACTUALIZACIÓN": st.column_config.TextColumn(width="small"),
+                     "FACTOR COMERCIAL": st.column_config.NumberColumn(
+                         format="%.2f", width="small")})
+    n_act = len(COMUNAS_ACT_2024_2025)
+    n_resto = len(COMUNA_A_GRUPO) - n_act
+    st.caption(
+        f"El valor comercial de la vigencia es el catastral dividido por el "
+        f"factor de la comuna: las {n_act} actualizadas en 2024-2025 van por "
+        f"{coma(FACTOR_COMERCIAL_ACT)} y las {n_resto} restantes por "
+        f"{coma(FACTOR_COMERCIAL_RESTO)}. El terreno no distingue comuna: "
+        f"siempre va por {coma(FACTOR_COMERCIAL_TERRENO)}. El valor de la "
+        f"liquidación 2027 no usa este factor: la tabla de valor da el "
+        f"comercial y el catastral sale de multiplicarlo por 0,7.")
 
     st.divider()
     st.markdown("**Excepciones**")

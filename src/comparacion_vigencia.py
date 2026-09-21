@@ -302,7 +302,8 @@ ACTIVIDAD_ZHF = {
 # Van al Excel tal cual, como la hoja "Reglas" del ejercicio anterior.
 REGLAS = [
     ("T1_RESIDENCIAL",
-     "Casas (001), Barracas (004), Vivienda_Hasta_3_Pisos (012), "
+     "Apartamentos_4_y_mas_pisos_en_PH (001), Barracas (004), "
+     "Vivienda_Hasta_3_Pisos (012), "
      "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)",
      "Construcciones residenciales ubicadas en zonas con actividad economica "
      "residencial", "Tipologias 011 a 016"),
@@ -317,7 +318,7 @@ REGLAS = [
      "Estratos 1 a 6; sin estrato o cero, la tabla del estrato 6"),
     ("T3_COMERCIAL",
      "Bodegas_Comerciales_Grandes_Almacenes (016), Estacion_de_servicio (021), "
-     "Clubes_Casinos (024), Comercio (025), Oficinas (028), Plaza_Mercado (039), "
+     "Clubes_Casinos (024), Comercio (025), Comercio_en_PH (028), Plaza_Mercado (039), "
      "Restaurantes (041), Restaurantes_en_PH (042), Talleres (049)",
      "Construcciones comerciales ubicadas en zonas con actividad economica "
      "comercial", "Tipologias 021 a 023"),
@@ -375,6 +376,47 @@ def grupo_comunas(d: pd.DataFrame) -> pd.Series:
         np.select([c.isin(CONFIG["comunas_7"]), c.isin(CONFIG["comunas_5"])],
                   ["7 comunas", "5 comunas (extra)"], default="10 comunas"),
         index=d.index)
+
+
+def crear_rango_variacion(valor, vigencia_base: int) -> str:
+    """Clasifica una variacion porcentual con los rangos del detalle anterior."""
+    if pd.isna(valor):
+        return f"19. Sin comparación {vigencia_base}"
+    if valor < -100:
+        return "(1. Menor a menos 100%]"
+    if valor <= -50:
+        return "(2. Entre -100% y -50%]"
+    if valor <= -30:
+        return "(3. Entre -50% y -30%]"
+    if valor <= -20:
+        return "(4. Entre -30% y -20%]"
+    if valor <= -10:
+        return "(5. Entre -20% y -10%]"
+    if valor < -5:
+        return "(6. Entre -10% y -5%)"
+    if valor < 0:
+        return "(7. Entre -5% y 0%)"
+    if valor == 0:
+        return "[8. Igual a 0%]"
+    if valor < 5:
+        return "(9. Entre 0% y 5%)"
+    if valor <= 10:
+        return "(10. Entre 5% y 10%]"
+    if valor <= 20:
+        return "(11. Entre 10% y 20%]"
+    if valor <= 50:
+        return "(12. Entre 20% y 50%]"
+    if valor <= 80:
+        return "(13. Entre 50% y 80%]"
+    if valor <= 100:
+        return "(14. Entre 80% y 100%]"
+    if valor <= 150:
+        return "(15. Entre 100% y 150%]"
+    if valor <= 200:
+        return "(16. Entre 150% y 200%]"
+    if valor <= 300:
+        return "(17. Entre 200% y 300%]"
+    return "(18. Mayor a 300%]"
 
 
 def preparar(df: pd.DataFrame) -> pd.DataFrame:
@@ -1219,6 +1261,7 @@ COLUMNAS_EXCEL_DETALLE = [
     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
     "DIF_VALORCONS_COM", "VARIACION_VALORCONS_COM_PCT",
     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "DIF_CAT_ABS", "VARIACION_CAT_PCT",
+    "RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_AVALUO",
     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS", "VARIACION_COM_PCT",
     "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
     "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
@@ -1739,6 +1782,19 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "VARIACION_AVALUO_COM_PCT"]
         det = d[[c for c in cols if c in d.columns]].copy()
         det["RANGO_VARIACION"] = det["RANGO_VARIACION"].astype(str)
+        det["RANGO_VM2"] = det["VARIACION_CAT_PCT"].apply(
+            lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
+        det["RANGO_CONS_TOTAL"] = det["VARIACION_VALORCONS_CAT_PCT"].apply(
+            lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
+        det["RANGO_AVALUO"] = det["VARIACION_AVALUO_CAT_PCT"].apply(
+            lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
+        anexo_var = pd.Series(np.nan, index=det.index)
+        if "VANEXO" in det.columns:
+            anexo_var = pd.Series(
+                np.where(pd.to_numeric(det["VANEXO"], errors="coerce").fillna(0) > 0,
+                         0, np.nan), index=det.index)
+        det["RANGO_ANEXO"] = anexo_var.apply(
+            lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
         det.to_parquet(CONFIG["parquet_detalle"], index=False)
         print(f"\n   Detalle fila a fila: {CONFIG['parquet_detalle']} "
               f"({len(det):,} construcciones)")
