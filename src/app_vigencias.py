@@ -324,7 +324,8 @@ APERTURAS = {
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
            "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
-           "CONDICION", "ESPECIAL", "PREDIO_ESPECIAL", "PUNTCONS",
+           "CONDICION", "ESPECIAL", "PREDIO_ESPECIAL", "CAMBIO_TIPOLOGIA",
+           "PUNTCONS",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
            "VARIACION_VALORCONS_CAT_PCT",
            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
@@ -483,6 +484,23 @@ with st.sidebar:
              "PREDIO_ESPECIAL=1."
     )
 
+    # La columna la escribe comparacion_vigencia.py. Si el parquet es anterior
+    # al cambio no esta, y entonces la casilla se ofrece deshabilitada en vez de
+    # quedarse marcando sin filtrar nada, que es lo que confunde.
+    hay_cambio_tip = "CAMBIO_TIPOLOGIA" in df_construccion.columns
+    excluir_cambio_tipologia = st.checkbox(
+        "Excluir cambio de tipología",
+        value=False,
+        disabled=not hay_cambio_tip,
+        help="Deja fuera lo que se movió de zona entre las dos entregas "
+             "(CAMBIO_TIPOLOGIA=1): esas construcciones no comparan lo mismo a "
+             "lado y lado, porque cambió la tabla que les toca. En Avalúo y "
+             "Valor total construido se excluye el predio completo si CUALQUIERA "
+             "de sus construcciones cambió."
+        if hay_cambio_tip else
+        "El parquet actual no trae CAMBIO_TIPOLOGIA. Vuelva a correr "
+        "`python src/comparacion_vigencia.py` para que la columna salga.")
+
     etiqueta_medida = st.radio(
         "Medida", list(MEDIDAS), index=0,
         help="El valor por m² es de cada CONSTRUCCIÓN; el valor construido "
@@ -612,6 +630,10 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
     if "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].le(max_construcciones)]
+    if excluir_cambio_tipologia and "CAMBIO_TIPOLOGIA" in d.columns:
+        # Solo el 1. El "SIN COMPARACIÓN" -a alguno de los dos lados le falta la
+        # tipologia- no es un cambio comprobado y se queda.
+        d = d[d["CAMBIO_TIPOLOGIA"].astype(str) != "1"]
     if excluir_predios_especiales:
         columnas_especiales = (
             ("PREDIO_ESPECIAL", "PREDIO_DESTINO_ESPECIAL")

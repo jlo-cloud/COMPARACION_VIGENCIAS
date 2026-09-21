@@ -695,6 +695,14 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
          g[una_vez].first(),
          g["TABLA_ORIGEN"].nunique().rename("N_TABLAS_PREDIO")],
         axis=1)
+    # El cambio de tipologia NO se toma de la construccion dominante como los de
+    # abajo: basta con que UNA se haya movido de zona para que el predio deje de
+    # servir como comparacion limpia, asi que se marca el predio entero.
+    if "CAMBIO_TIPOLOGIA" in d.columns:
+        uni["CAMBIO_TIPOLOGIA"] = g["CAMBIO_TIPOLOGIA"].agg(
+            lambda s: "1" if (s == "1").any()
+            else ("SIN COMPARACIÓN" if (s == "SIN COMPARACIÓN").any() else "0"))
+
     # Mismos nombres que a nivel construccion, pero de la construccion dominante.
     for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM",
               "CONDICION"):
@@ -1829,6 +1837,10 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     # mas se pide, y no dice mas de lo que ya dice USO_LADM,
                     # que va desde el principio.
                     "CONDICION",
+                    # Si la construccion se movio de zona entre entregas. La app
+                    # filtra por ella: una que cambio de tipologia no compara lo
+                    # mismo en las dos vigencias.
+                    "CAMBIO_TIPOLOGIA",
                     "PUNTCONS",
                     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                     "VARIACION_VALORCONS_CAT_PCT",
@@ -1845,6 +1857,9 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                            # Como la tabla y la actividad: la de la
                            # construccion de mayor area del predio.
                            "CONDICION",
+                           # Esta NO es la de la construccion dominante: marca 1
+                           # si CUALQUIERA de las del predio cambio de zona.
+                           "CAMBIO_TIPOLOGIA",
                            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                            "VARIACION_VALORCONS_CAT_PCT",
                            "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
