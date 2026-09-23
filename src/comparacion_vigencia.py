@@ -1232,7 +1232,26 @@ DICCIONARIO_DETALLE = [
     ("VARIACION_COM_PCT", "Variacion del VM2 comercial (%)",
      "DIF_COM_ABS / VM2_COM_VIGENCIA x 100"),
     ("SENTIDO", "Si sube, baja o queda igual", "sobre la base que se reporto"),
-    ("RANGO_VARIACION", "En que tramo de variacion cae", ""),
+    ("RANGO_VARIACION", "Rango de la variacion, en 7 rangos anchos",
+     "sobre la base que se reporto; pd.cut con cortes en -50, -25, -10, 10, "
+     "25 y 50"),
+    # Los cuatro de abajo son los rangos de crear_rango_variacion(): 18
+    # numerados mas el '19. Sin comparacion' cuando no hay dato. No son lo
+    # mismo que RANGO_VARIACION, que tiene 7 rangos anchos. Van siempre sobre
+    # el catastral, aunque el reporte salga en comercial. El rango 1 -menor a
+    # -100%- no se usa nunca: la variacion no puede bajar de -100% porque
+    # ningun valor liquidado es negativo.
+    ("RANGO_VM2", "Rango de la variacion del VM2 catastral",
+     "crear_rango_variacion() sobre VARIACION_CAT_PCT"),
+    ("RANGO_CONS_TOTAL",
+     "Rango de la variacion del valor construido catastral",
+     "crear_rango_variacion() sobre VARIACION_VALORCONS_CAT_PCT"),
+    ("RANGO_AVALUO", "Rango de la variacion del avaluo catastral",
+     "crear_rango_variacion() sobre VARIACION_AVALUO_CAT_PCT"),
+    ("RANGO_ANEXO", "Rango de la variacion del valor del anexo",
+     "crear_rango_variacion() sobre VANEXO; hoy sale '19. Sin comparacion' en "
+     "todas las filas porque la T10 no esta aprobada y ningun anexo se "
+     "revaloriza"),
     ("FUERA_TOLERANCIA", "Si se pasa de la tolerancia configurada", ""),
     ("AVALUO_CAT_VIGENCIA", "Avaluo catastral de la vigencia base",
      "VTER + VALORCONS + VANEXO"),
