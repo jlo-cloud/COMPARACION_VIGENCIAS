@@ -120,8 +120,7 @@ CONFIG = {
                  ("T6_INSTITUCIONAL_SA", "INSTITUCIONAL_SA"),
                  ("T9_HOTELES", "HOTELES"),
                  ("T11_CCOMERCIALES", "CCOMERCIALES"),
-                 ("T13_UNIDAD_DEPORTIVA", "UNIDAD_DEPORTIVA"),
-                 ("T12_PARQUEADEROS", "PARQUEADEROS")],
+                 ("T13_UNIDAD_DEPORTIVA", "UNIDAD_DEPORTIVA")],
 
     # Usos que se comparan por modelo según condición.
     "usos_por_modelo": {"Apartamentos_4_y_mas_pisos_en_PH": 8,
@@ -292,7 +291,6 @@ COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM
             # para subirla a nivel predio y mostrarla en el detalle.
             "PUNTCONS",
             "ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
-            "LIQ_PARQUEADERO", "DESTINOCONS",
             "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "VANEXO",
             "AVALPRED",
             # Marcas de como se valoro la construccion a cada lado.
@@ -474,13 +472,6 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     else:
         d["PREDIO_DESTINO_ESPECIAL"] = 0
 
-    # Predios que son INTEGRAL/MIXTO solo por sus parqueaderos: la T12 es
-    # integral, pero su valor sale de tabla. Se mira antes del recorte, que es
-    # cuando todavia se ven las construcciones que van por modelo.
-    t12 = set(d.loc[d["TABLA_ORIGEN"].str.startswith("T12"), "ID_PREDIO"])
-    con_modelo = set(d.loc[d["TABLA_ORIGEN"] == "MODELO", "ID_PREDIO"])
-    d["INTEGRAL_POR_PARQUEADERO"] = d["ID_PREDIO"].isin(t12 - con_modelo).astype(int)
-
     # La marca ESPECIAL de la base de convencionales, subida a nivel PREDIO: si
     # UNA sola de sus construcciones viene marcada, el predio queda marcado y la
     # marca baja a todas sus construcciones.
@@ -504,7 +495,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         return d
 
     for c in ["ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
-              "LIQ_PARQUEADERO", "VM2_ESP_2026", "VTER", "VALOANEX", "VANEXO", "AVALPRED",
+              "VM2_ESP_2026", "VTER", "VALOANEX", "VANEXO", "AVALPRED",
               "PUNTCONS"]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
@@ -521,14 +512,6 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
         "ACT 2024-2025", "SIN ACTUALIZAR")
 
     d["VM2_COM_LIQ"] = d["VM2"]                                  # comercial, 2027
-    # Garajes y parqueaderos (007, 008, 036, 037): su VM2 es un valor POR
-    # UNIDAD y la construccion vale LIQ_PARQUEADERO (unidad x factor de area).
-    # Para compararlo contra el m2 de la vigencia se lleva a m2 con su area.
-    if "LIQ_PARQUEADERO" in d.columns:
-        liq_parq = d["LIQ_PARQUEADERO"].fillna(0)
-        por_unidad = (liq_parq > 0) & (d["AREA_CONST"] > 0)
-        d.loc[por_unidad, "VM2_COM_LIQ"] = (liq_parq[por_unidad]
-                                            / d.loc[por_unidad, "AREA_CONST"])
     d["VM2_CAT_LIQ"] = d["VM2_COM_LIQ"] * factor                 # catastral, 2027
     d["VM2_CAT_VIGENCIA"] = d["VALORCONS"] / d["ACONCONS"]       # catastral, hoy
     d["VM2_COM_VIGENCIA"] = d["VM2_CAT_VIGENCIA"] / d["F_COMERCIAL"]  # com., hoy
@@ -645,9 +628,7 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         ("sin area de construccion (ACONCONS <= 0)", _falta("ACONCONS")),
         ("sin valor de construccion en la base (VALORCONS <= 0)",
          _falta("VALORCONS")),
-        # La T12 no se liquida por puntaje.
-        ("sin puntaje de construccion (PUNTCONS <= 0)",
-         _falta("PUNTCONS") & ~d["TABLA_ORIGEN"].str.startswith("T12")),
+        ("sin puntaje de construccion (PUNTCONS <= 0)", _falta("PUNTCONS")),
         ("sin VM2 de tabla en 2026 (VM2 <= 0)", _falta("VM2_CAT_LIQ")),
     ]
 
@@ -656,8 +637,6 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             metodo = d["METODO_LIQUIDACION"].astype(str).str.strip().str.upper()
             validos = [m.upper() for m in CONFIG["metodos_de_tabla"]]
             fuera_metodo = ~metodo.isin(validos)
-            if "INTEGRAL_POR_PARQUEADERO" in d.columns:
-                fuera_metodo &= d["INTEGRAL_POR_PARQUEADERO"] != 1
         else:
             fuera_metodo = pd.Series(False, index=d.index)
         # ESPECIAL y ESPECIAL_2026 ya no excluyen: las dos marcas vienen del
