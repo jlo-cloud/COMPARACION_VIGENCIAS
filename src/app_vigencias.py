@@ -1248,7 +1248,10 @@ with hoja_reglas:
         f"factor de la comuna: las {n_act} actualizadas en 2024-2025 van por "
         f"{coma(FACTOR_COMERCIAL_ACT)} y las {n_resto} restantes por "
         f"{coma(FACTOR_COMERCIAL_RESTO)}. El terreno no distingue comuna: "
-        f"siempre va por {coma(FACTOR_COMERCIAL_TERRENO)}. El valor de la "
+        f"siempre va por {coma(FACTOR_COMERCIAL_TERRENO)}. En el avalúo 2027 "
+        f"el terreno es el proyectado (VTER_CAT_proy, todavía no definitivo) "
+        f"donde el insumo lo trae; el predio que no está ahí conserva el "
+        f"VTER de la base. El valor de la "
         f"liquidación 2027 no usa este factor: la tabla de valor da el "
         f"comercial y el catastral sale de multiplicarlo por 0,7.")
 
