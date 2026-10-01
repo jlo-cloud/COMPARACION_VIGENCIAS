@@ -384,16 +384,17 @@ def grupo_comunas(d: pd.DataFrame) -> pd.Series:
         index=d.index)
 
 
-def terreno_proyectado() -> pd.Series:
-    """VTERR_COM_2027 (comercial) por ID_PREDIO; vacia si el insumo no esta."""
+def terreno_proyectado() -> pd.DataFrame:
+    """VTERR_COM_2027 (comercial) e inc (incremento de la comuna, fraccion)
+    por ID_PREDIO; vacia si el insumo no esta."""
     ruta = CONFIG["insumo_terreno_proyectado"]
     if not ruta or not os.path.exists(ruta):
         print(f"   (sin insumo de terreno proyectado: la liquidacion usa VTER)")
-        return pd.Series(dtype="float64")
-    t = pd.read_parquet(ruta, columns=["ID_PREDIO", "VTERR_COM_2027"])
+        return pd.DataFrame(columns=["VTERR_COM_2027", "inc"], dtype="float64")
+    t = pd.read_parquet(ruta, columns=["ID_PREDIO", "VTERR_COM_2027", "inc"])
     t["ID_PREDIO"] = t["ID_PREDIO"].astype(str).str.strip()
     return (t.drop_duplicates("ID_PREDIO").set_index("ID_PREDIO")
-             ["VTERR_COM_2027"].astype("float64"))
+             [["VTERR_COM_2027", "inc"]].astype("float64"))
 
 
 def crear_rango_variacion(valor, vigencia_base: int) -> str:
@@ -752,12 +753,17 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     # --- Terreno de la liquidacion: el proyectado donde lo hay ---------------
     # El insumo ya viene comercial: el catastral sale de el, no al reves.
     f_ter = CONFIG["factor_comercial_terreno"]
-    proy = uni["ID_PREDIO"].astype(str).str.strip().map(terreno_proyectado())
+    insumo = terreno_proyectado()
+    id_predio = uni["ID_PREDIO"].astype(str).str.strip()
+    proy = id_predio.map(insumo["VTERR_COM_2027"])
     uni["VTER_CAT_BASE"] = uni["VTER"]
     uni["VTER_COM_BASE"] = uni["VTER"] / f_ter
     uni["VTER_COM_PROYECTADO"] = proy.fillna(uni["VTER_COM_BASE"])
     uni["VTER_CAT_PROYECTADO"] = (proy * f_ter).fillna(uni["VTER_CAT_BASE"])
     uni["ORIGEN_TERRENO_LIQ"] = np.where(proy.notna(), "PROYECTADO", "BASE")
+    # El incremento de la comuna que trae el insumo, en puntos (5.0 = 5%).
+    uni["INCREMENTO_TERRENO_PCT"] = (id_predio.map(insumo["inc"]) * 100).where(
+        proy.notna())
     print(f"   Terreno proyectado: {int(proy.notna().sum()):,} de "
           f"{len(uni):,} predios; el resto conserva VTER")
 
@@ -1228,6 +1234,7 @@ DICCIONARIO_DETALLE = [
     ("VTER_CAT_PROYECTADO", "Terreno catastral 2027: VTERR_COM_2027 del insumo de proyeccion x 0.7; sin el, VTER_CAT_BASE", "calculado"),
     ("VTER_COM_PROYECTADO", "Terreno comercial 2027: VTERR_COM_2027 del insumo tal cual; sin el, VTER_COM_BASE", "calculado"),
     ("ORIGEN_TERRENO_LIQ", "PROYECTADO si el terreno 2027 salio del insumo; BASE si conserva el de la base", "calculado"),
+    ("INCREMENTO_TERRENO_PCT", "Incremento % de la comuna aplicado al terreno proyectado (inc del insumo); vacio si el terreno 2027 es el de la base", "insumo de proyeccion"),
     ("VANEXO", "Valor de los anexos del predio (catastral)",
      "de la base; es el total del predio, no el de una fila de anexo"),
     ("VALORCONS", "Valor de la construccion HOY (catastral)", "de la base"),
@@ -1317,7 +1324,7 @@ COLUMNAS_EXCEL_DETALLE = [
     "ACTIVIDAD_ECONOMICA", "CLAVE",
     "PUNTCONS", "ACONCONS", "AREA_CONST",
     "VTER_CAT_BASE", "VTER_CAT_PROYECTADO", "VTER_COM_BASE", "VTER_COM_PROYECTADO",
-    "ORIGEN_TERRENO_LIQ",
+    "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT",
     "VANEXO",
     "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
     "DIF_VALORCONS_CAT", "VARIACION_VALORCONS_CAT_PCT",
@@ -1798,7 +1805,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # El avaluo va por PREDIO: se cruza por ID_PREDIO, NUNCA por indice.
         cols_aval = [c for c in ("VTER_CAT_BASE", "VTER_CAT_PROYECTADO",
                                  "VTER_COM_BASE", "VTER_COM_PROYECTADO",
-                                 "ORIGEN_TERRENO_LIQ",
+                                 "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT",
                                  "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
                                  "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
                                  "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
@@ -1833,7 +1840,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "PUNTCONS", "ACONCONS", "AREA_CONST",
                 "VTER_CAT_BASE", "VTER_CAT_PROYECTADO",
                 "VTER_COM_BASE", "VTER_COM_PROYECTADO",
-                "ORIGEN_TERRENO_LIQ", "VANEXO",
+                "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT", "VANEXO",
                 "VALORCONS",
                 "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
                 "DIF_VALORCONS_CAT", "VARIACION_VALORCONS_CAT_PCT",
