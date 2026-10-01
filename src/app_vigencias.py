@@ -176,6 +176,32 @@ def factores_comerciales() -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+# --- Incremento del terreno proyectado ---------------------------------------
+# Sale de insumo_proyección_comuna_valor_terreno_20260930.parquet (columnas
+# COMUNA, GRUPO e inc): VTERR_COM_2027 = VTER / 0,7 x (1 + inc). El insumo no
+# se publica, asi que se copia aqui; si llega otro, hay que actualizarlo.
+# (comuna, grupo, predios en el insumo, incremento %)
+INCREMENTO_TERRENO = [
+    ("01", "Act. 2025", 7633, 5.00),
+    ("02", "Act. 2024", 15925, 4.69),
+    ("03", "Act. 2025", 7712, 6.75),
+    ("04", "Act. 2024", 9661, 12.72),
+    ("07", "Sin act.", 11475, 139.35),
+    ("08", "Act. 2024", 15986, 11.50),
+    ("09", "Act. 2025", 10100, 3.26),
+    ("10", "Act. 2025", 13131, 6.53),
+    ("11", "Act. 2025", 12887, 10.70),
+    ("12", "Act. 2025", 9053, 5.32),
+    ("14", "Sin act.", 26560, 44.05),
+    ("15", "Sin act.", 27959, 177.18),
+    ("17", "Act. 2024", 18615, 10.64),
+    ("19", "Act. 2024", 15068, 11.32),
+    ("20", "Sin act.", 8855, 138.91),
+    ("21", "Sin act.", 28580, 127.56),
+    ("22", "Act. 2025", 5063, 3.18),
+]
+
+
 USOS_T1 = ("Apartamentos_4_y_mas_pisos_en_PH (001), Barracas (004), "
            "Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
@@ -435,6 +461,19 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     if "CON_ANEXO" not in d.columns and "VANEXO" in d.columns:
         d["CON_ANEXO"] = (pd.to_numeric(d["VANEXO"], errors="coerce")
                           .fillna(0) > 0).astype(int)
+    # El incremento de su comuna, solo donde el terreno 2027 es el proyectado;
+    # va justo despues de ORIGEN_TERRENO_LIQ.
+    # comparacion_vigencia.py ya la escribe; esto es para un detalle viejo.
+    if ("ORIGEN_TERRENO_LIQ" in d.columns
+            and "INCREMENTO_TERRENO_PCT" not in d.columns):
+        inc = {c: p for c, _, _, p in INCREMENTO_TERRENO}
+        d["INCREMENTO_TERRENO_PCT"] = d["COMUNA"].map(inc).where(
+            d["ORIGEN_TERRENO_LIQ"].astype(str) == "PROYECTADO")
+        cols = list(d.columns)
+        cols.remove("INCREMENTO_TERRENO_PCT")
+        cols.insert(cols.index("ORIGEN_TERRENO_LIQ") + 1,
+                    "INCREMENTO_TERRENO_PCT")
+        d = d[cols]
     # ID_PREDIO y el numero predial son unicos por fila: _a_categoria los deja
     # como estan y solo convierte las columnas que de verdad se repiten.
     return _a_categoria(d)
@@ -1254,6 +1293,21 @@ with hoja_reglas:
         f"VTER de la base. El valor de la "
         f"liquidación 2027 no usa este factor: la tabla de valor da el "
         f"comercial y el catastral sale de multiplicarlo por 0,7.")
+
+    st.markdown("**Incremento del terreno proyectado por comuna**")
+    st.dataframe(
+        pd.DataFrame(INCREMENTO_TERRENO,
+                     columns=["COMUNA", "GRUPO", "PREDIOS", "INCREMENTO"]),
+        width="stretch", hide_index=True,
+        column_config={
+            "COMUNA": st.column_config.TextColumn(width="small"),
+            "GRUPO": st.column_config.TextColumn(width="small"),
+            "PREDIOS": st.column_config.NumberColumn(format="localized",
+                                                     width="small"),
+            "INCREMENTO": st.column_config.NumberColumn(format="%.2f %%",
+                                                        width="small")})
+    st.caption("VTERR_COM_2027 = VTER_COM_2026 × (1 + incremento de la "
+               "comuna). Predios: los que trae el insumo de proyección.")
 
     st.divider()
     st.markdown("**Excepciones**")
