@@ -761,9 +761,11 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     uni["VTER_COM_PROYECTADO"] = proy.fillna(uni["VTER_COM_BASE"])
     uni["VTER_CAT_PROYECTADO"] = (proy * f_ter).fillna(uni["VTER_CAT_BASE"])
     uni["ORIGEN_TERRENO_LIQ"] = np.where(proy.notna(), "PROYECTADO", "BASE")
-    # El incremento de la comuna que trae el insumo, en puntos (5.0 = 5%).
-    uni["INCREMENTO_TERRENO_PCT"] = (id_predio.map(insumo["inc"]) * 100).where(
-        proy.notna())
+    # El incremento de la comuna que trae el insumo, en puntos y redondeado a
+    # entero como en la tabla de tipologias (5 = 5%). Solo para leer: el
+    # terreno proyectado usa el inc exacto.
+    uni["INCREMENTO_TERRENO_PCT"] = (id_predio.map(insumo["inc"]) * 100).round(
+        0).where(proy.notna())
     print(f"   Terreno proyectado: {int(proy.notna().sum()):,} de "
           f"{len(uni):,} predios; el resto conserva VTER")
 
@@ -1288,6 +1290,10 @@ DICCIONARIO_DETALLE = [
      "crear_rango_variacion() sobre VARIACION_VALORCONS_CAT_PCT"),
     ("RANGO_AVALUO", "Rango de la variacion del avaluo catastral",
      "crear_rango_variacion() sobre VARIACION_AVALUO_CAT_PCT"),
+    ("RANGO_TERR", "Rango de la variacion del terreno catastral 2027 contra "
+     "la vigencia", "crear_rango_variacion() sobre VTER_CAT_PROYECTADO / "
+     "VTER_CAT_BASE - 1; el terreno que no esta en el insumo sale 'Igual a "
+     "0%' y el que no tiene VTER en la base, '19. Sin comparacion'"),
     ("RANGO_ANEXO", "Rango de la variacion del valor del anexo",
      "crear_rango_variacion() sobre VANEXO; hoy sale '19. Sin comparacion' en "
      "todas las filas porque la T10 no esta aprobada y ningun anexo se "
@@ -1331,7 +1337,7 @@ COLUMNAS_EXCEL_DETALLE = [
     "VALORCONS_COM_VIGENCIA", "VALORCONS_COM_LIQ",
     "DIF_VALORCONS_COM", "VARIACION_VALORCONS_COM_PCT",
     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "DIF_CAT_ABS", "VARIACION_CAT_PCT",
-    "RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_AVALUO",
+    "RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_TERR", "RANGO_AVALUO",
     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS", "VARIACION_COM_PCT",
     "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
     "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
@@ -1863,6 +1869,13 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
         det["RANGO_AVALUO"] = det["VARIACION_AVALUO_CAT_PCT"].apply(
             lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
+        if {"VTER_CAT_BASE", "VTER_CAT_PROYECTADO"} <= set(det.columns):
+            ter_base = pd.to_numeric(det["VTER_CAT_BASE"], errors="coerce")
+            ter_liq = pd.to_numeric(det["VTER_CAT_PROYECTADO"], errors="coerce")
+            ter_var = ((ter_liq / ter_base.where(ter_base > 0) - 1) * 100
+                       ).round(6)
+            det["RANGO_TERR"] = ter_var.apply(
+                lambda v: crear_rango_variacion(v, CONFIG["vigencia_base"]))
         anexo_var = pd.Series(np.nan, index=det.index)
         if "VANEXO" in det.columns:
             anexo_var = pd.Series(

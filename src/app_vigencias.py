@@ -467,7 +467,7 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     if ("ORIGEN_TERRENO_LIQ" in d.columns
             and "INCREMENTO_TERRENO_PCT" not in d.columns):
         inc = {c: p for c, _, _, p in INCREMENTO_TERRENO}
-        d["INCREMENTO_TERRENO_PCT"] = d["COMUNA"].map(inc).where(
+        d["INCREMENTO_TERRENO_PCT"] = d["COMUNA"].map(inc).round(0).where(
             d["ORIGEN_TERRENO_LIQ"].astype(str) == "PROYECTADO")
         cols = list(d.columns)
         cols.remove("INCREMENTO_TERRENO_PCT")
@@ -1304,7 +1304,7 @@ with hoja_reglas:
             "GRUPO": st.column_config.TextColumn(width="small"),
             "PREDIOS": st.column_config.NumberColumn(format="localized",
                                                      width="small"),
-            "INCREMENTO": st.column_config.NumberColumn(format="%.2f %%",
+            "INCREMENTO": st.column_config.NumberColumn(format="%.0f %%",
                                                         width="small")})
     st.caption("VTERR_COM_2027 = VTER_COM_2026 × (1 + incremento de la "
                "comuna). Predios: los que trae el insumo de proyección.")
