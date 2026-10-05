@@ -953,10 +953,13 @@ def con_formato(t: pd.DataFrame):
     primera = t.columns[0] if len(t.columns) else None
     if primera is not None and t[primera].astype(str).str.startswith("TOTAL").any():
         def _total(fila):
-            es_total = str(fila.iloc[0]).startswith("TOTAL")
-            estilo = ("background-color: #F4F6F9; font-weight: 700"
-                      if es_total else "")
-            return [estilo] * len(fila)
+            if not str(fila.iloc[0]).startswith("TOTAL"):
+                return [""] * len(fila)
+            # Letra gris como la de los titulos de columna; la diferencia y la
+            # variacion conservan su color de signo.
+            base = "background-color: #F4F6F9; font-weight: 700"
+            return [base if c in con_signo else f"{base}; color: #6B7085"
+                    for c in fila.index]
         sty = sty.apply(_total, axis=1)
     return sty
 
