@@ -476,7 +476,6 @@ def _a_categoria(d: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-@st.cache_data(show_spinner="Leyendo el detalle de la comparación…")
 def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     """Uno de los dos recortes anonimos, con solo las columnas que usa la app."""
     columnas = COLUMNAS_PREDIO if grano == "predio" else COLUMNAS
@@ -498,7 +497,6 @@ def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     return _a_categoria(d)
 
 
-@st.cache_data(show_spinner="Leyendo el detalle predio a predio…")
 def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     """El detalle fila a fila, CON identificadores. Solo lo lee la hoja Detalle."""
     d = pd.read_parquet(ruta)
@@ -532,6 +530,14 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     return _a_categoria(d)
 
 
+@st.cache_resource(show_spinner="Leyendo el detalle predio a predio…",
+                   max_entries=2)
+def cargar_detalles(fuentes: tuple) -> pd.DataFrame:
+    """El detalle de las versiones elegidas, con VERSION al frente."""
+    det = _unir([cargar_detalle(r, m).assign(VERSION=v) for v, r, m in fuentes])
+    return det[["VERSION"] + [c for c in det.columns if c != "VERSION"]]
+
+
 # Las columnas del detalle que se muestran en la vista corta.
 COLUMNAS_DETALLE_FIJAS = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA",
@@ -555,26 +561,39 @@ if not VERSIONES:
     st.stop()
 
 
-def cargar_versiones(nombre: str, grano: str):
-    """El recorte de todas las versiones, una debajo de otra, con VERSION."""
-    partes = []
-    for v in VERSIONES:
-        ruta = ruta_version(v, nombre)
-        if ruta.exists():
-            partes.append(cargar(str(ruta), os.path.getmtime(ruta), grano)
-                          .assign(VERSION=v))
-    if not partes:
-        return None
+def _unir(partes: list) -> pd.DataFrame:
+    """Concatena versiones sin perder las categorias (el concat las deshace)."""
+    from pandas.api.types import union_categoricals
     d = pd.concat(partes, ignore_index=True)
-    for c in d.columns:              # el concat deshace las categorias
-        if d[c].dtype == object or isinstance(d[c].dtype, pd.CategoricalDtype):
-            d[c] = d[c].astype(str) if c != "VERSION" else d[c]
+    for c in d.columns:
+        if c != "VERSION" and all(
+                isinstance(x[c].dtype, pd.CategoricalDtype) for x in partes):
+            d[c] = union_categoricals([x[c] for x in partes])
     d["VERSION"] = pd.Categorical(d["VERSION"], categories=VERSIONES)
     return _a_categoria(d)
 
 
-df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion")
-df_predio = cargar_versiones(NOMBRE_PREDIO, "predio")
+# cache_resource y no cache_data: guarda UN objeto y lo entrega sin copiarlo en
+# cada clic. Con cache_data cada rerun armaba una copia nueva de todas las
+# versiones y el contenedor del despliegue (1 GB) se caia. Nada de la app
+# modifica estos DataFrames en sitio: los filtros devuelven otros nuevos.
+@st.cache_resource(show_spinner="Leyendo las versiones de la comparación…",
+                   max_entries=4)
+def cargar_versiones(nombre: str, grano: str, marcas: tuple):
+    """El recorte de todas las versiones, una debajo de otra, con VERSION."""
+    partes = [cargar(str(ruta_version(v, nombre)), m, grano).assign(VERSION=v)
+              for v, m in marcas]
+    return _unir(partes) if partes else None
+
+
+def marcas_de(nombre: str) -> tuple:
+    """(version, fecha de modificacion) de cada archivo: la llave del cache."""
+    return tuple((v, os.path.getmtime(ruta_version(v, nombre)))
+                 for v in VERSIONES if ruta_version(v, nombre).exists())
+
+
+df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion",
+                                   marcas_de(NOMBRE_DATOS))
 
 
 # =====================================================================
@@ -641,6 +660,9 @@ with st.sidebar:
 
     # De aqui en adelante 'df' es el parquet del grano que corresponda, y todo
     # lo demas -filtros, tablas, graficos- trabaja sobre el sin enterarse.
+    df_predio = (cargar_versiones(NOMBRE_PREDIO, "predio",
+                                  marcas_de(NOMBRE_PREDIO))
+                 if grano == "predio" and marcas_de(NOMBRE_PREDIO) else None)
     if grano == "predio" and df_predio is None:
         st.error(f"Falta {NOMBRE_PREDIO}, que es de donde salen el valor "
                  f"construido total y el avalúo. Corra "
@@ -1279,12 +1301,8 @@ with hoja_detalle:
                      if ruta_version(v, NOMBRE_DETALLE).exists()}
     if rutas_detalle:
         st.markdown("**Explorador predio a predio**")
-        det = pd.concat([cargar_detalle(str(r), os.path.getmtime(r))
-                         .assign(VERSION=v)
-                         for v, r in rutas_detalle.items()],
-                        ignore_index=True)
-        # La version va al frente, junto a los identificadores.
-        det = det[["VERSION"] + [c for c in det.columns if c != "VERSION"]]
+        det = cargar_detalles(tuple((v, str(r), os.path.getmtime(r))
+                                    for v, r in rutas_detalle.items()))
         detf = filtrar(det)
 
         st.caption("Esto SÍ trae identificadores: ID_PREDIO y número predial. "
@@ -1516,3 +1534,8 @@ st.caption(
 # PUBLICAR (gratis, con enlace)
 # =====================================================================
 # Streamlit Community Cloud lo publica gratis con una URL fija.
+
+# Lo que cada clic arma -filtros, tablas, graficos- se suelta aqui mismo: sin
+# esto la memoria del despliegue (1 GB) sube de clic en clic hasta tumbar la app.
+import gc
+gc.collect()
