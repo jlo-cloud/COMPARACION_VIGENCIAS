@@ -915,8 +915,13 @@ def con_formato(t: pd.DataFrame):
     return t.style.format(reglas)
 
 
-def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
-    """Una fila por grupo: cuantos predios, las dos medianas y como se mueve."""
+def resumen(d: pd.DataFrame, col: str,
+            d_total: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Una fila por grupo: cuantos predios, las dos medianas y como se mueve.
+
+    d_total es de donde salen las filas TOTAL, si no es el mismo d: con varias
+    versiones, a d le faltan las filas repetidas de las tablas sin cambio, y el
+    total de cada version las necesita todas."""
     g = d.groupby(col, sort=True, observed=True)
     t = pd.DataFrame({
         COL_N: g.size(),
@@ -936,7 +941,8 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
 
     # La fila TOTAL va sobre los mismos grupos; las medianas se recalculan.
     # Con varias versiones sale un TOTAL por version, nunca mezcladas.
-    sub_todo = d[d[col].isin(grupos_ok)]
+    d_total = d if d_total is None else d_total
+    sub_todo = d_total[d_total[col].isin(grupos_ok)]
     filas = []
     for v in sel_versiones:
         sub = sub_todo[sub_todo["VERSION"] == v]
@@ -962,17 +968,47 @@ hoja_tablas, hoja_graf, hoja_detalle, hoja_reglas = st.tabs(
 # mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
 # Con varias versiones cada grupo se parte por version: "T3_COMERCIAL_021 · V1"
 # y "T3_COMERCIAL_021 · V2" quedan seguidos, como si fueran dos tablas.
+# Si un grupo trae exactamente los mismos valores en todas las versiones
+# elegidas -la tabla no cambio-, sale UNA sola fila: "T11_CCOMERCIALES · V1 = V2
+# (sin cambio)". Los TOTAL siguen siendo uno por version.
 if varias_versiones:
-    dff = dff.assign(_APERTURA=dff[col_apertura].astype(str) + " · "
-                     + dff["VERSION"].astype(str))
+    import hashlib
+    import numpy as np
+
+    etiqueta = dff[col_apertura].astype(str)
+
+    def _huella(s: pd.DataFrame) -> str:
+        """Los valores de las dos vigencias, ordenados: si coinciden, es igual."""
+        h = hashlib.md5()
+        for c in (medida["vig"], medida["liq"]):
+            h.update(np.sort(pd.to_numeric(s[c], errors="coerce")
+                             .to_numpy(dtype="float64")).tobytes())
+        return h.hexdigest()
+
+    huellas = (dff[[medida["vig"], medida["liq"]]]
+               .assign(_K=etiqueta, VERSION=dff["VERSION"].astype(str))
+               .groupby(["_K", "VERSION"])[[medida["vig"], medida["liq"]]]
+               .apply(_huella)
+               .unstack("VERSION")
+               .reindex(columns=sel_versiones))
+    sin_cambio = set(huellas.index[huellas.notna().all(axis=1)
+                                   & (huellas.nunique(axis=1) == 1)])
+    nota = f" · {' = '.join(sel_versiones)} (sin cambio)"
+    es_igual = etiqueta.isin(sin_cambio)
+    dff = dff.assign(_APERTURA=etiqueta.where(
+        ~es_igual, etiqueta + nota).where(
+        es_igual, etiqueta + " · " + dff["VERSION"].astype(str)))
+    # Para las filas de grupo basta una version de lo que no cambio.
+    dff_grupos = dff[~(es_igual & (dff["VERSION"] != sel_versiones[0]))]
     col_grupo = "_APERTURA"
 else:
+    dff_grupos = dff
     col_grupo = col_apertura
-res = resumen(dff, col_grupo)
+res = resumen(dff_grupos, col_grupo, dff)
 # Los percentiles del total, uno por version.
 totales = {v: percentiles(dff[dff["VERSION"] == v]) for v in sel_versiones}
 totales = {v: t for v, t in totales.items() if not t.empty}
-abierto = por_grupo(dff, col_grupo)
+abierto = por_grupo(dff_grupos, col_grupo)
 reglas = reglas_asignacion()
 factores = factores_comerciales()
 
