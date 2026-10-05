@@ -49,6 +49,12 @@ COMUNAS_EXCLUIDAS = [] if INCLUIR_COMUNAS_FALTANTES else list(COMUNAS_FALTANTES)
 COMUNAS_7 = ['02', '03', '04', '08', '17', '19', '22']
 COMUNAS_10 = (['01', '07', '09', '10', '11', '12', '14', '15', '20', '21']
               + (COMUNAS_FALTANTES if INCLUIR_COMUNAS_FALTANTES else []))
+# Version 2 de las tablas: EDIFICIOS (T2) e INDUSTRIAL (T4) ya no traen 10C,
+# sino 5C y 5C_N, que parten las 10 comunas en dos. Las 5 extra de estas dos
+# tablas se van con 5C_N; las demas tablas siguen con 10C.
+COMUNAS_5 = ['01', '09', '10', '11', '12']
+COMUNAS_5N = (['07', '14', '15', '20', '21']
+              + (COMUNAS_FALTANTES if INCLUIR_COMUNAS_FALTANTES else []))
 
 def convertir_a_float(df, columnas):
     for col in columnas:

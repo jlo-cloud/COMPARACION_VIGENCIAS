@@ -67,18 +67,23 @@ RAIZ = Path(__file__).resolve().parent.parent
 # =====================================================================
 # CONFIGURACION
 # =====================================================================
-from consolidar_tablas import tabla_valor_vigente
+from consolidar_tablas import tabla_valor_vigente, VERSION_TABLAS
+
+# Cada version de las tablas deja sus salidas en su propia carpeta, para que la
+# app y el Excel de versiones puedan comparar unas contra otras.
+CARPETA_VERSION = RAIZ / "output" / "versiones" / VERSION_TABLAS
 
 
 CONFIG = {
-    "parquet_liquidacion": str(RAIZ / "output" / "LIQUIDACION_TABLAS.parquet"),
+    "version_tablas": VERSION_TABLAS,
+    "parquet_liquidacion": str(CARPETA_VERSION / "LIQUIDACION_TABLAS.parquet"),
     "carpeta_results": str(RAIZ / "results" / "COMPARACION_VIGENCIA"),
-    "parquet_detalle": str(RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"),
+    "parquet_detalle": str(CARPETA_VERSION / "COMPARACION_VIGENCIA_DETALLE.parquet"),
     # El mismo detalle sin identificadores, que es lo que lee app_vigencias.py
     # y lo unico de output/ que se versiona (ver .gitignore).
-    "parquet_publico": str(RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"),
+    "parquet_publico": str(CARPETA_VERSION / "COMPARACION_VIGENCIA_PUBLICO.parquet"),
     # El segundo grano: una fila por PREDIO, con el valor construido y el avaluo.
-    "parquet_publico_predio": str(RAIZ / "output" /
+    "parquet_publico_predio": str(CARPETA_VERSION /
                                   "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"),
 
     # Comercial -> catastral.
@@ -92,6 +97,10 @@ CONFIG = {
     "comunas_10": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
     # Comunas adicionales del reporte.
     "comunas_5": ["05", "06", "13", "16", "18"],
+    # Version 2: T2 y T4 parten las 10 comunas en 5C y 5C_N; las 5 extra de
+    # esas dos tablas van con 5C_N.
+    "comunas_5c": ["01", "09", "10", "11", "12"],
+    "comunas_5c_n": ["07", "14", "15", "20", "21"],
 
     # Terreno proyectado (VTERR_COM_2027, ya comercial) para el lado de la
     # liquidacion; el catastral es ese valor x factor_comercial_terreno. El predio
@@ -229,13 +238,17 @@ def _mapa_tablas_valor(ruta: str) -> dict:
                 break
         if idx is None:
             continue
+        grupo = f"{num}C"
+        if idx + 1 < len(partes) and partes[idx + 1] == "N":   # 5C_N
+            partes.pop(idx + 1)
+            grupo = f"{num}C_N"
         resto = [p for p in partes[:idx] + partes[idx + 1:] if p != "COND"]
         if "9" not in resto and "0" in resto:    # COND_0 no va en el nombre
             resto.remove("0")
         if "9" in resto:                         # COND_9 queda de sufijo
             resto.pop(resto.index("9"))
             resto.append("9")
-        mapa[("_".join(resto), f"{num}C")] = col_str
+        mapa[("_".join(resto), grupo)] = col_str
     return mapa
 
 
@@ -254,12 +267,22 @@ def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
         return vacio
 
     comuna = d["COMUNA"].astype(str).str.strip().str.zfill(2)
-    grupo = np.where(comuna.isin(CONFIG["comunas_7"]), "7C", "10C")
+    # Grupos en que se busca la columna, en orden: el de 7, o el de 10 y, si la
+    # tabla no lo trae (T2 y T4 desde la version 2), su mitad 5C o 5C_N; las 5
+    # extra caen en 5C_N. Al final, el bloque unico de 17.
+    def candidatos(c: str) -> tuple:
+        if c in CONFIG["comunas_7"]:
+            return ("7C", "17C")
+        if c in CONFIG["comunas_5c"]:
+            return ("10C", "5C", "17C")
+        return ("10C", "5C_N", "17C")
     valores = []
-    for tabla, grupo_comuna in zip(d["TABLA_ORIGEN"], grupo):
-        valor = mapa.get((tabla, grupo_comuna), "")
-        if not valor:
-            valor = mapa.get((tabla, "17C"), "")
+    for tabla, c in zip(d["TABLA_ORIGEN"], comuna):
+        valor = ""
+        for g in candidatos(c):
+            valor = mapa.get((tabla, g), "")
+            if valor:
+                break
         valores.append(valor)
     return pd.Series(valores, index=d.index, dtype=object)
 
@@ -1180,8 +1203,10 @@ DICCIONARIO_DETALLE = [
     ("COMUNA", "Comuna", "de la base"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
      "10 comunas (01,07,09,10,11,12,14,15,20,21), 7 comunas (02,03,04,08,17,"
-     "19,22) o 5 comunas extra (05,06,13,16,18), que hoy se liquidan con las "
-     "columnas *_10C_*"),
+     "19,22) o 5 comunas extra (05,06,13,16,18), que se liquidan con las "
+     "columnas *_10C_*, salvo EDIFICIOS e INDUSTRIAL, que van con *_5C_N_*. "
+     "En esas dos tablas las 10 comunas se parten en 5C (01,09,10,11,12) y "
+     "5C_N (07,14,15,20,21)"),
     ("ESTRPRED", "Estrato del predio", "de la base; 0 donde no viene"),
     ("ACTUALIZACION", "Si la comuna se actualizo en 2024-2025", ""),
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",
@@ -1681,6 +1706,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
     # corridas puedan convivir en la carpeta sin pisarse.
     sufijo = "" if CONFIG["base_valor"] == "CATASTRAL" else "_COMERCIAL"
     os.makedirs(CONFIG["carpeta_results"], exist_ok=True)
+    os.makedirs(os.path.dirname(CONFIG["parquet_detalle"]), exist_ok=True)
 
     v_base, v_liq = CONFIG["vigencia_base"], CONFIG["vigencia_liq"]
     comercial = CONFIG["base_valor"] == "COMERCIAL"
@@ -1890,7 +1916,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         if CONFIG["excel_detalle"]:
             ruta_det = os.path.join(
                 CONFIG["carpeta_results"],
-                f"DETALLE_LIQUIDADOS{sufijo}_{fecha}.xlsx")
+                f"DETALLE_LIQUIDADOS_{CONFIG['version_tablas']}{sufijo}_{fecha}.xlsx")
             print("   Escribiendo el detalle a Excel (puede tardar)...")
             exportar_detalle_excel(det, ruta_det,
                                    CONFIG["excel_detalle_muestra"])
@@ -1998,6 +2024,13 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Recorte publico por PREDIO:       "
                   f"{CONFIG['parquet_publico_predio']} ({len(pub_p):,} filas, "
                   f"{len(pub_p.columns)} columnas)")
+
+        # Con dos o mas versiones guardadas, el libro que las compara.
+        try:
+            from comparacion_versiones import comparar_versiones
+            comparar_versiones()
+        except Exception as e:                           # pragma: no cover
+            print(f"   (no se pudo armar la comparacion de versiones: {e})")
 
     # --- Excel de agregados (apagado por defecto) ---------------------------
     if not CONFIG["excel_reporte"]:

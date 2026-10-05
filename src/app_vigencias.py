@@ -9,10 +9,35 @@ import pandas as pd
 import streamlit as st
 
 RAIZ = Path(__file__).resolve().parent.parent
-# Las dos fuentes anonimas, una por GRANO.
-RUTA_DATOS = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO.parquet"
-RUTA_PREDIO = RAIZ / "output" / "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
-RUTA_DETALLE = RAIZ / "output" / "COMPARACION_VIGENCIA_DETALLE.parquet"
+# Cada version de las tablas de valor deja sus salidas en su propia carpeta:
+# output/versiones/<VERSION>/. Las dos fuentes anonimas, una por GRANO, y el
+# detalle con identificadores, que solo existe en el equipo local.
+CARPETA_VERSIONES = RAIZ / "output" / "versiones"
+NOMBRE_DATOS = "COMPARACION_VIGENCIA_PUBLICO.parquet"
+NOMBRE_PREDIO = "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
+NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"
+
+
+def _orden_version(v: str) -> tuple:
+    """V2 antes que V10: por el numero, no por el texto."""
+    import re
+    m = re.search(r"(\d+)", v)
+    return (int(m.group(1)) if m else 0, v)
+
+
+def versiones_publicadas() -> list:
+    """Las versiones con datos para la app, de la mas vieja a la mas nueva."""
+    if not CARPETA_VERSIONES.is_dir():
+        return []
+    return sorted((p.name for p in CARPETA_VERSIONES.iterdir()
+                   if (p / NOMBRE_DATOS).exists()), key=_orden_version)
+
+
+def ruta_version(version: str, nombre: str) -> Path:
+    return CARPETA_VERSIONES / version / nombre
+
+
+VERSIONES = versiones_publicadas()
 
 ENLACE_DETALLE_DRIVE = ("https://drive.google.com/drive/folders/"
                         "1Kt-LnURIXhQThsZSS-vogcYtu8uBy5_C")
@@ -33,9 +58,20 @@ def _mas_nuevo(patron):
     return hallados[0] if hallados else None
 
 
-def detalle_liquidado_mas_reciente():
-    """El DETALLE_LIQUIDADOS_<fecha>.xlsx mas nuevo, o None si no hay."""
-    return _mas_nuevo("DETALLE_LIQUIDADOS*.xlsx")
+def detalle_liquidado_mas_reciente(version: str):
+    """El DETALLE_LIQUIDADOS_<version>_<fecha>.xlsx mas nuevo, o None."""
+    return _mas_nuevo(f"DETALLE_LIQUIDADOS_{version}_*.xlsx")
+
+
+def comparacion_versiones_mas_reciente():
+    """El COMPARACION_VERSIONES_*.xlsx mas nuevo, o None si no hay."""
+    carpeta = RAIZ / "results" / "COMPARACION_VERSIONES"
+    if not carpeta.is_dir():
+        return None
+    hallados = sorted((f for f in carpeta.glob("COMPARACION_VERSIONES_*.xlsx")
+                       if not f.name.startswith("~$")),
+                      key=lambda f: f.stat().st_mtime, reverse=True)
+    return hallados[0] if hallados else None
 
 
 # Las vigencias salen del modulo que genero el parquet, no escritas a mano.
@@ -138,7 +174,20 @@ GRUPOS_COMUNAS = {
             "16", "18", "20", "21"],
     "17C": ["01", "02", "03", "04", "07", "08", "09", "10", "11", "12",
             "14", "15", "17", "19", "20", "21", "22"],
+    # Version 2: EDIFICIOS e INDUSTRIAL parten las 10 comunas en dos, y sus 5
+    # extra van con 5C_N.
+    "5C": ["01", "09", "10", "11", "12"],
+    "5C_N": ["05", "06", "07", "13", "14", "15", "16", "18", "20", "21"],
 }
+
+# Las agrupaciones de comunas de las tablas, como las define el equipo.
+AGRUPACIONES_TABLAS = [
+    ("7C", ["02", "03", "04", "08", "17", "19", "22"]),
+    ("5C", ["01", "09", "10", "11", "12"]),
+    ("5C_N", ["07", "14", "15", "20", "21"]),
+    ("5C_E", ["05", "06", "13", "16", "18"]),
+    ("10C", ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
+]
 
 # Los tres grupos en que se reparten las 22 comunas.
 GRUPOS_FILTRO = {
@@ -279,8 +328,10 @@ REGLAS_TABLA = [
     # 7.655 construcciones que van a T2 tienen CONDICION 9. Lo dice tambien el
     # comentario de Liquidacion_tablas.py:84. Para que la regla se cumpla hay
     # que agregar la comprobacion alli.
-    (USOS_T2, "10C", "Diferente de 9",
-     "T2_EDIFICIOS_10C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T2, "5C", "Diferente de 9",
+     "T2_EDIFICIOS_5C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
+    (USOS_T2, "5C_N", "Diferente de 9",
+     "T2_EDIFICIOS_5C_N_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T2, "7C", "Diferente de 9",
      "T2_EDIFICIOS_7C_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T3, "10C", "NA",
@@ -293,8 +344,10 @@ REGLAS_TABLA = [
      "T3_COMERCIAL_10C_023", ["NA"], EXC_T3_FIJO),
     (USOS_T3_FIJO, "7C", "NA",
      "T3_COMERCIAL_7C_023", ["NA"], EXC_T3_FIJO),
-    (USOS_T4, "10C", "NA",
-     "T4_INDUSTRIAL_10C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
+    (USOS_T4, "5C", "NA",
+     "T4_INDUSTRIAL_5C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
+    (USOS_T4, "5C_N", "NA",
+     "T4_INDUSTRIAL_5C_N_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
     (USOS_T4, "7C", "NA",
      "T4_INDUSTRIAL_7C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
     (USOS_T5, "17C", "NA",
@@ -493,18 +546,35 @@ except Exception:                                        # pragma: no cover
     DICCIONARIO_DETALLE = []
 
 
-if not os.path.exists(RUTA_DATOS):
+if not VERSIONES:
     st.error(
-        f"No se encontró **{RUTA_DATOS.name}**.\n\n"
-        "Corra primero `python src/comparacion_vigencia.py`, que es quien lo "
-        "escribe en `output/`."
+        f"No se encontró ninguna versión en **output/versiones/**.\n\n"
+        "Corra primero `python src/main.py`, que deja cada versión en "
+        "`output/versiones/<VERSION>/`."
     )
     st.stop()
 
-df_construccion = cargar(str(RUTA_DATOS), os.path.getmtime(RUTA_DATOS),
-                         "construccion")
-df_predio = (cargar(str(RUTA_PREDIO), os.path.getmtime(RUTA_PREDIO), "predio")
-             if os.path.exists(RUTA_PREDIO) else None)
+
+def cargar_versiones(nombre: str, grano: str):
+    """El recorte de todas las versiones, una debajo de otra, con VERSION."""
+    partes = []
+    for v in VERSIONES:
+        ruta = ruta_version(v, nombre)
+        if ruta.exists():
+            partes.append(cargar(str(ruta), os.path.getmtime(ruta), grano)
+                          .assign(VERSION=v))
+    if not partes:
+        return None
+    d = pd.concat(partes, ignore_index=True)
+    for c in d.columns:              # el concat deshace las categorias
+        if d[c].dtype == object or isinstance(d[c].dtype, pd.CategoricalDtype):
+            d[c] = d[c].astype(str) if c != "VERSION" else d[c]
+    d["VERSION"] = pd.Categorical(d["VERSION"], categories=VERSIONES)
+    return _a_categoria(d)
+
+
+df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion")
+df_predio = cargar_versiones(NOMBRE_PREDIO, "predio")
 
 
 # =====================================================================
@@ -514,6 +584,17 @@ df_predio = (cargar(str(RUTA_PREDIO), os.path.getmtime(RUTA_PREDIO), "predio")
 with st.sidebar:
     st.header("⚙️ Filtros")
     st.caption("Se aplican a todas las hojas. Vacío = todo.")
+
+    sel_versiones = st.multiselect(
+        "Versión de tablas", VERSIONES, default=[VERSIONES[-1]],
+        help="Con qué versión de las tablas de valor se liquida 2027. Con una "
+             "sola, la app se ve como siempre. Con dos o más, cada tabla sale "
+             "una vez por versión (por ejemplo T3_COMERCIAL · V1 y "
+             "T3_COMERCIAL · V2) para compararlas lado a lado. Vacío = la más "
+             "reciente.")
+    sel_versiones = ([v for v in VERSIONES if v in sel_versiones]
+                     or [VERSIONES[-1]])
+    varias_versiones = len(sel_versiones) > 1
 
     excluir_predios_especiales = st.checkbox(
         "Excluir construcciones especiales",
@@ -561,7 +642,7 @@ with st.sidebar:
     # De aqui en adelante 'df' es el parquet del grano que corresponda, y todo
     # lo demas -filtros, tablas, graficos- trabaja sobre el sin enterarse.
     if grano == "predio" and df_predio is None:
-        st.error(f"Falta {RUTA_PREDIO.name}, que es de donde salen el valor "
+        st.error(f"Falta {NOMBRE_PREDIO}, que es de donde salen el valor "
                  f"construido total y el avalúo. Corra "
                  f"`python src/comparacion_vigencia.py`.")
         st.stop()
@@ -652,6 +733,8 @@ with st.sidebar:
 
 def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     """Los filtros de la barra lateral, aplicados a lo que se le pase."""
+    if "VERSION" in d.columns:
+        d = d[d["VERSION"].isin(sel_versiones)]
     if sel_familia:
         d = d[d["TABLA_ORIGEN"].str.startswith(tuple(sel_familia))]
     if sel_tabla:
@@ -694,7 +777,7 @@ st.markdown(
     <div class="app-hero">
         <h1>🏙️ Comparación de vigencias · {V_BASE} → {V_LIQ}</h1>
         <p>La liquidación ({V_LIQ}) contra lo que cobra hoy la base
-        ({V_BASE}) · <b>{entero(len(df))} {unidades}</b> ·
+        ({V_BASE}) · tablas <b>{" y ".join(sel_versiones)}</b> ·
         {titulo_medida.lower()}, base {etiqueta_base.lower()}. Solo predios con
         todas sus construcciones valoradas por tabla en las dos vigencias.
         El anexo no se revalora: la T10 no está entregada, así que su valor
@@ -717,13 +800,24 @@ c_base, c_liq, c_var = (f"{medida['prefijo']}_VIG_{V_BASE}",
 # La diferencia absoluta -en pesos- entre las dos vigencias.
 c_dif = f"DIFERENCIA_{medida['prefijo']}_{V_LIQ}_vs_{V_BASE}"
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric(unidades.capitalize(), entero(len(dff)),
-          f"{pct(len(dff) / len(df) * 100, 1)} del total")
-k2.metric(f"Mediana vigencia {V_BASE}", pesos(dff[medida["vig"]].median()))
-k3.metric(f"Mediana vigencia {V_LIQ}", pesos(dff[medida["liq"]].median()))
-k4.metric("Variación mediana", pct(dff[medida["var"]].median(), 2, signo=True))
-k5.metric("Bajan", pct((dff[medida["var"]] < 0).mean() * 100, 1))
+# Con varias versiones, una fila de tarjetas por version: sumarlas mezclaria
+# la misma construccion contada dos veces.
+for v in sel_versiones:
+    dv = dff[dff["VERSION"] == v]
+    base_v = df[df["VERSION"] == v]
+    if varias_versiones:
+        st.markdown(f"**Versión {v}**")
+    if dv.empty:
+        st.caption("Ningún registro de esta versión cumple los filtros.")
+        continue
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric(unidades.capitalize(), entero(len(dv)),
+              f"{pct(len(dv) / len(base_v) * 100, 1)} del total")
+    k2.metric(f"Mediana vigencia {V_BASE}", pesos(dv[medida["vig"]].median()))
+    k3.metric(f"Mediana vigencia {V_LIQ} · {v}" if varias_versiones
+              else f"Mediana vigencia {V_LIQ}", pesos(dv[medida["liq"]].median()))
+    k4.metric("Variación mediana", pct(dv[medida["var"]].median(), 2, signo=True))
+    k5.metric("Bajan", pct((dv[medida["var"]] < 0).mean() * 100, 1))
 
 
 # =====================================================================
@@ -814,16 +908,23 @@ def resumen(d: pd.DataFrame, col: str) -> pd.DataFrame:
     t = t.reset_index().rename(columns={col: etiqueta_apertura})
 
     # La fila TOTAL va sobre los mismos grupos; las medianas se recalculan.
-    sub = d[d[col].isin(grupos_ok)]
-    fila = {etiqueta_apertura: "TOTAL",
-            COL_N: len(sub),
-            c_base: sub[medida["vig"]].median(),
-            c_liq: sub[medida["liq"]].median(),
-            "VAR_MEDIANA_%": sub[medida["var"]].median(),
-            "BAJAN_%": (sub[medida["var"]] < 0).mean() * 100,
-            "SUBEN_%": (sub[medida["var"]] > 0).mean() * 100}
-    fila[c_dif] = fila[c_liq] - fila[c_base]
-    return pd.concat([t, pd.DataFrame([fila])[t.columns]], ignore_index=True)
+    # Con varias versiones sale un TOTAL por version, nunca mezcladas.
+    sub_todo = d[d[col].isin(grupos_ok)]
+    filas = []
+    for v in sel_versiones:
+        sub = sub_todo[sub_todo["VERSION"] == v]
+        if sub.empty:
+            continue
+        fila = {etiqueta_apertura: f"TOTAL · {v}" if varias_versiones else "TOTAL",
+                COL_N: len(sub),
+                c_base: sub[medida["vig"]].median(),
+                c_liq: sub[medida["liq"]].median(),
+                "VAR_MEDIANA_%": sub[medida["var"]].median(),
+                "BAJAN_%": (sub[medida["var"]] < 0).mean() * 100,
+                "SUBEN_%": (sub[medida["var"]] > 0).mean() * 100}
+        fila[c_dif] = fila[c_liq] - fila[c_base]
+        filas.append(fila)
+    return pd.concat([t, pd.DataFrame(filas)[t.columns]], ignore_index=True)
 
 
 hoja_tablas, hoja_graf, hoja_detalle, hoja_reglas = st.tabs(
@@ -832,9 +933,19 @@ hoja_tablas, hoja_graf, hoja_detalle, hoja_reglas = st.tabs(
 
 # Todo se arma una sola vez aca arriba: las tres hojas y el Excel leen de estos
 # mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
-res = resumen(dff, col_apertura)
-total = percentiles(dff)
-abierto = por_grupo(dff, col_apertura)
+# Con varias versiones cada grupo se parte por version: "T3_COMERCIAL_021 · V1"
+# y "T3_COMERCIAL_021 · V2" quedan seguidos, como si fueran dos tablas.
+if varias_versiones:
+    dff = dff.assign(_APERTURA=dff[col_apertura].astype(str) + " · "
+                     + dff["VERSION"].astype(str))
+    col_grupo = "_APERTURA"
+else:
+    col_grupo = col_apertura
+res = resumen(dff, col_grupo)
+# Los percentiles del total, uno por version.
+totales = {v: percentiles(dff[dff["VERSION"] == v]) for v in sel_versiones}
+totales = {v: t for v, t in totales.items() if not t.empty}
+abierto = por_grupo(dff, col_grupo)
 reglas = reglas_asignacion()
 factores = factores_comerciales()
 
@@ -842,13 +953,18 @@ factores = factores_comerciales()
 # en el rango de su propia variacion, no se comparan distribuciones.
 RANGOS = ["Baja más de 50%", "Baja 25-50%", "Baja 10-25%", "Estable (±10%)",
           "Sube 10-25%", "Sube 25-50%", "Sube más de 50%"]
-reparto = (dff[medida["var"]]
-           .pipe(pd.cut,
-                 bins=[-float("inf"), -50, -25, -10, 10, 25, 50, float("inf")],
-                 labels=RANGOS)
-           .value_counts(sort=False)
-           .rename_axis("RANGO").reset_index(name=COL_N))
-reparto["%"] = reparto[COL_N] / reparto[COL_N].sum() * 100
+_partes_reparto = []
+for v in sel_versiones:
+    _r = (dff.loc[dff["VERSION"] == v, medida["var"]]
+          .pipe(pd.cut,
+                bins=[-float("inf"), -50, -25, -10, 10, 25, 50, float("inf")],
+                labels=RANGOS)
+          .value_counts(sort=False)
+          .rename_axis("RANGO").reset_index(name=COL_N))
+    _r["%"] = _r[COL_N] / max(_r[COL_N].sum(), 1) * 100
+    _r["VERSION"] = v
+    _partes_reparto.append(_r)
+reparto = pd.concat(_partes_reparto, ignore_index=True)
 
 
 def _motor_excel():
@@ -966,13 +1082,17 @@ with hoja_tablas:
             })
 
     st.divider()
-    st.markdown("**Percentiles, diferencia y variación** · "
-                f"{entero(len(dff))} {unidades}")
     st.caption(f"En cada corte: cuánto vale en la vigencia {V_BASE}, cuánto "
                f"valdría en la {V_LIQ}, cuántos pesos de diferencia hay entre "
                f"los dos y qué proporción representa esa diferencia.")
-    total_visible = total.drop(columns=["__COUNT__"], errors="ignore")
-    st.dataframe(con_formato(total_visible), width="stretch", hide_index=True)
+    for v, total in totales.items():
+        n_v = int((dff["VERSION"] == v).sum())
+        st.markdown("**Percentiles, diferencia y variación** · "
+                    + (f"versión {v} · " if varias_versiones else "")
+                    + f"{entero(n_v)} {unidades}")
+        total_visible = total.drop(columns=["__COUNT__"], errors="ignore")
+        st.dataframe(con_formato(total_visible), width="stretch",
+                     hide_index=True)
 
 
 
@@ -1043,8 +1163,13 @@ with hoja_graf:
             .configure(locale=LOCALE_VEGA)      # ejes en formato colombiano
         )
 
-    st.altair_chart(curvas(total, "Total de la selección"), width="stretch")
-    st.caption(frase(total))
+    cols_total = st.columns(min(len(totales), 3)) if totales else []
+    for i, (v, total) in enumerate(totales.items()):
+        col = cols_total[i % len(cols_total)]
+        col.altair_chart(curvas(total, f"Total de la selección · {v}"
+                                if varias_versiones else "Total de la selección"),
+                         width="stretch")
+        col.caption(frase(total))
 
     st.divider()
     st.markdown(f"**Por {etiqueta_apertura.lower()}**")
@@ -1070,10 +1195,16 @@ with hoja_graf:
     st.caption("Muestra cómo se distribuyen los predios según la variación porcentual de su valor entre las vigencias 2026 y 2027, comparando cada predio consigo mismo.")
     st.altair_chart(
         alt.Chart(reparto).mark_bar(color=AZUL, cornerRadiusEnd=3).encode(
-            x=alt.X("RANGO:N", title=None, sort=list(reparto["RANGO"]),
+            x=alt.X("RANGO:N", title=None, sort=RANGOS,
                     axis=alt.Axis(labelAngle=0)),   # rotulos en horizontal
             y=alt.Y(f"{COL_N}:Q", title=unidades.capitalize()),
+            # Con varias versiones, una barra por version dentro de cada rango.
+            **({"color": alt.Color("VERSION:N", title="Versión",
+                                   legend=alt.Legend(orient="top")),
+                "xOffset": alt.XOffset("VERSION:N")}
+               if varias_versiones else {}),
             tooltip=[alt.Tooltip("RANGO:N", title="Rango"),
+                     alt.Tooltip("VERSION:N", title="Versión"),
                      alt.Tooltip(f"{COL_N}:Q", title=unidades.capitalize(),
                                  format=",.0f"),
                      alt.Tooltip("%:Q", title="% del total", format=",.1f")],
@@ -1106,15 +1237,16 @@ with hoja_detalle:
 
     # Solo el archivo que dejo la corrida. En el deploy no esta, y para eso
     # queda el enlace de Drive de arriba.
-    detalle = detalle_liquidado_mas_reciente()
-    if detalle is not None:
+    for v in sel_versiones:
+      detalle = detalle_liquidado_mas_reciente(v)
+      if detalle is not None:
         st.download_button(
-            "📗 Detalle liquidación",
+            f"📗 Detalle liquidación · {v}",
             data=leer_archivo(str(detalle), detalle.stat().st_mtime),
             file_name=detalle.name,
             mime=("application/vnd.openxmlformats-officedocument"
                   ".spreadsheetml.sheet"),
-            type="primary", key="dl_detalle_liq",
+            type="primary", key=f"dl_detalle_liq_{v}",
             help="Una fila por construcción, con el VM2 de las dos vigencias, "
                  "la tabla y la columna exacta de donde salió el valor, y el "
                  "avalúo del predio. Trae además una hoja Diccionario.")
@@ -1125,10 +1257,34 @@ with hoja_detalle:
             f". Es el detalle completo de la corrida: no responde a los "
             f"filtros de la izquierda.")
 
+    comp_versiones = comparacion_versiones_mas_reciente()
+    if comp_versiones is not None:
+        st.download_button(
+            "📘 Comparación entre versiones",
+            data=leer_archivo(str(comp_versiones),
+                              comp_versiones.stat().st_mtime),
+            file_name=comp_versiones.name,
+            mime=("application/vnd.openxmlformats-officedocument"
+                  ".spreadsheetml.sheet"),
+            key="dl_comp_versiones",
+            help="Todas las versiones liquidadas: resumen por categoría y por "
+                 "tabla con una fila por versión, y el detalle por "
+                 "construcción con el VM2 y el avalúo de cada versión lado a "
+                 "lado.")
+        st.caption(f"`{comp_versiones.name}` · "
+                   f"{_miles(comp_versiones.stat().st_size / 1e6, 1)} MB")
+
     st.divider()
-    if os.path.exists(RUTA_DETALLE):
+    rutas_detalle = {v: ruta_version(v, NOMBRE_DETALLE) for v in sel_versiones
+                     if ruta_version(v, NOMBRE_DETALLE).exists()}
+    if rutas_detalle:
         st.markdown("**Explorador predio a predio**")
-        det = cargar_detalle(str(RUTA_DETALLE), os.path.getmtime(RUTA_DETALLE))
+        det = pd.concat([cargar_detalle(str(r), os.path.getmtime(r))
+                         .assign(VERSION=v)
+                         for v, r in rutas_detalle.items()],
+                        ignore_index=True)
+        # La version va al frente, junto a los identificadores.
+        det = det[["VERSION"] + [c for c in det.columns if c != "VERSION"]]
         detf = filtrar(det)
 
         st.caption("Esto SÍ trae identificadores: ID_PREDIO y número predial. "
@@ -1268,9 +1424,11 @@ with hoja_reglas:
     st.divider()
     st.markdown("**Grupos de comunas**")
     st.markdown("\n".join(f"- **{g}** — {', '.join(c)}"
-                          for g, c in GRUPOS_FILTRO.items()))
-    st.caption("Las 5 comunas extra no tienen tabla propia: hoy se liquidan "
-               "leyendo las mismas columnas *_10C_* del grupo de 10.")
+                          for g, c in AGRUPACIONES_TABLAS))
+    st.caption("EDIFICIOS (T2) e INDUSTRIAL (T4) tienen tablas 7C, 5C y 5C_N, "
+               "y sus comunas extra (5C_E) se liquidan con la 5C_N. Las demás "
+               "tablas siguen con 7C y 10C, y sus comunas extra se liquidan con "
+               "la 10C.")
 
     st.divider()
     st.markdown("**Factor de valor comercial por comuna**")
@@ -1345,8 +1503,9 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
 
 
 st.caption(
-    f"Fuente: {RUTA_DATOS.name} · generado por comparacion_vigencia.py el "
-    f"{pd.Timestamp(os.path.getmtime(RUTA_DATOS), unit='s'):%Y-%m-%d %H:%M}. "
+    f"Fuente: output/versiones/<versión>/{NOMBRE_DATOS} · versión "
+    f"{sel_versiones[-1]} generada por comparacion_vigencia.py el "
+    f"{pd.Timestamp(os.path.getmtime(ruta_version(sel_versiones[-1], NOMBRE_DATOS)), unit='s'):%Y-%m-%d %H:%M}. "
     f"predial: el VM2 viene redondeado a $100 y el avalúo a $100.000, así que "
     f"puede haber diferencias de centésimas contra el reporte en Excel, que "
     f"trabaja con el valor exacto y es el documento de referencia."

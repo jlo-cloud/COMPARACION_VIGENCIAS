@@ -19,7 +19,12 @@ from openpyxl.utils import get_column_letter
 # =============================================================================
 
 RAIZ = Path(__file__).resolve().parent.parent
-CARPETA_ENTRADA = RAIZ / "input" / "tablas" / "input"
+# Version de las tablas con que se liquida: cada una tiene su carpeta en
+# input/tablas/input/ (V1, V2...) con su Consolidado_<fecha>.xlsx. Para volver a
+# una version anterior basta con cambiar esta linea, o correr con la variable
+# de entorno VERSION_TABLAS (p. ej. VERSION_TABLAS=V1 python src/main.py).
+VERSION_TABLAS = os.environ.get("VERSION_TABLAS", "V2").strip().upper()
+CARPETA_ENTRADA = RAIZ / "input" / "tablas" / "input" / VERSION_TABLAS
 CARPETA_SALIDA = RAIZ / "input" / "tablas" / "output"
 
 HOJAS_NC = [
@@ -67,11 +72,13 @@ SUFIJOS_POR_TIPO = {
 
 
 def tabla_valor_vigente():
-    """El Tablas_Valor_Consolidado_V1_<fecha>.xlsx mas reciente, o None."""
+    """El Tablas_Valor_Consolidado_<version>_<fecha>.xlsx mas reciente de la
+    version configurada, o None."""
     if not CARPETA_SALIDA.is_dir():
         return None
     # Se descartan los "~$": son los bloqueos que deja Excel al abrir un archivo.
-    hallados = sorted((f for f in CARPETA_SALIDA.glob("Tablas_Valor_Consolidado_*.xlsx")
+    hallados = sorted((f for f in CARPETA_SALIDA.glob(
+                           f"Tablas_Valor_Consolidado_{VERSION_TABLAS}_*.xlsx")
                        if not f.name.startswith("~$")),
                       key=lambda f: f.stat().st_mtime, reverse=True)
     return hallados[0] if hallados else None
@@ -499,10 +506,14 @@ FAMILIAS = {
     'T1_RESIDENCIAL_10C_9':       '16A085',
     'T2_EDIFICIOS_7C':            'E67E22',   # naranja
     'T2_EDIFICIOS_10C':           'CA6F1E',
+    'T2_EDIFICIOS_5C':            'CA6F1E',
+    'T2_EDIFICIOS_5C_N':          'A04000',
     'T3_COMERCIAL_7C':            'C0392B',   # rojo
     'T3_COMERCIAL_10C':           'E74C3C',
     'T4_INDUSTRIAL_7C':           '7D3C98',   # violeta
     'T4_INDUSTRIAL_10C':          '9B59B6',
+    'T4_INDUSTRIAL_5C':           '9B59B6',
+    'T4_INDUSTRIAL_5C_N':         '6C3483',
     'T5_INSTITUCIONAL_ED_17C':    'B7950B',   # mostaza
     'T6_INSTITUCIONAL_SA_17C':    '148F77',   # esmeralda
     'T7_INSTITUCIONAL_SER_17C':   '5D6D7E',   # gris azulado
@@ -750,7 +761,7 @@ def consolidar_tablas(ruta_entrada=None, ruta_salida=None) -> str:
         salida = Path(ruta_salida)
     else:
         fecha = datetime.now().strftime("%Y%m%d")
-        salida = CARPETA_SALIDA / f"Tablas_Valor_Consolidado_V1_{fecha}.xlsx"
+        salida = CARPETA_SALIDA / f"Tablas_Valor_Consolidado_{VERSION_TABLAS}_{fecha}.xlsx"
     salida.parent.mkdir(parents=True, exist_ok=True)
 
     try:

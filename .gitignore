@@ -29,6 +29,13 @@
 # El segundo grano del recorte anonimo: una fila por PREDIO, con el valor
 # construido total y el avaluo. Tampoco lleva identificadores.
 !/output/COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet
+# Desde que hay varias versiones de tablas, cada una deja sus recortes en
+# output/versiones/<VERSION>/. Entran SOLO los dos recortes anonimos de cada
+# version; el detalle y la liquidacion de esa carpeta se quedan por fuera.
+!/output/versiones
+/output/versiones/*/*
+!/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO.parquet
+!/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet
 
 
 # Basura de Python que vive dentro de src/
