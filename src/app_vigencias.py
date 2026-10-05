@@ -954,7 +954,7 @@ def con_formato(t: pd.DataFrame):
     if primera is not None and t[primera].astype(str).str.startswith("TOTAL").any():
         def _total(fila):
             es_total = str(fila.iloc[0]).startswith("TOTAL")
-            estilo = ("background-color: #E9EEF5; font-weight: 700"
+            estilo = ("background-color: #F4F6F9; font-weight: 700"
                       if es_total else "")
             return [estilo] * len(fila)
         sty = sty.apply(_total, axis=1)

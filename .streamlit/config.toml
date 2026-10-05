@@ -2,4 +2,4 @@
 base = "light"
 primaryColor = "#2563eb"
 # Titulos de las columnas de las tablas con el mismo fondo de las filas TOTAL.
-dataframeHeaderBackgroundColor = "#E9EEF5"
+dataframeHeaderBackgroundColor = "#F4F6F9"
