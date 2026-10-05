@@ -190,7 +190,7 @@ AGRUPACIONES_TABLAS = [
      ["07", "14", "15", "20", "21"]),
     ("5C_E", "Las 5 comunas propuestas para actualizar en 2027",
      ["05", "06", "13", "16", "18"]),
-    ("10C", "Las de 5C y 5C_N juntas",
+    ("10C", "Las actualizadas en 2025 (5C) junto con las 5 nuevas de 2026 (5C_N)",
      ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
 ]
 
