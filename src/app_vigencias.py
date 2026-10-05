@@ -182,11 +182,16 @@ GRUPOS_COMUNAS = {
 
 # Las agrupaciones de comunas de las tablas, como las define el equipo.
 AGRUPACIONES_TABLAS = [
-    ("7C", ["02", "03", "04", "08", "17", "19", "22"]),
-    ("5C", ["01", "09", "10", "11", "12"]),
-    ("5C_N", ["07", "14", "15", "20", "21"]),
-    ("5C_E", ["05", "06", "13", "16", "18"]),
-    ("10C", ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
+    ("7C", "Comunas actualizadas en 2024",
+     ["02", "03", "04", "08", "17", "19", "22"]),
+    ("5C", "Comunas actualizadas en 2025",
+     ["01", "09", "10", "11", "12"]),
+    ("5C_N", "Las 5 comunas que se actualizan por primera vez en 2026",
+     ["07", "14", "15", "20", "21"]),
+    ("5C_E", "Las 5 comunas propuestas para actualizar en 2027",
+     ["05", "06", "13", "16", "18"]),
+    ("10C", "Las de 5C y 5C_N juntas",
+     ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
 ]
 
 # Los tres grupos en que se reparten las 22 comunas.
@@ -1441,8 +1446,15 @@ with hoja_reglas:
 
     st.divider()
     st.markdown("**Grupos de comunas**")
-    st.markdown("\n".join(f"- **{g}** — {', '.join(c)}"
-                          for g, c in AGRUPACIONES_TABLAS))
+    st.dataframe(
+        pd.DataFrame([(g, desc, ", ".join(c))
+                      for g, desc, c in AGRUPACIONES_TABLAS],
+                     columns=["GRUPO", "DESCRIPCIÓN", "COMUNAS"]),
+        width="stretch", hide_index=True,
+        column_config={
+            "GRUPO": st.column_config.TextColumn(width="small"),
+            "DESCRIPCIÓN": st.column_config.TextColumn(width="large"),
+            "COMUNAS": st.column_config.TextColumn(width="medium")})
     st.caption("EDIFICIOS (T2) e INDUSTRIAL (T4) tienen tablas 7C, 5C y 5C_N, "
                "y sus comunas extra (5C_E) se liquidan con la 5C_N. Las demás "
                "tablas siguen con 7C y 10C, y sus comunas extra se liquidan con "
