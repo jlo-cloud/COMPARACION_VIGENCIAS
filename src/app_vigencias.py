@@ -452,6 +452,11 @@ st.markdown(
         }
         .app-hero h1 {margin:0; font-size:18px; font-weight:700;}
         .app-hero p  {margin:2px 0 0; opacity:.88; font-size:12.5px;}
+        .filtros-titulo {display:flex; align-items:center; gap:10px;
+            font-weight:700; font-size:18px; color:#0F1F33; margin:4px 0 6px;}
+        .filtros-icono {width:32px; height:32px; border-radius:7px;
+            background:#1D3557; display:flex; align-items:center;
+            justify-content:center; box-shadow:0 1px 3px rgba(16,24,40,.25);}
     </style>
     """,
     unsafe_allow_html=True,
@@ -606,7 +611,20 @@ df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion",
 # =====================================================================
 # El sidebar va antes del encabezado: la medida decide de que parquet se lee.
 with st.sidebar:
-    st.header("⚙️ Filtros")
+    st.markdown(
+        """
+        <div class="filtros-titulo">
+          <span class="filtros-icono" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round"><path d="M3 21h18"></path>
+              <path d="M5 21V9l7-5 7 5v12"></path><path d="M9 21v-6h6v6"></path>
+            </svg>
+          </span>
+          <span>Filtros</span>
+        </div>
+        """,
+        unsafe_allow_html=True)
     st.caption("Se aplican a todas las hojas. Vacío = todo.")
 
     sel_versiones = st.multiselect(
@@ -650,11 +668,14 @@ with st.sidebar:
         help="El valor por m² es de cada CONSTRUCCIÓN; el valor construido "
              "total y el avalúo son del PREDIO completo, sumando sus "
              "construcciones. Por eso al cambiar de medida cambia el conteo.")
-    etiqueta_base = st.radio(
-        "Base de valor", list(BASES), index=0, horizontal=True,
+    etiqueta_base = st.segmented_control(
+        "Base de valor", list(BASES), default=list(BASES)[0],
+        selection_mode="single", width="stretch",
         help="Catastral es lo que se cobra. Comercial es lo que se estima que "
              "vale: el catastral de la vigencia dividido por 0,7 en las comunas "
              "actualizadas en 2024-2025 y por 0,6 en las demás.")
+    # Si se vuelve a hacer clic en la caja marcada, queda sin seleccion.
+    etiqueta_base = etiqueta_base or list(BASES)[0]
     clave_medida, titulo_medida, grano = MEDIDAS[etiqueta_medida]
     medida = SERIES[(clave_medida, BASES[etiqueta_base])]
     unidad_eje = f"{titulo_medida} {etiqueta_base.lower()} (millones de pesos)"
@@ -890,6 +911,10 @@ def por_grupo(d: pd.DataFrame, col: str) -> pd.DataFrame:
     return pd.concat(salida, ignore_index=True) if salida else pd.DataFrame()
 
 
+AZUL_SUBE = "#1F5FA8"
+NARANJA_BAJA = "#B4430E"
+
+
 def con_formato(t: pd.DataFrame):
     """La tabla lista para mostrar. Devuelve un Styler: la columna sigue siendo numerica y se puede ordenar."""
     reglas = {}
@@ -912,7 +937,28 @@ def con_formato(t: pd.DataFrame):
         elif col in (COL_N, COL_NUM, "NUM_PREDIOS", "PREDIOS",
                      "N_CONST_PREDIO", "N_TABLAS_PREDIO"):
             reglas[col] = entero
-    return t.style.format(reglas)
+    sty = t.style.format(reglas)
+
+    # Lo que sube en azul y lo que baja en naranja: se distinguen tambien en
+    # luminosidad, no solo por el tono.
+    def _signo(v):
+        if pd.isna(v) or v == 0:
+            return ""
+        return f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}"
+    con_signo = [c for c in (c_dif, c_var, "VAR_MEDIANA_%") if c in t.columns]
+    if con_signo:
+        sty = sty.map(_signo, subset=con_signo)
+
+    # Las filas TOTAL, sombreadas y en negrilla.
+    primera = t.columns[0] if len(t.columns) else None
+    if primera is not None and t[primera].astype(str).str.startswith("TOTAL").any():
+        def _total(fila):
+            es_total = str(fila.iloc[0]).startswith("TOTAL")
+            estilo = ("background-color: #E9EEF5; font-weight: 700"
+                      if es_total else "")
+            return [estilo] * len(fila)
+        sty = sty.apply(_total, axis=1)
+    return sty
 
 
 def resumen(d: pd.DataFrame, col: str,
