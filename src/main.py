@@ -121,7 +121,9 @@ def main():
         try:
             fecha_actual = datetime.now().strftime('%Y%m%d')
             
-            archivo_parquet = './output/LIQUIDACION_TABLAS.parquet'
+            from comparacion_vigencia import CONFIG as CONFIG_VIG
+            archivo_parquet = CONFIG_VIG['parquet_liquidacion']
+            os.makedirs(os.path.dirname(archivo_parquet), exist_ok=True)
             df_liquidacion.to_parquet(archivo_parquet, index=False)
             print(f"✅ Archivo parquet guardado: {archivo_parquet}")
 
@@ -139,7 +141,7 @@ def main():
         try:
             df_comparacion = comparacion_vigencia(df_liquidacion)
             archivo_comparacion = (f'./results/COMPARACION_VIGENCIA/'
-                                   f'DETALLE_LIQUIDADOS_{fecha_actual}.xlsx')
+                                   f'DETALLE_LIQUIDADOS_{CONFIG_VIG["version_tablas"]}_{fecha_actual}.xlsx')
             print(f"✅ Comparación contra la vigencia 2026 generada")
             print(f"   - Construcciones comparadas: {len(df_comparacion):,}")
 

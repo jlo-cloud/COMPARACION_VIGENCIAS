@@ -15,7 +15,8 @@ from model_liq import ejecutar_modelos
 from perf import crono  # ⏱️ medición de tiempos
 from consolidar_tablas import tabla_valor_vigente
 from tabla_construccion import (convertir_a_cero, convertir_a_float,
-                                convertir_a_string, COMUNAS_7, COMUNAS_10)
+                                convertir_a_string, COMUNAS_7, COMUNAS_10,
+                                COMUNAS_5, COMUNAS_5N)
 
 
 
@@ -126,6 +127,8 @@ def tablas_liquidacion(df_const):
     # tener una segunda copia era la forma segura de que se desincronizaran.
     comunas_7 = COMUNAS_7
     comunas_10 = COMUNAS_10
+    comunas_5 = COMUNAS_5      # T2 y T4 desde la version 2 de las tablas
+    comunas_5n = COMUNAS_5N
 
     # Por ahora la liquidacion es solo por tablas. En True, las construcciones
     # de la condicion 2 salen de su tabla y pasan a TABLA_ORIGEN = 'MODELO';
@@ -881,7 +884,9 @@ def tablas_liquidacion(df_const):
     #   T5_INSTITUCIONAL_ED, T6_INSTITUCIONAL_SA, T9_HOTELES,
     #   T11_CCOMERCIALES, T13_UNIDAD_DEPORTIVA.
     comunas_17 = sorted(set(comunas_7) | set(comunas_10))
-    grupos_comunas = {'7': comunas_7, '10': comunas_10, '17': comunas_17}
+    # '5' y '5N' son las hojas *_5C y *_5C_N de T2 y T4 (version 2).
+    grupos_comunas = {'7': comunas_7, '10': comunas_10, '17': comunas_17,
+                      '5': comunas_5, '5N': comunas_5n}
     TABLAS_17C = {
         'T5_INSTITUCIONAL_ED',
         'T6_INSTITUCIONAL_SA',
@@ -916,6 +921,11 @@ def tablas_liquidacion(df_const):
 
         if idx_comunas is None:
             continue
+
+        # 5C_N: la N es parte del grupo, no del nombre de la tabla.
+        if idx_comunas + 1 < len(partes) and partes[idx_comunas + 1] == 'N':
+            partes.pop(idx_comunas + 1)
+            num_comunas += 'N'
 
         # Regla nueva: las tablas institucionales, hoteles, comerciales y
         # deportivas vienen por 17 comunas juntas; el resto sigue por 7C/10C.
@@ -1710,7 +1720,7 @@ def tablas_liquidacion(df_const):
 
     # Tablas que NO pasan por este merge: se liquidan por otra via.
     OTRA_VIA = ['SIN TABLA', 'MODELO', 'ESPECIALES', 'T10_ANEXOS', 'T12_PARQUEADEROS']
-    comunas_con_valores = set(comunas_7) | set(comunas_10)
+    comunas_con_valores = set(comunas_7) | set(comunas_10) | set(comunas_5) | set(comunas_5n)
 
     diag = df_const_liq[~df_const_liq['TABLA_ORIGEN'].isin(OTRA_VIA)].copy()
     diag['VM2'] = pd.to_numeric(diag['VM2'], errors='coerce').fillna(0)
