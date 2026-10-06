@@ -127,6 +127,13 @@ def main():
             df_liquidacion.to_parquet(archivo_parquet, index=False)
             print(f"✅ Archivo parquet guardado: {archivo_parquet}")
 
+            # La hoja USOS del consolidado: necesita la liquidacion, por eso va aqui.
+            try:
+                from hoja_usos import agregar_hoja_usos
+                agregar_hoja_usos(df_liquidacion)
+            except Exception as e:
+                print(f"⚠️ No se pudo agregar la hoja USOS al consolidado: {e}")
+
             pbar.update(1)
             crono.marca("PASO 4: guardar parquet")  # ⏱️
         except Exception as e:
