@@ -69,14 +69,11 @@ NOTAS = {
 
 
 def comunas_de(grupo: str) -> str:
-    """Las comunas del grupo, con las 5 extra aparte donde las lleva."""
+    """Las comunas del grupo, sin las 5 extra: por ahora no se trabajan."""
     base = {"7C": COMUNAS_7, "5C": COMUNAS_5, "17C": COMUNAS_17,
             "10C": [c for c in COMUNAS_10 if c not in EXTRA],
             "5C_N": [c for c in COMUNAS_5N if c not in EXTRA]}.get(grupo, [])
-    texto = ", ".join(sorted(base))
-    if grupo in ("10C", "5C_N") and set(EXTRA) <= set(COMUNAS_10) | set(COMUNAS_5N):
-        texto += f" + extra {', '.join(EXTRA)}"
-    return texto
+    return ", ".join(sorted(base))
 
 
 def grupo_de(base: str, comuna: str) -> str:
@@ -219,6 +216,14 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
 
     t = filas_usos(liq, mapa)
     revisar_reglas(t, mapa)
+    dif_enero = comparar_con_enero(liq)
+    if not dif_enero.empty:
+        print(f"\n   REVISAR LAS REGLAS: {len(dif_enero)} diferencia(s) con la hoja "
+              f"Uso de enero; el detalle va en la hoja {HOJA_REVISAR}.")
+        for f in dif_enero.head(15).itertuples(index=False):
+            print(f"     - {f.USO_LADM}: {f.DIFERENCIA.lower()} (enero "
+                  f"{f[3] or '-'}, liquidación {f[4]}; {f.CONSTRUCCIONES:,} "
+                  f"construcciones)")
     desc = descripcion_usos()
     if not desc.empty:
         t = t.merge(desc, left_on="USO_LADM", right_index=True, how="left")
@@ -303,6 +308,7 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
     ws.freeze_panes = "F3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(columnas))}{len(t) + 2}"
 
+    hoja_revisar(wb, dif_enero)
     try:
         wb.save(ruta)
     except PermissionError:
@@ -420,6 +426,165 @@ def revisar_reglas(t: pd.DataFrame, mapa: dict) -> list:
             print(f"     * {lugar}")
         print("   " + "!" * 70 + "\n")
     return avisos
+
+
+HOJA_REVISAR = "REVISAR_REGLAS"
+TODAS_COND = set(range(10))
+# Tablas que valen para las 17 comunas aunque la hoja de enero escriba solo
+# "1,3,9,10,11,12 y 22": las institucionales y las de bloque unico.
+FAMILIAS_17C = set(TABLAS_17C) | {"T7_INSTITUCIONAL_SER", "T8_INSTITUCIONAL_IG"}
+
+
+def _cond_enero(texto):
+    """'9', '8 y 9', 'Diferente de 8 y 9', 'Condicion del 1 al 9', 'Todas',
+    'Resto' -> conjunto de condiciones (o 'RESTO', o None si viene vacia)."""
+    t = str(texto).strip().lower()
+    if t in ("", "nan", "none"):
+        return None
+    if "todas" in t:
+        return set(TODAS_COND)
+    if "resto" in t:
+        return "RESTO"
+    m = re.search(r"(\d+)\s*al?\s*(\d+)", t)
+    nums = (set(range(int(m.group(1)), int(m.group(2)) + 1)) if m
+            else {int(x) for x in re.findall(r"\d+", t)})
+    return TODAS_COND - nums if "diferente" in t else nums
+
+
+def reglas_enero() -> list:
+    """La asignacion de la hoja Uso del libro de homologacion: por uso, la
+    tabla, las condiciones y las comunas donde aplica."""
+    libros = [f for f in sorted(CARPETA_HOMOLOGACION.glob(
+        "HOMOLOGACION_Y_TABLAS_DE_VALOR_USOS_LADM_*.xlsx"))
+        if not f.name.startswith("~$")]
+    if not libros:
+        return []
+    u = pd.read_excel(libros[-1], sheet_name="Uso", header=1, dtype=str)
+    u = u.iloc[:, :11]
+    u.columns = ["CAT", "ANT", "NOM", "COD", "USO", "TIPO", "DESC", "COND",
+                 "TABLA", "CONDAP", "COMUNA"]
+    u["USO"] = u["USO"].ffill().str.strip()
+    for c in ["TABLA", "COND", "CONDAP", "COMUNA"]:     # celdas combinadas
+        u[c] = u.groupby("USO")[c].ffill()
+    u = u[u["TABLA"].notna()].drop_duplicates(["USO", "TABLA", "CONDAP",
+                                               "COMUNA"])
+    reglas = []
+    for _, r in u.iterrows():
+        tabla = str(r["TABLA"]).strip()
+        fam = "MODELO" if tabla.upper().startswith("MODELO") else familia(tabla)
+        cond = _cond_enero(r["CONDAP"])
+        texto_cond = r["CONDAP"]
+        if cond is None:
+            cond, texto_cond = _cond_enero(r["COND"]), r["COND"]
+        com = ({x.zfill(2) for x in re.findall(r"\d+", str(r["COMUNA"]))}
+               if str(r["COMUNA"]) != "nan" else None)
+        if fam in FAMILIAS_17C:
+            com = set(COMUNAS_17)
+        reglas.append({"uso": r["USO"], "fam": fam,
+                       "cond": cond if cond is not None else set(TODAS_COND),
+                       "com": com, "texto_cond": str(texto_cond).strip(),
+                       "texto_com": "17 comunas" if fam in FAMILIAS_17C
+                       else str(r["COMUNA"]).strip()})
+    for r in reglas:                     # 'Resto' = lo que no cubren las demas
+        if r["cond"] == "RESTO":
+            otras = [o["cond"] for o in reglas
+                     if o is not r and o["uso"] == r["uso"]
+                     and o["cond"] != "RESTO"
+                     and (o["com"] is None or r["com"] is None
+                          or o["com"] & r["com"])]
+            r["cond"] = TODAS_COND - set().union(*otras) if otras else set(TODAS_COND)
+    return reglas
+
+
+def comparar_con_enero(liq: pd.DataFrame) -> pd.DataFrame:
+    """Donde la hoja Uso de enero define una regla, compara la tabla que dice
+    contra la que uso la liquidacion. Sin las 5 comunas extra ni rurales."""
+    reglas = reglas_enero()
+    if not reglas:
+        return pd.DataFrame()
+    d = liq[["USO_LADM", "CONDICION", "COMUNA", "TABLA_ORIGEN"]].copy()
+    d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+    d = d[d["COMUNA"].isin(COMUNAS_17)]
+    d["USO_LADM"] = d["USO_LADM"].astype(str).str.strip()
+    d["C"] = pd.to_numeric(d["CONDICION"], errors="coerce").fillna(-1).astype(int)
+    d["FAM"] = d["TABLA_ORIGEN"].astype(str).map(familia)
+    g = d.groupby(["USO_LADM", "COMUNA", "C", "FAM"]).size().reset_index(name="N")
+
+    usos_enero = {r["uso"] for r in reglas}
+    filas = []
+    for _, o in g.iterrows():
+        del_uso = [r for r in reglas if r["uso"] == o["USO_LADM"]]
+        if not del_uso:
+            filas.append((o["USO_LADM"], "Sin regla en la hoja de enero", "", "",
+                          o["FAM"], o["COMUNA"], o["C"], o["N"]))
+            continue
+        en_comuna = [r for r in del_uso
+                     if r["com"] is None or o["COMUNA"] in r["com"]]
+        if not en_comuna:
+            continue                     # enero no habla de esta comuna
+        aplica = [r for r in en_comuna if o["C"] in r["cond"]]
+        if not aplica:
+            filas.append((o["USO_LADM"], "Condición no prevista en enero",
+                          "; ".join(sorted({r["texto_cond"] for r in en_comuna})),
+                          "; ".join(sorted({r["fam"] for r in en_comuna})),
+                          o["FAM"], o["COMUNA"], o["C"], o["N"]))
+        elif o["FAM"] not in {r["fam"] for r in aplica}:
+            filas.append((o["USO_LADM"], "Tabla distinta",
+                          "; ".join(sorted({r["texto_cond"] for r in aplica})),
+                          "; ".join(sorted({r["fam"] for r in aplica})),
+                          o["FAM"], o["COMUNA"], o["C"], o["N"]))
+    if not filas:
+        return pd.DataFrame()
+    t = pd.DataFrame(filas, columns=["USO_LADM", "DIFERENCIA",
+                                     "CONDICIÓN EN ENERO", "TABLA EN ENERO",
+                                     "TABLA EN LA LIQUIDACIÓN", "COMUNA",
+                                     "CONDICIÓN", "CONSTRUCCIONES"])
+    return (t.groupby(["USO_LADM", "DIFERENCIA", "CONDICIÓN EN ENERO",
+                       "TABLA EN ENERO", "TABLA EN LA LIQUIDACIÓN"])
+             .agg(COMUNAS=("COMUNA", lambda s: ", ".join(sorted(set(s)))),
+                  CONDICIONES=("CONDICIÓN",
+                               lambda s: ", ".join(map(str, sorted(set(s))))),
+                  CONSTRUCCIONES=("CONSTRUCCIONES", "sum"))
+             .reset_index()
+             .sort_values("CONSTRUCCIONES", ascending=False))
+
+
+def hoja_revisar(wb, dif: pd.DataFrame) -> None:
+    """Las diferencias con la hoja Uso de enero, en una hoja al final."""
+    if HOJA_REVISAR in wb.sheetnames:
+        del wb[HOJA_REVISAR]
+    if dif.empty:
+        return
+    ws = wb.create_sheet(HOJA_REVISAR)
+    titulo = ws.cell(1, 1, "REGLAS QUE NO COINCIDEN: hoja Uso de enero frente a "
+                           "lo que hace la liquidación (sin comunas extra ni "
+                           "rurales; institucionales y tablas 17C en las 17 "
+                           "comunas)")
+    ws.merge_cells(start_row=1, start_column=1, end_row=1,
+                   end_column=len(dif.columns))
+    titulo.font = Font(bold=True, color="FFFFFF", size=12)
+    titulo.fill = PatternFill("solid", fgColor="9C3B0B")
+    titulo.alignment = Alignment(wrap_text=True, vertical="center")
+    ws.row_dimensions[1].height = 36
+    borde = Border(*(Side(style="thin", color="E3C4B0"),) * 4)
+    for j, n in enumerate(dif.columns, start=1):
+        c = ws.cell(2, j, n)
+        c.fill = PatternFill("solid", fgColor="FCE4D6")
+        c.font = Font(bold=True, color="0F1F33")
+        c.border = borde
+        c.alignment = Alignment(horizontal="center", vertical="center",
+                                wrap_text=True)
+    for i, fila in enumerate(dif.itertuples(index=False), start=3):
+        for j, v in enumerate(fila, start=1):
+            c = ws.cell(i, j, v)
+            c.border = borde
+            c.alignment = Alignment(vertical="top", wrap_text=True)
+    for col, w in zip("ABCDEFGH", [34, 28, 24, 22, 24, 30, 14, 16]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A3"
+    volver = ws.cell(1, len(dif.columns) + 2, "← Volver a USOS")
+    volver.hyperlink = Hyperlink(ref=volver.coordinate, location=f"'{HOJA}'!A1")
+    volver.font = Font(bold=True, color="0563C1", underline="single")
 
 
 HOJA_T12 = "T12_PARQUEADEROS"
