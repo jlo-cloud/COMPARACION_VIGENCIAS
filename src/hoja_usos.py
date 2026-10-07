@@ -142,10 +142,15 @@ def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
         por_modelo = CONFIG_VIG.get("usos_por_modelo", {})
     except Exception:                                    # pragma: no cover
         por_modelo = {}
+    # Lo que va por MODELO (salvo la condicion que va por tabla). Con el modelo
+    # apagado la liquidacion le pone la tabla de su familia, y la comparacion
+    # de vigencias lo excluye: se marca aparte para que la hoja diga lo que es.
+    d["MOD"] = [u in por_modelo and c != str(por_modelo[u])
+                for u, c in zip(d["USO_LADM"], d["CONDICION"])]
 
     filas = []
-    for (uso, base, grupo, cond9), s in d.groupby(
-            ["USO_LADM", "BASE", "GRUPO", "COND9"], sort=False):
+    for (uso, base, grupo, cond9, mod), s in d.groupby(
+            ["USO_LADM", "BASE", "GRUPO", "COND9", "MOD"], sort=False):
         conds = sorted(set(s["CONDICION"]), key=lambda x: (len(x), x))
         condicion = ", ".join(conds)
 
@@ -177,13 +182,18 @@ def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
             nota = f"{nota} {extra}".strip()
         if uso in TABLA_FIJA:
             nota = f"Tabla fija {base}_{TABLA_FIJA[uso][0]} en todas las comunas."
+        if mod:
+            hay_columna = any(c for _, c in enlaces)
+            tabla = (f"MODELO (apagado) → se liquida con {tabla}" if hay_columna
+                     else f"MODELO (apagado) → {tabla} no está en el "
+                          f"consolidado: queda en $ 0")
 
         filas.append({"USO_LADM": uso, "CONDICIÓN (observada)": condicion,
                       "TABLA DE VALOR": tabla, "GRUPO": grupo,
                       "COMUNAS": comunas_de(grupo),
                       "CONSTRUCCIONES": len(s), "OBSERVACIÓN": nota,
                       "_ENLACES": enlaces, "_ORDEN": ORDEN_GRUPO.get(grupo, 9),
-                      "_COND9": cond9})
+                      "_COND9": cond9, "_MOD": mod})
     return pd.DataFrame(filas)
 
 
@@ -216,7 +226,7 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
 
     t = filas_usos(liq, mapa)
     revisar_reglas(t, mapa)
-    dif_enero = comparar_con_enero(liq)
+    dif_enero = comparar_con_enero(liq, mapa)
     if not dif_enero.empty:
         print(f"\n   REVISAR LAS REGLAS: {len(dif_enero)} diferencia(s) con la hoja "
               f"Uso de enero; el detalle va en la hoja {HOJA_REVISAR}.")
@@ -496,7 +506,8 @@ def reglas_enero() -> list:
     return reglas
 
 
-def comparar_con_enero(liq: pd.DataFrame) -> pd.DataFrame:
+def comparar_con_enero(liq: pd.DataFrame,
+                       mapa: dict | None = None) -> pd.DataFrame:
     """Donde la hoja Uso de enero define una regla, compara la tabla que dice
     contra la que uso la liquidacion. Sin las 5 comunas extra ni rurales."""
     reglas = reglas_enero()
@@ -528,6 +539,17 @@ def comparar_con_enero(liq: pd.DataFrame) -> pd.DataFrame:
                           "; ".join(sorted({r["texto_cond"] for r in en_comuna})),
                           "; ".join(sorted({r["fam"] for r in en_comuna})),
                           o["FAM"], o["COMUNA"], o["C"], o["N"]))
+        elif ("MODELO" in {r["fam"] for r in aplica}
+              and o["FAM"] != "MODELO"):
+            # Va por modelo, pero el modelo esta apagado.
+            en_consolidado = o["FAM"] in {familia(tb) for tb, _ in (mapa or {})}
+            filas.append((o["USO_LADM"],
+                          "Modelo apagado: en la liquidación toma tabla; en la "
+                          "app se excluye" if en_consolidado else
+                          "Modelo apagado: la tabla no está en el consolidado, "
+                          "queda en $ 0; en la app se excluye",
+                          "; ".join(sorted({r["texto_cond"] for r in aplica})),
+                          "MODELO", o["FAM"], o["COMUNA"], o["C"], o["N"]))
         elif o["FAM"] not in {r["fam"] for r in aplica}:
             filas.append((o["USO_LADM"], "Tabla distinta",
                           "; ".join(sorted({r["texto_cond"] for r in aplica})),
