@@ -85,6 +85,9 @@ CONFIG = {
     # El segundo grano: una fila por PREDIO, con el valor construido y el avaluo.
     "parquet_publico_predio": str(CARPETA_VERSION /
                                   "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"),
+    # Los usos que todavia no tienen tabla, solo los nombres: la app los
+    # muestra en la hoja Reglas.
+    "parquet_sin_tabla": str(CARPETA_VERSION / "USOS_SIN_TABLA.parquet"),
 
     # Comercial -> catastral.
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
@@ -402,6 +405,18 @@ def cargar(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
         return pd.read_parquet(ruta, columns=usar)
     except ImportError:
         return pd.read_parquet(ruta)
+
+
+def usos_sin_tabla(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Los usos que todavia no tienen tabla asignada (TABLA_ORIGEN SIN TABLA).
+    Solo los nombres: va a la app como recordatorio."""
+    cols = ["DESTINOCONS", "USO_LADM", "TABLA_ORIGEN"]
+    if df_liq is not None:
+        t = df_liq[cols]
+    else:
+        t = pd.read_parquet(CONFIG["parquet_liquidacion"], columns=cols)
+    return (t.loc[t["TABLA_ORIGEN"].eq("SIN TABLA"), ["DESTINOCONS", "USO_LADM"]]
+            .drop_duplicates().sort_values("DESTINOCONS", ignore_index=True))
 
 
 def grupo_comunas(d: pd.DataFrame) -> pd.Series:
@@ -2037,6 +2052,11 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Recorte publico por PREDIO:       "
                   f"{CONFIG['parquet_publico_predio']} ({len(pub_p):,} filas, "
                   f"{len(pub_p.columns)} columnas)")
+
+        sin_tabla = usos_sin_tabla(df_liq)
+        sin_tabla.to_parquet(CONFIG["parquet_sin_tabla"], index=False)
+        print(f"   Usos sin tabla:                   "
+              f"{CONFIG['parquet_sin_tabla']} ({len(sin_tabla)} usos)")
 
         # Con dos o mas versiones guardadas, el libro que las compara.
         if not CONFIG["excel_versiones"]:

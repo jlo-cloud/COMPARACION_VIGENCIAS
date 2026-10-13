@@ -15,6 +15,8 @@ RAIZ = Path(__file__).resolve().parent.parent
 CARPETA_VERSIONES = RAIZ / "output" / "versiones"
 NOMBRE_DATOS = "COMPARACION_VIGENCIA_PUBLICO.parquet"
 NOMBRE_PREDIO = "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
+# Los usos que todavia no tienen tabla (los nombres, como recordatorio).
+NOMBRE_SIN_TABLA = "USOS_SIN_TABLA.parquet"
 NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"
 
 
@@ -259,6 +261,9 @@ INCREMENTO_TERRENO = [
 USOS_T1 = ("Apartamentos_4_y_mas_pisos_en_PH (001), Barracas (004), "
            "Vivienda_Hasta_3_Pisos (012), "
            "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
+# En condicion 9 el 001 va por modelo, no por tabla: la fila COND_9 no lo lleva.
+USOS_T1_COND_9 = ("Barracas (004), Vivienda_Hasta_3_Pisos (012), "
+                  "Vivienda_Hasta_3_Pisos_En_PH (013), Jardin_Infantil_en_Casa (063)")
 USOS_T2 = "Apartamentos_4_y_mas_pisos (003)"
 # Pensiones_y_Residencias (038) NO va aqui: no se reparte por tipologia
 # 021/022/023 como los demas comerciales, sino que tiene tabla FIJA
@@ -267,11 +272,17 @@ USOS_T3 = ("Bodegas_Comerciales_Grandes_Almacenes (016), "
            "Estacion_de_servicio (021), Clubes_Casinos (024), Comercio (025), "
            "Comercio_en_PH (028), Plaza_Mercado (039), Restaurantes (041), "
            "Restaurantes_en_PH (042), Talleres (049)")
-USOS_T4 = ("Salon_Comunal (009), Bodegas_Comerciales (017), "
-           "Bodegas_Comerciales_en_PH (018), Industrias (047), "
-           "Industrias_en_PH (048)")
+USOS_T4 = ("Salon_Comunal (009), Bodegas_Comerciales_en_PH (018), "
+           "Industrias (047), Industrias_en_PH (048)")
+# Bodegas_Comerciales (017): como la 038, tabla FIJA, no va por tipologia.
+USOS_T4_FIJO = "Bodegas_Comerciales (017)"
 USOS_T5 = "Educación y formación institucional (050, 051, 055, 068, 070)"
 USOS_T6 = "Salud y servicios institucionales (054, 067)"
+USOS_T7 = ("Oficinas_Consultorios (032), Oficinas_Consultorios_Coloniales (033), "
+           "Oficinas_Consultorios_en_PH (034, fuera de condición 9), "
+           "Carceles (052), Administrativos (073), Fundaciones_y_ONG (074), "
+           "075, Estaciones_y_CAI (076)")
+USOS_T8 = "Casas_de_Culto (053), Iglesia (060), Iglesia_en_PH (061)"
 USOS_T9 = "Hoteles (030, 031)"
 USOS_T11 = "Centros comerciales (019, 022, 043)"
 USOS_T13 = "Unidad deportiva (071)"
@@ -304,6 +315,14 @@ EXC_T3_FIJO = ("No depende de la ZHF ni del estrato: siempre "
                "T3_COMERCIAL_023, en todas las comunas.")
 EXC_T5 = "Se liquida con T5_INSTITUCIONAL_ED_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T6 = "Se liquida con T6_INSTITUCIONAL_SA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
+EXC_T4_FIJO = ("No depende de la ZHF ni del estrato: siempre "
+               "T4_INDUSTRIAL_032, en todas las comunas.")
+SIN_VALORES = (" La asignación ya está definida, pero el consolidado todavía "
+               "no trae los valores de esta tabla: mientras tanto quedan en $ 0.")
+EXC_T7 = ("Se liquida con T7_INSTITUCIONAL_SER_17C en el grupo 17C; no depende "
+          "de la ZHF ni del estrato." + SIN_VALORES)
+EXC_T8 = ("Se liquida con T8_INSTITUCIONAL_IG_17C en el grupo 17C; no depende "
+          "de la ZHF ni del estrato." + SIN_VALORES)
 EXC_T9 = "Se liquida con T9_HOTELES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T11 = "Se liquida con T11_CCOMERCIALES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T13 = "Se liquida con T13_UNIDAD_DEPORTIVA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
@@ -318,7 +337,7 @@ EXC_INDUSTRIAL = ("Si la ZHF termina en 011-016, la tabla es la que concuerde "
 # (uso, grupo, condicion juridica, patron de la columna, tipologias, excepcion).
 # {t} donde va la tipologia de la ZHF.
 REGLAS_TABLA = [
-    (USOS_T1, "10C", "9",
+    (USOS_T1_COND_9, "10C", "9",
      "T1_RESIDENCIAL_10C_COND_9_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
     (USOS_T1, "10C", "Diferente de 9",
      "T1_RESIDENCIAL_10C_COND_0_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_RESIDENCIAL),
@@ -355,10 +374,20 @@ REGLAS_TABLA = [
      "T4_INDUSTRIAL_5C_N_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
     (USOS_T4, "7C", "NA",
      "T4_INDUSTRIAL_7C_{t}", TIPOLOGIAS_INDUSTRIAL, EXC_INDUSTRIAL),
+    (USOS_T4_FIJO, "5C", "NA",
+     "T4_INDUSTRIAL_5C_032", ["NA"], EXC_T4_FIJO),
+    (USOS_T4_FIJO, "5C_N", "NA",
+     "T4_INDUSTRIAL_5C_N_032", ["NA"], EXC_T4_FIJO),
+    (USOS_T4_FIJO, "7C", "NA",
+     "T4_INDUSTRIAL_7C_032", ["NA"], EXC_T4_FIJO),
     (USOS_T5, "17C", "NA",
      "T5_INSTITUCIONAL_ED_17C", ["NA"], EXC_T5),
     (USOS_T6, "17C", "NA",
      "T6_INSTITUCIONAL_SA_17C", ["NA"], EXC_T6),
+    (USOS_T7, "17C", "NA",
+     "T7_INSTITUCIONAL_SER_17C", ["NA"], EXC_T7),
+    (USOS_T8, "17C", "NA",
+     "T8_INSTITUCIONAL_IG_17C", ["NA"], EXC_T8),
     (USOS_T9, "17C", "NA",
      "T9_HOTELES_17C", ["NA"], EXC_T9),
     (USOS_T10, "17C", "NA",
@@ -1604,7 +1633,8 @@ with hoja_reglas:
 
 En condición 9 van por **modelo**, en todas las comunas. Mientras el
 modelo esté apagado **no se reemplazan con tabla**: quedan en $ 0,
-pendientes de modelo. En condición 8 van por tabla. Si un predio en
+pendientes de modelo. En condición 8 van por tabla (las oficinas, por la T7,
+que todavía no tiene valores). Si un predio en
 condición 9 trae el código de no PH (Apartamentos_4_y_mas_pisos,
 Comercio, Oficinas_Consultorios), va a preinconsistencias y no se liquida.
 
@@ -1620,6 +1650,17 @@ Comercio, Oficinas_Consultorios), va a preinconsistencias y no se liquida.
 Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
         """)
 
+    st.divider()
+    st.markdown("**Usos que todavía no tienen tabla**")
+    ruta_sin_tabla = ruta_version(sel_versiones[-1], NOMBRE_SIN_TABLA)
+    if ruta_sin_tabla.exists():
+        sin_tabla = pd.read_parquet(ruta_sin_tabla)
+        st.markdown("\n".join(f"- `{f.USO_LADM}` ({f.DESTINOCONS})"
+                              for f in sin_tabla.itertuples())
+                    or "Todos los usos tienen tabla.")
+    else:
+        st.info(f"La versión {sel_versiones[-1]} no trae {NOMBRE_SIN_TABLA}: "
+                f"sale de correr el main.")
 
 
 
