@@ -655,8 +655,8 @@ def homologar_rural(df):
     no_conv['DESTANEX'] = no_conv['DESTANEX'].astype(int)
     
     # ========== CONVENCIONALES RURAL ==========
-    USO = [1, 1, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 
-           22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 
+    USO = [1, 1, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 19,
+           23, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 
            40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 
            58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 1, 21]
     
@@ -683,10 +683,12 @@ def homologar_rural(df):
         (df_conv["DESTINOCONS_2025"].isin([15])) & (df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([16])) & ~(df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([17])) & (df_conv["CONDICION"].isin([8,9])),
-        (df_conv["DESTINOCONS_2025"].isin([18])) & ~(df_conv["CONDICION"].isin([8,9])),
+        # Los de mas de 5.000 m2 van primero: np.select se queda con la primera
+        # verdadera, y la regla general del 18/19 se los llevaba a todos.
         (df_conv["DESTINOCONS_2025"].isin([18])) & ~(df_conv["CONDICION"].isin([8,9])) & (df_conv["AREA_CONST"] > 5000),
-        (df_conv["DESTINOCONS_2025"].isin([19])) & (df_conv["CONDICION"].isin([8,9])),
+        (df_conv["DESTINOCONS_2025"].isin([18])) & ~(df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([19])) & (df_conv["CONDICION"].isin([8,9])) & (df_conv["AREA_CONST"] > 5000),
+        (df_conv["DESTINOCONS_2025"].isin([19])) & (df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([20])) & ~(df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([21])) & ~(df_conv["CONDICION"].isin([8,9])),
         (df_conv["DESTINOCONS_2025"].isin([22])) & ~(df_conv["CONDICION"].isin([8,9])),
@@ -810,7 +812,7 @@ def homologar_rural(df):
     ]
     
     df_no_conv["DESTANEX"] = np.select(CONDICIONES_ANEX, USO_ANEX, default=0)
-    
+
     df_no_conv_homologadas = df_no_conv[df_no_conv["DESTANEX"] > 0].copy()
     df_no_conv_sin_homologar = df_no_conv[df_no_conv["DESTANEX"] == 0].copy()
     

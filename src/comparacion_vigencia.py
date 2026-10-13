@@ -179,9 +179,15 @@ CONFIG = {
     "guardar_detalle": True,
     # Excel del detalle liquidado: una fila por construccion con como se
     # liquido. Es el DETALLE_LIQUIDADOS_<fecha>.xlsx que entrega la hoja
-    # Detalle de la app. Cuesta ~90 s por corrida y ~57 MB en disco.
-    "excel_detalle": True,
+    # Detalle de la app. Apagado en la corrida normal: cuesta ~5 min y trae
+    # lo mismo que COMPARACION_VIGENCIA_DETALLE.parquet. Cuando haga falta se
+    # saca de ese parquet, sin volver a liquidar:
+    #     python src/exportar_detalle.py
+    "excel_detalle": False,
     "excel_detalle_muestra": None,   # None = todas las filas
+    # COMPARACION_VERSIONES_<V1>_<V2>_<fecha>.xlsx (comparacion_versiones.py).
+    # Apagado: por ahora solo se piden el detalle y las tablas de valor.
+    "excel_versiones": False,
 }
 
 # La ruta del consolidado no va escrita: se toma el mas reciente que haya
@@ -740,10 +746,17 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     # El cambio de tipologia NO se toma de la construccion dominante como los de
     # abajo: basta con que UNA se haya movido de zona para que el predio deje de
     # servir como comparacion limpia, asi que se marca el predio entero.
+    # Marcas por fila y un any() por predio: con un lambda en el agg eran
+    # ~276 mil llamadas a Python (~165 s).
     if "CAMBIO_TIPOLOGIA" in d.columns:
-        uni["CAMBIO_TIPOLOGIA"] = g["CAMBIO_TIPOLOGIA"].agg(
-            lambda s: "1" if (s == "1").any()
-            else ("SIN COMPARACIÓN" if (s == "SIN COMPARACIÓN").any() else "0"))
+        hay = (pd.DataFrame({"ID_PREDIO": d["ID_PREDIO"],
+                             "UNO": d["CAMBIO_TIPOLOGIA"] == "1",
+                             "SIN": d["CAMBIO_TIPOLOGIA"] == "SIN COMPARACIÓN"})
+                 .groupby("ID_PREDIO", sort=False)[["UNO", "SIN"]].any())
+        uni["CAMBIO_TIPOLOGIA"] = pd.Series(
+            np.where(hay["UNO"], "1",
+                     np.where(hay["SIN"], "SIN COMPARACIÓN", "0")),
+            index=hay.index)
 
     # Mismos nombres que a nivel construccion, pero de la construccion dominante.
     for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM",
@@ -2026,11 +2039,15 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                   f"{len(pub_p.columns)} columnas)")
 
         # Con dos o mas versiones guardadas, el libro que las compara.
-        try:
-            from comparacion_versiones import comparar_versiones
-            comparar_versiones()
-        except Exception as e:                           # pragma: no cover
-            print(f"   (no se pudo armar la comparacion de versiones: {e})")
+        if not CONFIG["excel_versiones"]:
+            print("\n   Comparacion de versiones: APAGADA "
+                  "(CONFIG['excel_versiones'] en comparacion_vigencia.py)")
+        else:
+            try:
+                from comparacion_versiones import comparar_versiones
+                comparar_versiones()
+            except Exception as e:                       # pragma: no cover
+                print(f"   (no se pudo armar la comparacion de versiones: {e})")
 
     # --- Excel de agregados (apagado por defecto) ---------------------------
     if not CONFIG["excel_reporte"]:

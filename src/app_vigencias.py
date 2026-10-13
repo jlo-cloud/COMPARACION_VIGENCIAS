@@ -1602,6 +1602,12 @@ with hoja_reglas:
 | `Comercio_en_PH` |
 | `Oficinas_Consultorios_en_PH` |
 
+En condición 9 van por **modelo**, en todas las comunas. Mientras el
+modelo esté apagado **no se reemplazan con tabla**: quedan en $ 0,
+pendientes de modelo. En condición 8 van por tabla. Si un predio en
+condición 9 trae el código de no PH (Apartamentos_4_y_mas_pisos,
+Comercio, Oficinas_Consultorios), va a preinconsistencias y no se liquida.
+
 **2. Son especiales por defecto**
 
 | Uso de construcción |

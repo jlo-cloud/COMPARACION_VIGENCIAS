@@ -12,9 +12,24 @@ from Liquidacion_tablas import tablas_liquidacion
 from Liquidacion_final import liquidacion_completa
 from comparacion_vigencia import comparacion_vigencia
 from perf import crono  # ⏱️ medición de tiempos
+from control_filas import control
 
 
-def main():
+# ---------------------------------------------------------------------------
+# Por defecto se liquida SOLO la vigencia actual y sale lo de la comparacion:
+# los parquets que lee la app y el Excel de detalle.
+#
+# Las reglas de 2024 y 2025 sobre esta misma base (output/ESCENARIOS.parquet)
+# son de la preliquidacion completa y agregan varios minutos. Se piden por
+# argumento:
+#
+#     python src/main.py --todas
+# ---------------------------------------------------------------------------
+def main(liquidar_otras=None):
+    if liquidar_otras is None:
+        import sys as _sys
+        liquidar_otras = "--todas" in _sys.argv[1:]
+
     inicio = time.time()
     crono.inicio("LIQUIDACION (main)")  # ⏱️
 
@@ -76,6 +91,8 @@ def main():
             print(f"   - Predios: {len(df_predio):,}")
             print(f"   - Construcciones convencionales: {len(df_conv):,}")
             print(f"   - Construcciones no convencionales: {len(df_noconv):,}")
+            control.marca("entrada (insumos)", convencionales=df_conv,
+                          no_convencionales=df_noconv)
 
             pbar.update(1)
             crono.marca("PASO 1: procesar_construcciones")  # ⏱️
@@ -159,6 +176,19 @@ def main():
             print(f"   (la liquidación SÍ quedó guardada; puede reintentar solo")
             print(f"    la comparación con: python src/comparacion_vigencia.py)")
 
+        # PASO 7 (opcional): las otras vigencias sobre esta misma base
+        if liquidar_otras:
+            print(f"\n{'='*60}")
+            print("=== PASO 7: Escenarios 2024 / 2025 sobre la misma base ===")
+            print(f"{'='*60}")
+            try:
+                from escenarios import comparar
+                comparar()
+                crono.marca("PASO 7: escenarios 2024/2025")  # ⏱️
+            except Exception as e:
+                print(f"⚠️ Los escenarios no se pudieron generar: {str(e)}")
+                print("   (la liquidación actual SÍ quedó guardada)")
+
         #                 print(f"   - Máximo: {var_avaluo.max():.2f}%")
                 
         #         # Estadísticas de avalúo total
@@ -198,6 +228,7 @@ def main():
     print(f"⏱️  Tiempo total de ejecución: {tiempo_total} segundos ({tiempo_total/60:.2f} minutos)")
 
     crono.resumen()  # ⏱️ desglose por paso y sub-bloque
+    control.resumen()
     # Lo que se anuncia sale de LO QUE QUEDO EN DISCO, no de una lista escrita
     # a mano. Antes se nombraban REVISION_LIQUIDACION_<fecha>.xlsx y
     # LIQUIDACION_FINAL/CONSTRUCCIONES_<fecha>.txt, que los genera el PASO 5

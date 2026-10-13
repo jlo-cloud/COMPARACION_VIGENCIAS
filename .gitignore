@@ -14,6 +14,8 @@
 /*
 
 !/.gitignore
+!/README.md
+!/INSUMOS.md
 !/requirements.txt
 !/.streamlit
 !/src
