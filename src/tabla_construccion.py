@@ -11,6 +11,7 @@ from datetime import datetime
 from Homologacion import aplicar_homologacion, cruce_uso_ladm, homologar_rural
 from pre_inconsistencias import generar_reporte_inconsistencias
 from uso_principal import uso_principal_const
+from control_filas import control, acunar_llave
 
 
 # =====================================================================
@@ -57,15 +58,21 @@ COMUNAS_5N = (['07', '14', '15', '20', '21']
               + (COMUNAS_FALTANTES if INCLUIR_COMUNAS_FALTANTES else []))
 
 def convertir_a_float(df, columnas):
+    # Los .txt del export traen coma decimal y los .parquet punto, y tras el
+    # concat urbano+rural llegan mezclados en la misma columna: astype(float)
+    # reventaba con "17567654,24".
     for col in columnas:
-        if col in df.columns:
-            df[col] = (
-                df[col]
-                  .astype(str)
-                  .astype(float)
-            )
-        else:
+        if col not in df.columns:
             print(f"⚠️ La columna '{col}' no existe en el DataFrame")
+            continue
+        texto = df[col].astype(str).str.strip().str.replace(",", ".", regex=False)
+        valor = pd.to_numeric(texto, errors="coerce")
+        perdidos = int(valor.isna().sum() - df[col].isna().sum())
+        if perdidos > 0:
+            malos = texto[valor.isna() & df[col].notna()].unique()[:3]
+            print(f"⚠️ {col}: {perdidos:,} valores no numericos -> NaN. "
+                  f"Ejemplos: {list(malos)}")
+        df[col] = valor
     return df
 
 
@@ -171,7 +178,12 @@ def procesar_construcciones(base_path=None):
     file_patterns = {
         "predio": r"export_predio_zhf",
         "no_conv": r"no.?convencional|anexo",
-        "conv": r"convencional|construccion",
+        #
+        # "construccion" a secas era demasiado ancho: cuando llego
+        # export_construccion_2025.txt -la entrega del anio pasado- le gano al
+        # parquet por orden de nombre y el proceso empezo a leer los destinos
+        # viejos, sin las columnas ESPECIAL, VALOR_M2 ni INTEGRAL.
+        "conv": r"convencional|construccion_homologado",
     }
 
     dataframes = {k: None for k in file_patterns}
@@ -239,6 +251,14 @@ def procesar_construcciones(base_path=None):
                   f"{os.path.basename(anterior)}: {e}")
     elif dataframes["predio"] is not None:
         print("⚠️ No hay export_predio_<fecha>: no se agrega ZHF_ANTERIOR")
+
+    # Llave propia, acuñada aqui y no deducida de los datos: es la unica forma
+    # de que ninguna construccion se confunda con otra mas adelante.
+    for nombre, prefijo in (("conv", "C"), ("no_conv", "A")):
+        if dataframes[nombre] is not None:
+            dataframes[nombre] = dataframes[nombre].copy()
+            dataframes[nombre]["LLAVE_CONST"] = acunar_llave(
+                dataframes[nombre], prefijo)
 
     for k, v in dataframes.items():
         print(f"📊 {k}: {'OK' if v is not None else 'None'}")
@@ -606,6 +626,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
 
     df_const = pd.concat([urbano, rural], ignore_index=True)
 
+    control.marca("homologacion", df_const)
+
     print(f"✅ Total después de homologación: {len(df_const)}")
     print(f"✅ Columnas disponibles: {list(df_const.columns)}")
 
@@ -649,6 +671,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     
     # Merge construccion y predio
     df_const_predio = pd.merge(df_const, df_predio_usop, on='ID_PREDIO', how='left')
+
+    control.marca("cruce con predio", df_const_predio)
 
     print(f'✅ REVISION CRUCE ENTRE CONSTRUCCION Y PREDIO {len(df_const)-len(df_const_predio)}')
 
@@ -721,20 +745,23 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     df_const_predio = pd.concat([df_conv_ord, df_noconv_ord], ignore_index=True)
 
     
+    # Sufijo: DESTINOCONS si es > 0, si no DESTANEX si es > 0, si no nada.
+    # Por columnas y no con apply(axis=1), que iba fila por fila (~30 s).
+    def _destino_txt(col):
+        v = pd.to_numeric(df_const_predio[col], errors='coerce')
+        ok = v.notna() & (v > 0)
+        return ok, np.trunc(v.where(ok, 0)).astype('int64').astype(str)
+    _ok_cons, _txt_cons = _destino_txt('DESTINOCONS')
+    _ok_anex, _txt_anex = _destino_txt('DESTANEX')
     df_const_predio['CONSTRUCCION_ID'] = (
     df_const_predio['ID_PREDIO'].astype(str) +
     df_const_predio['CONSECUTIVO'].astype(str) +
-    df_const_predio.apply(
-        lambda x: (
-            str(int(x['DESTINOCONS'])) if pd.notna(x['DESTINOCONS']) and x['DESTINOCONS'] > 0
-            else str(int(x['DESTANEX'])) if pd.notna(x['DESTANEX']) and x['DESTANEX'] > 0
-            else ""
-        ),
-        axis=1
-    )
+    pd.Series(np.select([_ok_cons, _ok_anex], [_txt_cons, _txt_anex], ''),
+              index=df_const_predio.index)
     )
 
    
+    control.marca("llave CONSTRUCCION_ID", df_const_predio)
     df_const_predio.to_parquet("./output/todas_las_construcciones.parquet")
     del df_predio_usop, df_const, df_conv, df_noconv
     gc.collect()
@@ -744,6 +771,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     # Con los criterios de hoy son ~64.000 predios, el 8.8%. Para volver a
     # correr sin descontar, comente la primera linea y descomente la segunda.
     df_const_predio_clean = generar_reporte_inconsistencias(df_const_predio)
+    control.marca("pre_inconsistencias", df_const_predio_clean,
+                  baja_ok="predios a los que les falta informacion")
     # df_const_predio_clean = df_const_predio.copy()
 
     print(f'PREDIOS DESCONTADOS POR INCONSISTENCIAS {df_const_predio['ID_PREDIO'].nunique()-df_const_predio_clean['ID_PREDIO'].nunique()}')

@@ -142,8 +142,12 @@ def comparar_versiones(versiones: list | None = None) -> str | None:
     fecha = datetime.now().strftime("%Y%m%d")
     ruta = CARPETA_SALIDA / f"COMPARACION_VERSIONES_{'_'.join(versiones)}_{fecha}.xlsx"
     print("   Escribiendo la comparacion de versiones a Excel (puede tardar)...")
-    with pd.ExcelWriter(ruta, engine="xlsxwriter") as xw:
-        libro = xw.book
+    # Fila por fila con constant_memory, como el Excel del detalle en
+    # comparacion_vigencia: con to_excel este libro tardaba ~11 minutos.
+    import xlsxwriter
+    libro = xlsxwriter.Workbook(str(ruta), {"constant_memory": True,
+                                            "nan_inf_to_errors": True})
+    try:
         f_tit = libro.add_format({"bold": True, "bg_color": "#1F4E78",
                                   "font_color": "white", "border": 1,
                                   "text_wrap": True, "valign": "vcenter"})
@@ -152,12 +156,10 @@ def comparar_versiones(versiones: list | None = None) -> str | None:
         for nombre, t in (("Resumen por categoria", por_cat),
                           ("Resumen por tabla", por_tabla),
                           ("Detalle", ancho), ("Diccionario", dic)):
-            t.to_excel(xw, sheet_name=nombre, index=False)
-            h = xw.sheets[nombre]
+            h = libro.add_worksheet(nombre)
             h.freeze_panes(1, 0)
             h.autofilter(0, 0, len(t), len(t.columns) - 1)
             for i, col in enumerate(t.columns):
-                h.write(0, i, col, f_tit)
                 if col.startswith(("VM2", "AVALUO", "DIF_")):
                     fmt, ancho_col = f_pesos, 18
                 elif "PCT" in col:
@@ -167,6 +169,22 @@ def comparar_versiones(versiones: list | None = None) -> str | None:
                 else:
                     fmt, ancho_col = None, max(12, min(len(col) + 2, 34))
                 h.set_column(i, i, ancho_col, fmt)
+                h.write(0, i, col, f_tit)
+            t = t.copy()
+            for c in t.columns:
+                if isinstance(t[c].dtype, pd.CategoricalDtype):
+                    t[c] = t[c].astype(str)
+            fila = 1
+            for ini in range(0, len(t), 20_000):
+                bloque = t.iloc[ini:ini + 20_000]
+                # astype(object): xlsxwriter no acepta tipos de numpy.
+                for valores in (bloque.astype(object)
+                                      .where(pd.notna(bloque), None)
+                                      .values.tolist()):
+                    h.write_row(fila, 0, valores)
+                    fila += 1
+    finally:
+        libro.close()
     print(f"   Comparacion de versiones: {ruta}")
     print(f"     Detalle: {len(ancho):,} construcciones x {len(versiones)} versiones")
     return str(ruta)

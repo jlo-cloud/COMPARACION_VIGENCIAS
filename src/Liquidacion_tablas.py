@@ -14,6 +14,7 @@ import gc
 from model_liq import ejecutar_modelos
 from perf import crono  # ⏱️ medición de tiempos
 from consolidar_tablas import tabla_valor_vigente
+from control_filas import control
 from tabla_construccion import (convertir_a_cero, convertir_a_float,
                                 convertir_a_string, COMUNAS_7, COMUNAS_10,
                                 COMUNAS_5, COMUNAS_5N)
@@ -21,6 +22,10 @@ from tabla_construccion import (convertir_a_cero, convertir_a_float,
 
 
 warnings.filterwarnings("ignore")
+
+# El DIAGNOSTICO_TABLAS_<fecha>.xlsx (resumen de VM2 en cero). Apagado: por
+# ahora solo se piden el detalle y las tablas de valor.
+EXCEL_DIAGNOSTICO = False
 
 ### Cargar archivos
 # 1. Tabla df_const
@@ -42,7 +47,21 @@ def tablas_liquidacion(df_const):
     # Cuando entreguen los del año: se pone True y se cambia ruta_especiales.
     APLICAR_ESPECIALES_EXCEL = False
 
+    # Los 26 valores de valores_parqueaderos son los del ejercicio 2025
+    # -identicos cifra por cifra-. Se encendio el 2026-09-29 para liquidar los
+    # parqueaderos con ellos; si llegan valores nuevos, se cambian abajo.
+    # Con False vuelven a cero, como las T7, T8 y T10.
+    LIQUIDAR_PARQUEADEROS = True
 
+
+    # Llega como texto y model_liq le escribe numeros a las filas que van por
+    # modelo: la columna queda mezclada y to_parquet revienta con
+    # "Expected bytes, got a float". Es un valor por m2, va numerica.
+    if 'VALOR_M2_SUELO' in df_const.columns:
+        df_const['VALOR_M2_SUELO'] = pd.to_numeric(
+            df_const['VALOR_M2_SUELO'], errors='coerce').fillna(0.0)
+
+    control.marca("entrada a tablas", df_const)
     print(f'Tipo de columnas df const {df_const.dtypes}')
   
     
@@ -130,9 +149,10 @@ def tablas_liquidacion(df_const):
     comunas_5 = COMUNAS_5      # T2 y T4 desde la version 2 de las tablas
     comunas_5n = COMUNAS_5N
 
-    # Por ahora la liquidacion es solo por tablas. En True, las construcciones
-    # de la condicion 2 salen de su tabla y pasan a TABLA_ORIGEN = 'MODELO';
-    # solo tiene sentido cuando VM2_MOD venga con valores.
+    # Las construcciones que van por modelo (condicion 2 de abajo) quedan SIEMPRE
+    # en TABLA_ORIGEN = 'MODELO': una tabla no reemplaza a un modelo. Este
+    # interruptor solo decide si se CORREN los modelos. En False no se corren y
+    # esas construcciones quedan con VM2 = 0, pendientes de modelo.
     LIQUIDAR_CON_MODELO = False
 
     df_const['ACONCONS'] = pd.to_numeric(df_const['ACONCONS'], errors='coerce')
@@ -162,30 +182,14 @@ def tablas_liquidacion(df_const):
         # -------------------------------------------
         # 2. MODELO
         # -------------------------------------------
-        # Apagada mientras la liquidacion sea solo por tablas: VM2_MOD viene en
-        # cero en todo el parquet, asi que mandar estas construcciones a MODELO
-        # las dejaria sin valor (el merge de tablas excluye TABLA_ORIGEN=MODELO).
-        # Se enciende poniendo LIQUIDAR_CON_MODELO = True, arriba.
+        # Siempre activa: lo que va por modelo no toma valor de tabla aunque el
+        # modelo este apagado (LIQUIDAR_CON_MODELO = False); queda en 0.
         (
-            LIQUIDAR_CON_MODELO &
             (
-                (
-                    df_const['DESTINOCONS'].isin(['001']) &
-                    (df_const['CONDICION'] == 9) &
-                    df_const['COMUNA'].isin(['01','09','10','11','12','03','22'])
-                )
-                |
-                (
-                    df_const['DESTINOCONS'].isin(['028']) &
-                    (df_const['CONDICION'] == 9) &
-                    df_const['COMUNA'].isin(['01','09','10','11','12','03','22'])
-                )
-                |
-                (
-                    df_const['DESTINOCONS'].isin(['034']) &
-                    (df_const['CONDICION'] == 9) &
-                    df_const['COMUNA'].isin(['01','09','10','11','12','03','22'])
-                )
+                # Apartamentos (001), comercio (028) y oficinas (034) en PH,
+                # condicion 9: van por modelo en TODAS las comunas.
+                df_const['DESTINOCONS'].isin(['001', '028', '034']) &
+                (df_const['CONDICION'] == 9)
             )
         ),
         
@@ -698,13 +702,16 @@ def tablas_liquidacion(df_const):
         # 4. AGRUPAR POR PREDIO Y CONTAR TIPOS
         # ============================================================
         
+        # COUNT_ANEXOS suma una marca 0/1 y no un lambda: con un lambda el
+        # groupby llamaba a Python una vez por predio (~730 mil, ~230 s).
         df_metodo = (
-            df_const.groupby('ID_PREDIO', as_index=False)
+            df_const.assign(_ES_ANEXO=(df_const['TABLA_ORIGEN'] == 'T10_ANEXOS').astype(int))
+            .groupby('ID_PREDIO', as_index=False)
             .agg(
                 #COUNT_INTEGRAL_NO_ESP =('ES_INTEGRAL_NO_ESP','sum'), ##CAmtodad de predios integrales no especiales
                 COUNT_INTEGRAL=('ES_INTEGRAL', 'sum'),  # Cantidad de construcciones integrales
                 COUNT_TABLA=('ES_TABLA', 'sum'),        # Cantidad de construcciones con tabla
-                COUNT_ANEXOS=('TABLA_ORIGEN', lambda x: (x == 'T10_ANEXOS').sum()),
+                COUNT_ANEXOS=('_ES_ANEXO', 'sum'),
                 COUNT_INFORMAL =('INFORMALIDAD','sum'),
                 TOTAL_CONST=('CONSTRUCCION_ID', 'count')
             )
@@ -1450,11 +1457,16 @@ def tablas_liquidacion(df_const):
 
     ]
 
-    df_const.loc[mask_parq, 'VM2_FINAL_V3'] = np.select(
-        condiciones_parqueaderos,
-        valores_parqueaderos,
-        default=0
-    )
+    if LIQUIDAR_PARQUEADEROS:
+        df_const.loc[mask_parq, 'VM2_FINAL_V3'] = np.select(
+            condiciones_parqueaderos,
+            valores_parqueaderos,
+            default=0
+        )
+    else:
+        df_const.loc[mask_parq, 'VM2_FINAL_V3'] = 0
+        print(f"   PARQUEADEROS SIN AVAL PARA ESTA VIGENCIA: "
+              f"{int(mask_parq.sum()):,} construcciones quedan en 0")
     
     def actualizar_valores(df_const):
         """
@@ -1533,19 +1545,39 @@ def tablas_liquidacion(df_const):
     #tabla_especiales['INTEGRAL_ESP_2026'] = 1
 
     
-    df_liq_modelo = ejecutar_modelos(df_const)
+    if LIQUIDAR_CON_MODELO:
+        df_liq_modelo = ejecutar_modelos(df_const)
+    else:
+        # Modelo apagado: las construcciones de MODELO se conservan, sin valor.
+        df_liq_modelo = df_const[df_const['TABLA_ORIGEN'] == 'MODELO'].copy()
+        df_liq_modelo['VM2'] = 0.0
+        df_liq_modelo['VM2_MOD'] = 0.0
+        print(f"   Modelo apagado: {len(df_liq_modelo):,} construcciones de "
+              f"MODELO quedan con VM2 = 0 (no se reemplazan con tabla)")
     crono.marca("3.5 modelos ML (ejecutar_modelos)")  # ⏱️
-    
-    
+
+
+    # ejecutar_modelos devuelve SOLO las que logra predecir. Las que van por
+    # modelo pero no tienen familia entrenada hay que reponerlas aqui o
+    # desaparecen de la salida: no es que queden sin valorar, es que se pierden.
+    tabla_modelo = df_const[df_const['TABLA_ORIGEN'] == 'MODELO'].copy()
     if df_liq_modelo is None or df_liq_modelo.empty:
+        tabla_modelo['VM2_MOD'] = 0.0
         df_const_liq = pd.concat(
-            [df_liq_tabla, tabla_especiales],
+            [df_liq_tabla, tabla_modelo, tabla_especiales],
             ignore_index=True
         )
         df_const_liq['VM2_MOD'] = 0
     else:
+        predichas = set(df_liq_modelo['CONSTRUCCION_ID'].astype(str))
+        sin_modelo = tabla_modelo[
+            ~tabla_modelo['CONSTRUCCION_ID'].astype(str).isin(predichas)].copy()
+        if not sin_modelo.empty:
+            sin_modelo['VM2_MOD'] = 0.0
+            print(f"   {len(sin_modelo):,} construcciones van por modelo y no "
+                  f"tienen familia entrenada: quedan sin valorar")
         df_const_liq = pd.concat(
-            [df_liq_tabla, df_liq_modelo, tabla_especiales],
+            [df_liq_tabla, df_liq_modelo, sin_modelo, tabla_especiales],
             ignore_index=True
         )
 
@@ -1700,6 +1732,8 @@ def tablas_liquidacion(df_const):
         keep='first'
     )
     print(f'DUPLICADOS ELIMINADOS EN SALIDA: {antes - len(df_const_liq):,} filas')
+    control.marca("asignacion de valores", df_const_liq,
+                  baja_ok="construcciones iguales a otra del mismo predio")
     print(f'REGISTROS FINALES df_const_liq:  {len(df_const_liq):,}')
     # ⏸️ DESACTIVADO: escribir 725k filas a .xlsx tardaba ~555s (82% del proceso).
     # Reactivar solo cuando se necesite exportar a Excel. La data ya queda en LIQUIDACION_TABLAS.parquet.
@@ -1803,14 +1837,18 @@ def tablas_liquidacion(df_const):
                   .rename_axis('MOTIVO_VM2_CERO').reset_index(name='CONSTRUCCIONES'))
 
     ruta_diag = f'{carpeta_diag}/DIAGNOSTICO_TABLAS_{fecha_diag}.xlsx'
-    try:
-        with pd.ExcelWriter(ruta_diag, engine='xlsxwriter') as xw:
-            res_motivo.to_excel(xw, sheet_name='RESUMEN_MOTIVOS', index=False)
-            res_tabla.to_excel(xw, sheet_name='POR_TABLA', index=False)
-            res_comuna.to_excel(xw, sheet_name='POR_COMUNA', index=False)
-        print(f"\n✅ Resumen del diagnostico: {ruta_diag}")
-    except Exception as e:
-        print(f"\n⚠️ No se pudo escribir {ruta_diag}: {e}")
+    if not EXCEL_DIAGNOSTICO:
+        print("\n   Resumen del diagnostico en Excel: APAGADO "
+              "(EXCEL_DIAGNOSTICO en Liquidacion_tablas.py)")
+    else:
+        try:
+            with pd.ExcelWriter(ruta_diag, engine='xlsxwriter') as xw:
+                res_motivo.to_excel(xw, sheet_name='RESUMEN_MOTIVOS', index=False)
+                res_tabla.to_excel(xw, sheet_name='POR_TABLA', index=False)
+                res_comuna.to_excel(xw, sheet_name='POR_COMUNA', index=False)
+            print(f"\n✅ Resumen del diagnostico: {ruta_diag}")
+        except Exception as e:
+            print(f"\n⚠️ No se pudo escribir {ruta_diag}: {e}")
 
     cols_diag = [c for c in ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'CONSTRUCCION_ID',
                              'USO_LADM', 'TABLA_ORIGEN', 'METODO_LIQUIDACION', 'COMUNA',

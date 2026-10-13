@@ -26,6 +26,16 @@ MOTIVOS_QUE_DESCUENTAN = {
 }
 
 
+# El reporte_pre_inconsistencias_<fecha>.xlsx. Apagado: por ahora solo se
+# piden el detalle y las tablas de valor. Los predios se descuentan igual.
+EXCEL_REPORTE = False
+
+
+# Usos de no PH cuyo par en PH se liquida por MODELO en condicion 9.
+USOS_PAR_DE_MODELO = {"Apartamentos_4_y_mas_pisos", "Comercio",
+                      "Oficinas_Consultorios"}
+
+
 def generar_reporte_inconsistencias(
     df,
     validar_coordenadas=True,
@@ -189,15 +199,22 @@ def generar_reporte_inconsistencias(
         # b) el uso NO dice PH pero viene con condicion 9, donde eso cambia
         #    la tabla que le toca
         falla_b = ~tiene_ph & (cond_num == 9) & ~es_7c
-        # c) lo mismo en las 7 comunas, donde no cambia nada: solo se reporta
-        falla_c = ~tiene_ph & (cond_num == 9) & es_7c
+        # d) en las 7 comunas, un uso de no PH cuyo par en PH va por MODELO
+        #    (003 -> 001, 025 -> 028, 032 -> 034): en condicion 9 deberia ir
+        #    por modelo, asi que el predio no se liquida.
+        par_modelo = uso_txt.str.strip().isin(USOS_PAR_DE_MODELO)
+        falla_d = ~tiene_ph & (cond_num == 9) & es_7c & par_modelo
+        # c) el resto en las 7 comunas, donde no cambia nada: solo se reporta
+        falla_c = ~tiene_ph & (cond_num == 9) & es_7c & ~par_modelo
 
         uso_ph = df[df['USO_LADM'].notna() & ~es_anexo &
-                    (falla_a | falla_b | falla_c)].copy()
+                    (falla_a | falla_b | falla_c | falla_d)].copy()
 
         uso_ph['MOTIVO_INCONSISTENCIA'] = np.select(
-            [falla_a[uso_ph.index], falla_b[uso_ph.index]],
-            ['USO _PH sin CONDICION 8 o 9', 'USO sin _PH con CONDICION 9'],
+            [falla_a[uso_ph.index], falla_b[uso_ph.index],
+             falla_d[uso_ph.index]],
+            ['USO _PH sin CONDICION 8 o 9', 'USO sin _PH con CONDICION 9',
+             'USO sin _PH con CONDICION 9 (su par en PH va por modelo)'],
             default='USO sin _PH con CONDICION 9 (7 comunas, no afecta el valor)')
 
         # El predio se descuenta solo si su inconsistencia cambia la tabla.
@@ -280,6 +297,12 @@ def generar_reporte_inconsistencias(
     # ------------------------------------------------------------------
     # 6️⃣ EXPORTAR EXCEL
     # ------------------------------------------------------------------
+    if not EXCEL_REPORTE:
+        print("\n   Reporte de pre-inconsistencias en Excel: APAGADO "
+              "(EXCEL_REPORTE en pre_inconsistencias.py)")
+        print(f"✅ Predios limpios: {df_limpio['ID_PREDIO'].nunique()}")
+        return df_limpio
+
     os.makedirs(output_path, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d')
     archivo = f"{output_path}reporte_pre_inconsistencias_{timestamp}.xlsx"

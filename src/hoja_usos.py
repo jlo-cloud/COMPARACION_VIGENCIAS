@@ -1,24 +1,4 @@
-"""
-Hoja USOS del consolidado de tablas de valor.
 
-Arma results/HOMOLOGACION/HOMOLOGACION_Y_TABLAS_DE_VALOR_<version>_<fecha>.xlsx:
-una copia del consolidado de la version con una hoja USOS al frente, al
-estilo de la hoja "Uso" del libro de homologacion: una fila por uso LADM,
-condicion y grupo de comunas, con un hipervinculo a la columna exacta de
-CONVENCIONALES de cada tipologia.
-
-De donde sale cada cosa:
-  - La asignacion (tabla, condicion, grupo de comunas): de la liquidacion de
-    ESTA version, es decir lo que el proceso uso de verdad. La condicion que se
-    muestra es la observada en los datos.
-  - Lo descriptivo (categoria, codigo anterior, nombre del destino, codigo de
-    homologacion, tipo, descripcion): de la hoja "Uso" del libro de
-    homologacion (input/tablas/HOMOLOGACION_Y_TABLAS_DE_VALOR_USOS_LADM_*.xlsx),
-    cruzado por USO_LADM.
-
-Como la hoja necesita la liquidacion, se arma despues del PASO 4 de main.py.
-A mano:  python src/hoja_usos.py
-"""
 import re
 import shutil
 from datetime import datetime
@@ -37,6 +17,12 @@ from tabla_construccion import (COMUNAS_7, COMUNAS_10, COMUNAS_5, COMUNAS_5N,
 RAIZ = Path(__file__).resolve().parent.parent
 CARPETA_HOMOLOGACION = RAIZ / "input" / "tablas"
 HOJA = "USOS"
+# Tono clarito por categoria en las columnas del uso (A a H).
+COLOR_CATEGORIA = {"residencial": "E8F1FB", "comercial": "FDF0E4",
+                   "industrial": "F0EAF8", "institucional": "E8F5EC",
+                   "anexos": "F2F2F2"}
+# El mismo uso escrito distinto en la base y en el libro de homologacion.
+ALIAS_USOS = {"Saunas_y_Banos_Turcos": "Saunas_y_Banios_Turcos"}
 HOJA_CONV = "CONVENCIONALES"
 CARPETA_SALIDA = RAIZ / "results" / "HOMOLOGACION"
 
@@ -60,7 +46,7 @@ EXTRA = sorted(COMUNAS_FALTANTES)
 ORDEN_GRUPO = {"7C": 0, "10C": 1, "5C": 2, "5C_N": 3, "17C": 4, "": 5}
 
 NOTAS = {
-    "MODELO": "Se liquida por modelo, no por tabla.",
+    "MODELO": "Se liquida por modelo; con el modelo apagado queda en $ 0.",
     "ESPECIALES": "Valor especial: no sale de tabla.",
     "SIN TABLA": "Sin tabla de valor asignada.",
     "T10_ANEXOS": "Anexo: la T10 no está aprobada, no se revaloriza.",
@@ -109,32 +95,235 @@ def descripcion_usos() -> pd.DataFrame:
                           u.columns[4]: "USO_LADM", u.columns[5]: "TIPO",
                           u.columns[6]: "DESCRIPCIÓN"})
     # Las celdas combinadas llegan vacias debajo de la primera.
-    u[["CATEGORÍA", "USO_LADM"]] = u[["CATEGORÍA", "USO_LADM"]].ffill()
+    u[["CATEGORÍA", "USO_LADM", "CÓDIGO HOMOLOGACIÓN"]] = u[
+        ["CATEGORÍA", "USO_LADM", "CÓDIGO HOMOLOGACIÓN"]].ffill()
     u = u[u["USO_LADM"].notna()]
     u["USO_LADM"] = u["USO_LADM"].str.strip()
+    u["CÓDIGO HOMOLOGACIÓN"] = u["CÓDIGO HOMOLOGACIÓN"].str.strip()
 
     def unir(s):
         vals = [str(x).strip() for x in s.dropna() if str(x).strip()
                 and str(x).strip().upper() != "N/A"]
         return " / ".join(dict.fromkeys(vals))
-    return (u.groupby("USO_LADM")
+    # Un mismo nombre de uso puede tener dos codigos (Coliseos: 056 y 114):
+    # cada par uso-codigo es un uso distinto.
+    return (u.groupby(["USO_LADM", "CÓDIGO HOMOLOGACIÓN"], sort=False)
              .agg({"CATEGORÍA": "first", "CÓDIGO ANTERIOR": unir,
-                   "NOMBRE DESTINO": unir, "CÓDIGO HOMOLOGACIÓN": "first",
-                   "TIPO": lambda s: unir(s), "DESCRIPCIÓN": "first"}))
+                   "NOMBRE DESTINO": unir,
+                   "TIPO": lambda s: unir(s), "DESCRIPCIÓN": "first"})
+             .reset_index())
+
+
+def motivo_no_liquidado(uso: str, cod: str, unico: bool = True) -> str:
+    """Por que un uso del libro no aparece en la liquidacion: no esta en la
+    base, solo esta en zona rural, o esta pero va a preinconsistencias."""
+    if "base" not in _CACHE_ENERO:
+        ruta = RAIZ / "output" / "todas_las_construcciones.parquet"
+        if ruta.exists():
+            b = pd.read_parquet(ruta, columns=["USO_LADM", "DESTINOCONS",
+                                               "COMUNA"])
+            b["USO_LADM"] = (b["USO_LADM"].astype(str).str.strip()
+                             .replace(ALIAS_USOS))
+            b["DEST"] = b["DESTINOCONS"].astype(str).str.zfill(3)
+            b["URBANA"] = (b["COMUNA"].astype(str).str.strip().str.zfill(2)
+                           .isin(COMUNAS_17 + EXTRA))
+            _CACHE_ENERO["base"] = b
+        else:
+            _CACHE_ENERO["base"] = None
+    b = _CACHE_ENERO["base"]
+    if b is None:
+        return "No aparece en la liquidación"
+    x = b[(b["USO_LADM"] == uso) & (b["DEST"] == cod)]
+    if x.empty and unico:            # anexos: el destino viene en 000
+        x = b[b["USO_LADM"] == uso]
+    if x.empty:
+        return "No aparece en la liquidación: no existe en la base"
+    urb = int(x["URBANA"].sum())
+    if urb == 0:
+        return (f"No aparece en la liquidación: solo en zona rural "
+                f"({len(x):,} construcciones)")
+    return (f"No aparece en la liquidación: está en la base ({urb:,} "
+            f"construcciones urbanas) pero va a preinconsistencias")
+
+
+def completar_usos(t: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """Agrega los usos del libro de homologacion que no aparecen en la
+    liquidacion, armados desde su REGLA: la tabla y la condicion de enero, los
+    grupos de comunas de hoy y el enlace al bloque. Es un manual: cada uso
+    lleva su regla aunque en la base no tenga construcciones."""
+    desc = descripcion_usos()
+    if desc.empty:
+        return t
+    presentes = set(zip(t["USO_LADM"], t["_COD"]))
+    usos_presentes = set(t["USO_LADM"])
+
+    def llave(uso, fam, g, cond9):
+        # Solo las tablas por grupo distinguen grupo y, la T1, condicion 9.
+        con_grupo = fam in TIPOLOGIAS or fam in TABLAS_17C or fam == "T12_PARQUEADEROS"
+        return (uso, fam, g if con_grupo else "*",
+                bool(cond9) if fam == "T1_RESIDENCIAL" else False)
+    opciones = {llave(u, str(tb).split(" · ")[0], g, c9)
+                for u, tb, g, c9 in zip(t["USO_LADM"], t["TABLA DE VALOR"],
+                                        t["GRUPO"], t["_COND9"])}
+    codigos_por_uso = desc.groupby("USO_LADM")["CÓDIGO HOMOLOGACIÓN"].nunique()
+    reglas = {}
+    for r in _REGLAS_ENERO():
+        reglas.setdefault(r["uso"], []).append(r)
+    nuevas, vistos = [], set()
+    for uso, cod in zip(desc["USO_LADM"], desc["CÓDIGO HOMOLOGACIÓN"]):
+        ya_esta = (uso, cod) in presentes or (uso in usos_presentes
+                                              and codigos_por_uso[uso] == 1)
+        if ya_esta and uso not in reglas:
+            continue
+        filas_uso = reglas.get(uso) or [{"fam": "SIN TABLA",
+                                         "cond": set(TODAS_COND),
+                                         "com_enero": set()}]
+        for r in filas_uso:
+            fam = r["fam"]
+            cond9 = r["cond"] == {9}
+            grupos = _grupos_nuevos(fam, {c.lstrip("0") for c in r["com_enero"]})
+            for g in grupos or [""]:
+                clave = (uso, cod, fam, g, cond9)
+                if clave in vistos or (ya_esta and llave(uso, fam, g, cond9)
+                                       in opciones):
+                    continue
+                vistos.add(clave)
+                enlaces = []
+                tabla = fam
+                if fam in TIPOLOGIAS and g:
+                    for tip in TABLA_FIJA.get(uso, TIPOLOGIAS[fam]):
+                        origen = f"{fam}_{tip}" + ("_9" if cond9 else "")
+                        enlaces.append((tip, mapa.get((origen, g))))
+                    if fam == "T1_RESIDENCIAL" and g == "10C":
+                        tabla += " · COND_9" if cond9 else " · COND_0"
+                elif fam in TABLAS_17C:
+                    enlaces.append(("17C", mapa.get((fam, "17C"))))
+                nuevas.append({"USO_LADM": uso,
+                               "CONDICIÓN": condicion_aplicacion_enero(
+                                   uso, fam, g, cond9),
+                               "TABLA DE VALOR": tabla, "GRUPO": g,
+                               "COMUNAS": comunas_de(g) if g else "",
+                               "CONSTRUCCIONES": 0, "OBSERVACIÓN": "",
+                               "_ENLACES": enlaces,
+                               "_ORDEN": ORDEN_GRUPO.get(g, 9),
+                               "_COND9": cond9, "_MOD": False, "_COD": cod})
+    if not nuevas:
+        return t
+    print(f"   Hoja {HOJA}: se agregan {len(nuevas)} filas de regla sin "
+          f"construcciones en la liquidación.")
+    return pd.concat([t, pd.DataFrame(nuevas)], ignore_index=True)
+
+
+def condicion_general(uso: str) -> str:
+    """La CONDICION (posicion 22 del numero predial) del uso, tal cual la
+    escribe la columna H de la hoja Uso de enero."""
+    if "npn" not in _CACHE_ENERO:
+        libros = [f for f in sorted(CARPETA_HOMOLOGACION.glob(
+            "HOMOLOGACION_Y_TABLAS_DE_VALOR_USOS_LADM_*.xlsx"))
+            if not f.name.startswith("~$")]
+        u = pd.read_excel(libros[-1], sheet_name="Uso", header=1,
+                          dtype=str).iloc[:, [4, 7]]
+        u.columns = ["USO", "COND"]
+        u["USO"] = u["USO"].ffill().str.strip()
+        u = u.dropna(subset=["COND"])
+        _CACHE_ENERO["npn"] = (u.groupby("USO")["COND"].first()
+                               .map(lambda x: " ".join(str(x).split())))
+    return _CACHE_ENERO["npn"].get(uso, "")
+
+
+def condicion_aplicacion_enero(uso, fam, grupo, cond9) -> str:
+    """La CONDICION APLICACION TABLA de enero para esta fila: la regla del
+    mismo uso y tabla en el grupo de comunas que le corresponde (7C = las
+    '3 y 22' de enero; 10C, 5C y 5C_N = las '1,9,10,11 y 12')."""
+    viejas = ({"03", "22"} if grupo == "7C" else
+              {"01", "09", "10", "11", "12"} if grupo in ("10C", "5C", "5C_N")
+              else None)
+    if (uso, grupo) in CORRECCIONES_CONDICION:
+        return CORRECCIONES_CONDICION[(uso, grupo)]
+    # Usos de modelo: la condicion 9 va por MODELO y la 8 por su tabla.
+    try:
+        from comparacion_vigencia import CONFIG as CONFIG_VIG
+        por_modelo = CONFIG_VIG.get("usos_por_modelo", {})
+    except Exception:                                    # pragma: no cover
+        por_modelo = {}
+    if uso in por_modelo and fam != "MODELO":
+        return str(por_modelo[uso])
+    rs = [r for r in _REGLAS_ENERO() if r["uso"] == uso and r["fam"] == fam]
+    if not rs:
+        return ""
+    sel = [r for r in rs if viejas is None or (r["com_enero"] & viejas)] or rs
+    if fam == "T1_RESIDENCIAL" and grupo == "10C" and len(sel) > 1:
+        por_cond = [r for r in sel if r["cond"] != "RESTO" and
+                    ((9 in r["cond"]) == cond9) and
+                    (not cond9 or r["cond"] == {9})]
+        sel = por_cond or [r for r in sel if r["cond"] == "RESTO"] or sel
+    # El texto de enero tal cual; vacio si enero lo deja vacio.
+    return "; ".join(dict.fromkeys(r["texto_condap"] for r in sel
+                                   if r["texto_condap"]))
+
+
+_CACHE_ENERO = {}
+
+# Correcciones a la CONDICION APLICACION TABLA de enero. En las 7 comunas la
+# T1 no distingue por condicion: enero escribia "Condicion del 1 al 9" y
+# "Condiciones 1 a 9", que dejaban por fuera la condicion 0.
+CORRECCIONES_CONDICION = {("Barracas", "7C"): "Todas",
+                          ("Jardin_Infantil_en_Casa", "7C"): "Todas"}
+
+
+def _REGLAS_ENERO():
+    if "r" not in _CACHE_ENERO:
+        _CACHE_ENERO["r"] = reglas_enero()
+    return _CACHE_ENERO["r"]
+
+
+def condicion_regla(uso, base, grupo, cond9, mod, por_modelo, reglas_txt) -> str:
+    """La condicion juridica que dice la regla para esta fila. Lo que el
+    codigo decide por condicion va primero; lo demas, como lo escribe la hoja
+    Uso del libro de homologacion; sin regla escrita, 'Todas'."""
+    if base == "MODELO" or mod:
+        return "9"
+    try:
+        from pre_inconsistencias import USOS_PAR_DE_MODELO
+    except Exception:                                    # pragma: no cover
+        USOS_PAR_DE_MODELO = set()
+    if uso in USOS_PAR_DE_MODELO:
+        return "Diferente de 9"
+    if uso in por_modelo:
+        return str(por_modelo[uso])                      # la que va por tabla
+    if base == "T1_RESIDENCIAL" and grupo == "10C":
+        return "9" if cond9 else "Diferente de 9"
+    if base == "T1_RESIDENCIAL":                         # 7C: una sola hoja
+        return "Todas"
+    textos = [t for t in reglas_txt.get((uso, base), [])
+              if t and t.lower() not in ("nan", "none")]
+    if textos:
+        return "; ".join(dict.fromkeys(" ".join(t.split()) for t in textos))
+    return "Todas"
 
 
 def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
     """Una fila por uso, tabla, grupo de comunas y condicion (9 o no 9)."""
-    d = liq[["USO_LADM", "CONDICION", "COMUNA", "TABLA_ORIGEN"]].copy()
+    cols = [c for c in ("USO_LADM", "CONDICION", "COMUNA", "TABLA_ORIGEN",
+                        "DESTINOCONS", "DESTANEX") if c in liq.columns]
+    d = liq[cols].copy()
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     d = d[d["COMUNA"].isin(COMUNAS_17 + EXTRA)]           # sin rurales
+    dest = (d["DESTINOCONS"].astype(str).str.strip().str.zfill(3)
+            if "DESTINOCONS" in d else pd.Series("", index=d.index))
+    anex = (d["DESTANEX"].astype(str).str.strip().str.zfill(3)
+            if "DESTANEX" in d else pd.Series("", index=d.index))
+    d["_COD"] = dest.where(~dest.isin(["000", "nan", "<NA>", "None"]), anex)
     d["TABLA_ORIGEN"] = d["TABLA_ORIGEN"].astype(str)
-    d["USO_LADM"] = d["USO_LADM"].astype(str).str.strip()
+    d["USO_LADM"] = d["USO_LADM"].astype(str).str.strip().replace(ALIAS_USOS)
     d["CONDICION"] = d["CONDICION"].astype(str)
     d["BASE"] = d["TABLA_ORIGEN"].map(familia)
     d["COND9"] = d["TABLA_ORIGEN"].str.endswith("_9")
+    # Garajes, parqueaderos y depositos (T12) se asignan solo por destino: van
+    # en las 17 comunas, como las tablas de bloque unico.
     d["GRUPO"] = [grupo_de(b, c) if b in TIPOLOGIAS
-                  else ("17C" if b in TABLAS_17C else "")
+                  else ("17C" if b in TABLAS_17C or b == "T12_PARQUEADEROS"
+                        else "")
                   for b, c in zip(d["BASE"], d["COMUNA"])]
 
     try:
@@ -148,11 +337,15 @@ def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
     d["MOD"] = [u in por_modelo and c != str(por_modelo[u])
                 for u, c in zip(d["USO_LADM"], d["CONDICION"])]
 
+    # La condicion que dice la REGLA (no la observada en los datos).
+    reglas_txt = {}
+    for r in reglas_enero():
+        reglas_txt.setdefault((r["uso"], r["fam"]), []).append(r["texto_cond"])
+
     filas = []
     for (uso, base, grupo, cond9, mod), s in d.groupby(
             ["USO_LADM", "BASE", "GRUPO", "COND9", "MOD"], sort=False):
-        conds = sorted(set(s["CONDICION"]), key=lambda x: (len(x), x))
-        condicion = ", ".join(conds)
+        condicion = condicion_aplicacion_enero(uso, base, grupo, cond9)
 
         enlaces = []                                     # (texto, columna)
         if base in TIPOLOGIAS:
@@ -182,18 +375,20 @@ def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
             nota = f"{nota} {extra}".strip()
         if uso in TABLA_FIJA:
             nota = f"Tabla fija {base}_{TABLA_FIJA[uso][0]} en todas las comunas."
-        if mod:
-            hay_columna = any(c for _, c in enlaces)
-            tabla = (f"MODELO (apagado) → se liquida con {tabla}" if hay_columna
-                     else f"MODELO (apagado) → {tabla} no está en el "
-                          f"consolidado: queda en $ 0")
+        if base == "MODELO":
+            tabla, enlaces = "MODELO", []                # sin hipervinculo
+        elif mod:
+            # Uso de modelo pero fuera de las comunas del modelo: va por tabla
+            # en la liquidacion, y la comparacion de vigencias lo excluye.
+            tabla = f"{tabla} · fuera de las comunas del modelo (en la app se excluye)"
 
-        filas.append({"USO_LADM": uso, "CONDICIÓN (observada)": condicion,
+        filas.append({"USO_LADM": uso, "CONDICIÓN": condicion,
                       "TABLA DE VALOR": tabla, "GRUPO": grupo,
                       "COMUNAS": comunas_de(grupo),
                       "CONSTRUCCIONES": len(s), "OBSERVACIÓN": nota,
                       "_ENLACES": enlaces, "_ORDEN": ORDEN_GRUPO.get(grupo, 9),
-                      "_COND9": cond9, "_MOD": mod})
+                      "_COND9": cond9, "_MOD": mod,
+                      "_COD": s["_COD"].mode().iat[0] if len(s) else ""})
     return pd.DataFrame(filas)
 
 
@@ -220,23 +415,34 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
         from comparacion_vigencia import CONFIG as CONFIG_VIG
         liq = pd.read_parquet(CONFIG_VIG["parquet_liquidacion"],
                               columns=["USO_LADM", "CONDICION", "COMUNA",
-                                       "TABLA_ORIGEN"])
+                                       "TABLA_ORIGEN", "DESTINOCONS",
+                                       "DESTANEX"])
     from comparacion_vigencia import _mapa_tablas_valor
     mapa = _mapa_tablas_valor(str(ruta))
 
     t = filas_usos(liq, mapa)
     revisar_reglas(t, mapa)
+    t = completar_usos(t, mapa)
     dif_enero = comparar_con_enero(liq, mapa)
     if not dif_enero.empty:
         print(f"\n   REVISAR LAS REGLAS: {len(dif_enero)} diferencia(s) con la hoja "
-              f"Uso de enero; el detalle va en la hoja {HOJA_REVISAR}.")
+              f"Uso de enero:")
         for f in dif_enero.head(15).itertuples(index=False):
             print(f"     - {f.USO_LADM}: {f.DIFERENCIA.lower()} (enero "
                   f"{f[3] or '-'}, liquidación {f[4]}; {f.CONSTRUCCIONES:,} "
                   f"construcciones)")
     desc = descripcion_usos()
     if not desc.empty:
-        t = t.merge(desc, left_on="USO_LADM", right_index=True, how="left")
+        por_par = desc.rename(columns={"CÓDIGO HOMOLOGACIÓN": "_COD"})
+        t = t.merge(por_par, on=["USO_LADM", "_COD"], how="left")
+        # Si el codigo observado no esta en el libro, se toma el del uso.
+        por_uso = desc.drop_duplicates("USO_LADM").set_index("USO_LADM")
+        falta = t["CATEGORÍA"].isna()
+        for c in por_uso.columns:
+            destino = c if c != "CÓDIGO HOMOLOGACIÓN" else "_COD_LIBRO"
+            t.loc[falta, destino] = t.loc[falta, "USO_LADM"].map(por_uso[c])
+        t["CÓDIGO HOMOLOGACIÓN"] = t.get("_COD_LIBRO", pd.Series(index=t.index)
+                                         ).fillna(t["_COD"].where(~falta))
     for c in ["CATEGORÍA", "CÓDIGO ANTERIOR", "NOMBRE DESTINO",
               "CÓDIGO HOMOLOGACIÓN", "TIPO", "DESCRIPCIÓN"]:
         if c not in t.columns:
@@ -254,10 +460,19 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
     t = t.sort_values(["_CODIGO", "USO_LADM", "TABLA DE VALOR", "_ORDEN",
                        "_COND9"], ascending=[True, True, True, True, False])
 
+    t["CONDICIÓN GENERAL"] = t["USO_LADM"].map(condicion_general)
     columnas = ["CATEGORÍA", "CÓDIGO ANTERIOR", "NOMBRE DESTINO",
                 "CÓDIGO HOMOLOGACIÓN", "USO_LADM", "TIPO", "DESCRIPCIÓN",
-                "CONDICIÓN (observada)", "TABLA DE VALOR", "GRUPO", "COMUNAS",
-                "HIPERVÍNCULO"]
+                "CONDICIÓN GENERAL", "CONDICIÓN", "TABLA DE VALOR", "GRUPO",
+                "COMUNAS", "HIPERVÍNCULO"]
+    # Encabezados como en la hoja Uso del libro de enero.
+    titulos = {"CONDICIÓN GENERAL": "CONDICIÓN (POSICIÓN 22 NÚMERO PREDIAL "
+                                    "NACIONAL)",
+               "TABLA DE VALOR": "TABLA DE VALOR O MODELO",
+               "CONDICIÓN": "CONDICIÓN APLICACIÓN TABLA"}
+    # Las columnas del uso (A a H) se combinan sobre sus filas; el color del
+    # bloque va de la tabla en adelante.
+    n_uso = columnas.index("CONDICIÓN GENERAL") + 1
 
     wb = load_workbook(ruta)
     if HOJA in wb.sheetnames:
@@ -276,7 +491,7 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
     ws.merge_cells(start_row=1, start_column=1, end_row=1,
                    end_column=len(columnas))
     for j, nombre in enumerate(columnas, start=1):
-        c = ws.cell(2, j, nombre)
+        c = ws.cell(2, j, titulos.get(nombre, nombre))
         c.fill, c.font, c.border = azul, negrilla, borde
         c.alignment = Alignment(horizontal="center", vertical="center",
                                 wrap_text=True)
@@ -291,15 +506,18 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
                 and datos["TABLA DE VALOR"] == "T12_PARQUEADEROS"):
             bloque = bloque_t12
         fondo = PatternFill("solid", fgColor=bloque["claro"]) if bloque else None
+        tono = COLOR_CATEGORIA.get(str(datos.get("CATEGORÍA") or "").strip().lower())
+        fondo_cat = PatternFill("solid", fgColor=tono) if tono else None
         for j, nombre in enumerate(columnas, start=1):
             v = datos.get(nombre)
-            c = ws.cell(i, j, None if (v is None or pd.isna(v)) else v)
+            c = ws.cell(i, j, None if (v is None or (not isinstance(v, list)
+                                                     and pd.isna(v))) else v)
             c.border = borde
-            c.alignment = Alignment(vertical="top",
-                                    wrap_text=nombre in ("DESCRIPCIÓN",
-                                                         "NOMBRE DESTINO"))
-            if fondo is not None:
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+            if fondo is not None and j > n_uso:
                 c.fill = fondo
+            elif fondo_cat is not None and j <= n_uso:
+                c.fill = fondo_cat
         if bloque:
             c = ws.cell(i, len(columnas), f"{bloque['etiqueta']} →")
             c.hyperlink = Hyperlink(ref=c.coordinate,
@@ -311,20 +529,37 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
             c.alignment = Alignment(horizontal="center", vertical="top")
             n_links += 1
 
-    anchos = [14, 13, 30, 13, 34, 18, 46, 20, 28, 8, 34, 30]
+    # Celdas combinadas por uso (codigo + nombre), como en el libro de enero.
+    llave = list(zip(t["CÓDIGO HOMOLOGACIÓN"].astype(str), t["USO_LADM"]))
+    fila0 = 3
+    for k in range(1, len(llave) + 1):
+        if k == len(llave) or llave[k] != llave[fila0 - 3]:
+            fin = k + 2
+            if fin > fila0:
+                for j in range(1, n_uso + 1):
+                    ws.merge_cells(start_row=fila0, start_column=j,
+                                   end_row=fin, end_column=j)
+            fila0 = fin + 1
+
+    anchos = [14, 13, 30, 13, 34, 18, 46, 30, 30, 22, 8, 34, 30]
     for j, a in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(j)].width = a
     ws.row_dimensions[2].height = 32
     ws.freeze_panes = "F3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(columnas))}{len(t) + 2}"
+    n_filas = len(t)
 
-    hoja_revisar(wb, dif_enero)
+    # El manual no lleva CONTROL (se queda en el consolidado) ni la hoja de
+    # diferencias: esas se avisan en pantalla al correr el proceso.
+    for hoja in ("CONTROL", HOJA_REVISAR):
+        if hoja in wb.sheetnames:
+            del wb[hoja]
     try:
         wb.save(ruta)
     except PermissionError:
         raise RuntimeError(f"No se pudo guardar '{ruta}'. Ciérrelo en Excel y "
                            f"vuelva a ejecutar.")
-    print(f"   Homologación y tablas de valor: {ruta} (hoja {HOJA}: {len(t)} "
+    print(f"   Homologación y tablas de valor: {ruta} (hoja {HOJA}: {n_filas} "
           f"filas, {n_links} hipervínculos)")
     return str(ruta)
 
@@ -442,7 +677,8 @@ HOJA_REVISAR = "REVISAR_REGLAS"
 TODAS_COND = set(range(10))
 # Tablas que valen para las 17 comunas aunque la hoja de enero escriba solo
 # "1,3,9,10,11,12 y 22": las institucionales y las de bloque unico.
-FAMILIAS_17C = set(TABLAS_17C) | {"T7_INSTITUCIONAL_SER", "T8_INSTITUCIONAL_IG"}
+FAMILIAS_17C = set(TABLAS_17C) | {"T7_INSTITUCIONAL_SER", "T8_INSTITUCIONAL_IG",
+                                   "T12_PARQUEADEROS"}
 
 
 def _cond_enero(texto):
@@ -488,9 +724,13 @@ def reglas_enero() -> list:
             cond, texto_cond = _cond_enero(r["COND"]), r["COND"]
         com = ({x.zfill(2) for x in re.findall(r"\d+", str(r["COMUNA"]))}
                if str(r["COMUNA"]) != "nan" else None)
+        com_enero = set(com) if com else set()
         if fam in FAMILIAS_17C:
             com = set(COMUNAS_17)
-        reglas.append({"uso": r["USO"], "fam": fam,
+        condap = str(r["CONDAP"]).strip()
+        reglas.append({"uso": r["USO"], "fam": fam, "com_enero": com_enero,
+                       "texto_condap": "" if condap.lower() == "nan" else condap,
+                       "texto_general": " ".join(str(r["COND"]).split()),
                        "cond": cond if cond is not None else set(TODAS_COND),
                        "com": com, "texto_cond": str(texto_cond).strip(),
                        "texto_com": "17 comunas" if fam in FAMILIAS_17C
@@ -516,7 +756,7 @@ def comparar_con_enero(liq: pd.DataFrame,
     d = liq[["USO_LADM", "CONDICION", "COMUNA", "TABLA_ORIGEN"]].copy()
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     d = d[d["COMUNA"].isin(COMUNAS_17)]
-    d["USO_LADM"] = d["USO_LADM"].astype(str).str.strip()
+    d["USO_LADM"] = d["USO_LADM"].astype(str).str.strip().replace(ALIAS_USOS)
     d["C"] = pd.to_numeric(d["CONDICION"], errors="coerce").fillna(-1).astype(int)
     d["FAM"] = d["TABLA_ORIGEN"].astype(str).map(familia)
     g = d.groupby(["USO_LADM", "COMUNA", "C", "FAM"]).size().reset_index(name="N")
@@ -544,10 +784,10 @@ def comparar_con_enero(liq: pd.DataFrame,
             # Va por modelo, pero el modelo esta apagado.
             en_consolidado = o["FAM"] in {familia(tb) for tb, _ in (mapa or {})}
             filas.append((o["USO_LADM"],
-                          "Modelo apagado: en la liquidación toma tabla; en la "
-                          "app se excluye" if en_consolidado else
-                          "Modelo apagado: la tabla no está en el consolidado, "
-                          "queda en $ 0; en la app se excluye",
+                          "Va por modelo y la liquidación le pone tabla"
+                          if en_consolidado else
+                          "Va por modelo y la liquidación le pone una tabla "
+                          "que no está en el consolidado",
                           "; ".join(sorted({r["texto_cond"] for r in aplica})),
                           "MODELO", o["FAM"], o["COMUNA"], o["C"], o["N"]))
         elif o["FAM"] not in {r["fam"] for r in aplica}:
@@ -607,6 +847,225 @@ def hoja_revisar(wb, dif: pd.DataFrame) -> None:
     volver = ws.cell(1, len(dif.columns) + 2, "← Volver a USOS")
     volver.hyperlink = Hyperlink(ref=volver.coordinate, location=f"'{HOJA}'!A1")
     volver.font = Font(bold=True, color="0563C1", underline="single")
+
+
+HOJA_CONDICION = "CONDICIÓN Y MODELO"
+
+
+def hoja_condicion_modelo(wb) -> None:
+    """Las reglas de condicion juridica y modelo, escritas en una hoja: que va
+    por modelo, que va por tabla y que va a preinconsistencias."""
+    try:
+        from pre_inconsistencias import USOS_PAR_DE_MODELO
+    except Exception:                                    # pragma: no cover
+        USOS_PAR_DE_MODELO = set()
+    if HOJA_CONDICION in wb.sheetnames:
+        del wb[HOJA_CONDICION]
+    ws = wb.create_sheet(HOJA_CONDICION, 1)
+    color = "1D3557"
+    borde = Border(*(Side(style="thin", color="B7C9D6"),) * 4)
+
+    def banda(fila, txt):
+        c = ws.cell(fila, 1, txt)
+        ws.merge_cells(start_row=fila, start_column=1, end_row=fila, end_column=4)
+        c.fill = PatternFill("solid", fgColor=color)
+        c.font = Font(bold=True, color="FFFFFF", size=12)
+        c.alignment = Alignment(vertical="center", indent=1)
+        ws.row_dimensions[fila].height = 24
+
+    def tabla(fila, encabezados, filas, tonos=None):
+        for j, n in enumerate(encabezados, start=1):
+            c = ws.cell(fila, j, n)
+            c.fill = PatternFill("solid", fgColor="83CAEB")
+            c.font = Font(bold=True, color="0F1F33")
+            c.border = borde
+            c.alignment = Alignment(horizontal="center", vertical="center",
+                                    wrap_text=True)
+        for i, valores in enumerate(filas, start=fila + 1):
+            for j, v in enumerate(valores, start=1):
+                c = ws.cell(i, j, v)
+                c.border = borde
+                c.alignment = Alignment(vertical="top", wrap_text=True)
+                if tonos and tonos[i - fila - 1]:
+                    c.fill = PatternFill("solid", fgColor=tonos[i - fila - 1])
+            ws.row_dimensions[i].height = 45
+        return fila + len(filas) + 2
+
+    ws.cell(1, 1, "CONDICIÓN JURÍDICA Y MODELO · cómo se decide si una "
+                  "construcción va por modelo, por tabla o no se liquida"
+            ).font = Font(bold=True, size=13, color="0F1F33")
+    ws.merge_cells("A1:D1")
+    volver = ws.cell(1, 6, "← Volver a USOS")
+    volver.hyperlink = Hyperlink(ref=volver.coordinate, location=f"'{HOJA}'!A1")
+    volver.font = Font(bold=True, color="0563C1", underline="single")
+    ws.cell(2, 1, "La condición jurídica es la posición 22 del número predial: "
+                  "8 y 9 son propiedad horizontal (PH).").font = Font(
+        italic=True, color="4A5565")
+    ws.merge_cells("A2:D2")
+
+    f = 4
+    banda(f, "1. Usos que van por modelo")
+    f = tabla(f + 1, ["USO (CÓDIGO)", "CONDICIÓN", "SE LIQUIDA CON", "NOTA"], [
+        ["Apartamentos_4_y_mas_pisos_en_PH (001)", "9", "MODELO",
+         "Mientras el modelo esté apagado queda en $ 0: no se reemplaza con tabla."],
+        ["Apartamentos_4_y_mas_pisos_en_PH (001)", "8", "T1_RESIDENCIAL", "Por tabla."],
+        ["Comercio_en_PH (028)", "9", "MODELO",
+         "Mientras el modelo esté apagado queda en $ 0: no se reemplaza con tabla."],
+        ["Comercio_en_PH (028)", "8", "T3_COMERCIAL", "Por tabla."],
+        ["Oficinas_Consultorios_en_PH (034)", "9", "MODELO",
+         "Mientras el modelo esté apagado queda en $ 0: no se reemplaza con tabla."],
+        ["Oficinas_Consultorios_en_PH (034)", "8", "T7_INSTITUCIONAL_SER",
+         "Por tabla (la T7 aún no viene en el consolidado)."],
+    ], ["E9EEF5", None, "E9EEF5", None, "E9EEF5", None])
+    ws.cell(f - 1, 1, "Aplica en todas las comunas. En la comparación de "
+                      "vigencias (la app) solo entra la condición 8.").font = Font(
+        italic=True, color="4A5565")
+    ws.merge_cells(start_row=f - 1, start_column=1, end_row=f - 1, end_column=4)
+
+    f += 1
+    banda(f, "2. Uso y condición que no coinciden (preinconsistencias)")
+    par = ", ".join(sorted(USOS_PAR_DE_MODELO)) or "—"
+    f = tabla(f + 1, ["CASO", "COMUNAS", "QUÉ PASA", "MOTIVO EN EL REPORTE"], [
+        ["Uso de PH (nombre termina en _PH) en un predio que no está en "
+         "condición 8 ni 9", "Todas", "Se reporta y el predio NO se liquida",
+         "USO _PH sin CONDICION 8 o 9"],
+        ["Uso de no PH en condición 9", "10 comunas", "Se reporta y el predio NO "
+         "se liquida (la condición 9 lo mandaría a la tabla de PH)",
+         "USO sin _PH con CONDICION 9"],
+        [f"Uso de no PH cuyo par en PH va por modelo ({par}) en condición 9",
+         "7 comunas", "Se reporta y el predio NO se liquida: en PH debería ir "
+         "por modelo", "USO sin _PH con CONDICION 9 (su par en PH va por modelo)"],
+        ["Cualquier otro uso de no PH en condición 9 (depósitos, garajes, "
+         "vivienda hasta 3 pisos, pensiones, institucionales…)", "7 comunas",
+         "Se reporta pero SÍ se liquida: en esas comunas la tabla no cambia con "
+         "la condición", "USO sin _PH con CONDICION 9 (7 comunas, no afecta el valor)"],
+    ], ["FCE4D6", "FCE4D6", "FCE4D6", None])
+    ws.cell(f - 1, 1, "El detalle de cada caso está en "
+                      "output/Pre_inconsistencias/reporte_pre_inconsistencias_"
+                      "<fecha>.xlsx, hoja USO_INCONSISTENTE.").font = Font(
+        italic=True, color="4A5565")
+    ws.merge_cells(start_row=f - 1, start_column=1, end_row=f - 1, end_column=4)
+
+    for col, w in zip("ABCDEF", [46, 16, 46, 52, 4, 18]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A3"
+
+
+HOJA_USO_ENERO = "Uso"
+GRUPOS_VIEJOS_5 = {"1", "9", "10", "11", "12"}       # el '5C' de enero
+GRUPOS_VIEJOS_2 = {"3", "22"}                         # el '2C' de enero
+FAMILIAS_TODAS = (set(TABLAS_17C) | {"T7_INSTITUCIONAL_SER", "T8_INSTITUCIONAL_IG",
+                                     "T12_PARQUEADEROS", "MODELO"})
+
+
+def _grupos_nuevos(fam: str, viejas: set) -> list:
+    """Los grupos de comunas de hoy para una fila de enero."""
+    if fam in FAMILIAS_TODAS:
+        return ["17C"]
+    if fam in TIPOLOGIAS or fam == "T10_ANEXOS":
+        grupos = []
+        if viejas & GRUPOS_VIEJOS_5:
+            grupos += ["5C", "5C_N"] if fam in POR_5C else ["10C"]
+        if viejas & GRUPOS_VIEJOS_2:
+            grupos.append("7C")
+        return grupos
+    return []
+
+
+def hoja_usos_enero(wb, bloques: dict, bloque_t12: dict | None) -> tuple:
+    """La hoja Uso del libro de homologacion de enero, TAL CUAL (filas, textos,
+    celdas combinadas y formato). Solo cambian la COMUNA, con los grupos de
+    hoy, y el HIPERVINCULO, al bloque de la tabla en el consolidado."""
+    from copy import copy
+    libros = [f for f in sorted(CARPETA_HOMOLOGACION.glob(
+        "HOMOLOGACION_Y_TABLAS_DE_VALOR_USOS_LADM_*.xlsx"))
+        if not f.name.startswith("~$")]
+    if not libros:
+        raise RuntimeError("No esta el libro de homologacion en input/tablas.")
+    en = load_workbook(libros[-1])[HOJA_USO_ENERO]
+
+    if HOJA in wb.sheetnames:
+        del wb[HOJA]
+    ws = wb.create_sheet(HOJA, 0)
+
+    # Hasta la ultima fila con datos en A:M; N en adelante enlazaba a hojas
+    # del libro de enero que aqui no existen.
+    ultima = max(c.row for fila in en.iter_rows(max_col=13) for c in fila
+                 if c.value not in (None, ""))
+    for fila in en.iter_rows(min_row=1, max_row=ultima, max_col=13):
+        for c in fila:
+            n = ws.cell(c.row, c.column, c.value)
+            if c.has_style:
+                n.font, n.fill, n.border = copy(c.font), copy(c.fill), copy(c.border)
+                n.alignment, n.number_format = copy(c.alignment), c.number_format
+    for m in en.merged_cells.ranges:
+        if m.max_col <= 13 and m.max_row <= ultima:
+            ws.merge_cells(str(m))
+    for letra, dim in en.column_dimensions.items():
+        if dim.width and letra in "ABCDEFGHIJKLM":
+            ws.column_dimensions[letra].width = dim.width
+    for r in range(1, ultima + 1):
+        if en.row_dimensions[r].height:
+            ws.row_dimensions[r].height = en.row_dimensions[r].height
+
+    # Valor efectivo de cada celda: en las combinadas, el de su esquina.
+    esquina = {}
+    for m in en.merged_cells.ranges:
+        for r in range(m.min_row, m.max_row + 1):
+            for col in range(m.min_col, m.max_col + 1):
+                esquina[(r, col)] = (m.min_row, m.min_col)
+
+    def valor(r, col):
+        rr, cc = esquina.get((r, col), (r, col))
+        v = en.cell(rr, cc).value
+        return "" if v is None else str(v).strip()
+
+    def es_esquina(r, col):
+        return esquina.get((r, col), (r, col)) == (r, col)
+
+    K, L = 11, 12
+    n_links = 0
+    for r in range(3, ultima + 1):
+        tabla, viejas = valor(r, 9), valor(r, K)
+        if not tabla or not es_esquina(r, K):
+            continue
+        fam = "MODELO" if tabla.upper().startswith("MODELO") else familia(tabla)
+        grupos = _grupos_nuevos(fam, set(re.findall(r"\d+", viejas)))
+        if grupos:
+            ws.cell(r, K).value = " · ".join(f"{g}: {comunas_de(g)}"
+                                             for g in grupos)
+        # El bloque del consolidado (o la hoja T12) al que lleva la fila.
+        bloque = None
+        if fam == "T12_PARQUEADEROS":
+            bloque = bloque_t12
+        elif fam in TABLAS_17C:
+            bloque = bloques.get(f"{fam}_17C")
+        elif fam in TIPOLOGIAS and grupos:
+            g = grupos[0]
+            if fam == "T1_RESIDENCIAL" and g == "10C":
+                cond = valor(r, 10).lower()
+                g = ("10C_COND_9" if "9" in cond and "diferente" not in cond
+                     and "resto" not in cond else "10C_COND_0")
+            bloque = bloques.get(f"{fam}_{g}")
+        if not es_esquina(r, L):
+            continue
+        c = ws.cell(r, L)
+        c.hyperlink = None
+        if bloque:
+            c.value = f"{bloque['etiqueta']} →"
+            c.hyperlink = Hyperlink(ref=c.coordinate,
+                                    location=f"'{bloque.get('hoja', HOJA_CONV)}'!"
+                                             f"{bloque['celda']}")
+            c.fill = PatternFill("solid", fgColor=bloque["color"])
+            c.font = Font(bold=True, underline="single", color=bloque["texto"])
+            n_links += 1
+        else:
+            c.value = None
+    ws.cell(1, 13, "Reglas de condición y modelo →").hyperlink = Hyperlink(
+        ref="M1", location=f"'{HOJA_CONDICION}'!A1")
+    ws.cell(1, 13).font = Font(bold=True, color="0563C1", underline="single")
+    ws.freeze_panes = "F3"
+    return ultima - 2, n_links
 
 
 HOJA_T12 = "T12_PARQUEADEROS"
