@@ -38,6 +38,8 @@
 /output/versiones/*/*
 !/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO.parquet
 !/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet
+# Los usos que todavia no tienen tabla: solo los nombres.
+!/output/versiones/*/USOS_SIN_TABLA.parquet
 
 
 # Basura de Python que vive dentro de src/
