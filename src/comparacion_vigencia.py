@@ -410,13 +410,18 @@ def cargar(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
 def usos_sin_tabla(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
     """Los usos que todavia no tienen tabla asignada (TABLA_ORIGEN SIN TABLA).
     Solo los nombres: va a la app como recordatorio."""
-    cols = ["DESTINOCONS", "USO_LADM", "TABLA_ORIGEN"]
+    cols = ["DESTINOCONS", "DESTANEX", "USO_LADM", "TABLA_ORIGEN"]
     if df_liq is not None:
         t = df_liq[cols]
     else:
         t = pd.read_parquet(CONFIG["parquet_liquidacion"], columns=cols)
-    return (t.loc[t["TABLA_ORIGEN"].eq("SIN TABLA"), ["DESTINOCONS", "USO_LADM"]]
-            .drop_duplicates().sort_values("DESTINOCONS", ignore_index=True))
+    t = t[t["TABLA_ORIGEN"].eq("SIN TABLA")]
+    # Los anexos traen DESTINOCONS 000: su codigo es el DESTANEX.
+    anexo = t["DESTINOCONS"].astype(str).eq("000")
+    return (pd.DataFrame({"TIPO": np.where(anexo, "DESTANEX", "DESTINOCONS"),
+                          "CODIGO": np.where(anexo, t["DESTANEX"], t["DESTINOCONS"]),
+                          "USO_LADM": t["USO_LADM"]})
+            .drop_duplicates().sort_values(["TIPO", "CODIGO"], ignore_index=True))
 
 
 def grupo_comunas(d: pd.DataFrame) -> pd.Series:
