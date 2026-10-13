@@ -1806,8 +1806,7 @@ def tablas_liquidacion(df_const):
         print(f"   comunas_10 = {comunas_10}")
 
     # --- Salida a disco -----------------------------------------------------
-    # Los resumenes van a Excel (son chicos). El detalle va a CSV porque son
-    # cientos de miles de filas y escribirlas a .xlsx tarda minutos.
+    # Los resumenes van a Excel (son chicos).
     carpeta_diag = './results/LIQUIDACION_TABLAS'
     os.makedirs(carpeta_diag, exist_ok=True)
     fecha_diag = datetime.now().strftime('%Y%m%d')
@@ -1850,15 +1849,8 @@ def tablas_liquidacion(df_const):
         except Exception as e:
             print(f"\n⚠️ No se pudo escribir {ruta_diag}: {e}")
 
-    cols_diag = [c for c in ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'CONSTRUCCION_ID',
-                             'USO_LADM', 'TABLA_ORIGEN', 'METODO_LIQUIDACION', 'COMUNA',
-                             'PUNTCONS', 'AREA_CONST', 'DESTINOCONS', 'TIPOUSO',
-                             'TIPOUSO_AJUSTADO', 'ANOCONST', 'VM2', 'VALORCONS',
-                             'MOTIVO_VM2_CERO'] if c in diag.columns]
-    ruta_det = f'{carpeta_diag}/CONSTRUCCIONES_TABLA_VM2_CERO_{fecha_diag}.txt'
-    diag.loc[diag['VM2'] == 0, cols_diag].to_csv(ruta_det, sep='|', index=False,
-                                                 encoding='utf-8-sig')
-    print(f"✅ Detalle de las que quedan en 0: {ruta_det}")
+    # El detalle de las construcciones en 0 sale en post_inconsistencias
+    # (hoja VM2_CERO), no aqui.
     print("="*70)
     crono.marca("3.8 diagnostico tablas VM2=0")  # ⏱️
 
