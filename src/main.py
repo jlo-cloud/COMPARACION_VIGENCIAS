@@ -9,7 +9,6 @@ from consolidar_tablas import (consolidar_tablas, consolidado_necesita_actualiza
                                tabla_valor_vigente)
 from tabla_construccion import procesar_construcciones, cruces_const_predio
 from Liquidacion_tablas import tablas_liquidacion
-from Liquidacion_final import liquidacion_completa
 from comparacion_vigencia import comparacion_vigencia
 from perf import crono  # ⏱️ medición de tiempos
 from control_filas import control
@@ -39,7 +38,6 @@ def main(liquidar_otras=None):
         "Cruzar construcciones con predios",
         "Aplicar tablas de liquidación",
         "Guardar resultados intermedios",
-        "Liquidación completa y resultados finales",
         "Comparar VM2 liquidación vs vigencia 2026"
     ]
     
@@ -49,7 +47,6 @@ def main(liquidar_otras=None):
     
     os.makedirs('./output', exist_ok=True)
     os.makedirs('./results', exist_ok=True)
-    os.makedirs('./results/LIQUIDACION_FINAL', exist_ok=True)
 
     
     with tqdm(total=len(pasos), desc="Progreso general", ncols=100, 
@@ -159,7 +156,7 @@ def main(liquidar_otras=None):
 
 
         print(f"\n{'='*60}")
-        print(f"=== PASO 6: {pasos[6]} ===")
+        print(f"=== PASO 6: {pasos[5]} ===")
         print(f"{'='*60}")
         archivo_comparacion = None
         try:
@@ -189,33 +186,6 @@ def main(liquidar_otras=None):
                 print(f"⚠️ Los escenarios no se pudieron generar: {str(e)}")
                 print("   (la liquidación actual SÍ quedó guardada)")
 
-        #                 print(f"   - Máximo: {var_avaluo.max():.2f}%")
-                
-        #         # Estadísticas de avalúo total
-        #         if 'AVALUO_CAT_2026' in df_predio_final.columns:
-        #             avaluo_total = df_predio_final['AVALUO_CAT_2026'].sum()
-        #             print(f"\n💰 Avalúo total catastral 2026: ${avaluo_total:,.0f}")
-        #             print(f"   ({avaluo_total/1_000_000_000_000:.2f} Billones)")
-                
-        #         if 'AVALPRED' in df_predio_final.columns and 'AVALPRED_2025' in df_predio_final.columns:
-        #             avaluo_2026 = df_predio_final['AVALPRED'].sum()
-        #             avaluo_2025 = df_predio_final['AVALPRED_2025'].sum()
-        #             diferencia = avaluo_2026 - avaluo_2025
-        #             print(f"\n📊 Comparación con 2025:")
-        #             print(f"   - Avalúo 2025: ${avaluo_2025:,.0f}")
-        #             print(f"   - Avalúo 2026: ${avaluo_2026:,.0f}")
-        #             print(f"   - Diferencia: ${diferencia:,.0f} ({diferencia/1_000_000_000_000:.2f} Billones)")
-        #             if avaluo_2025 > 0:
-        #                 variacion_porcentual = ((avaluo_2026 - avaluo_2025) / avaluo_2025) * 100
-        #                 print(f"   - Variación: {variacion_porcentual:.2f}%")
-        #     else:
-        #         print("⚠️ La liquidación completa no retornó resultados")
-            
-        #     pbar.update(1)
-        # except Exception as e:
-        #     print(f"❌ Error en liquidación completa: {str(e)}")
-        #     raise
-        
     # ============================================================
     # RESUMEN FINAL
     # ============================================================
@@ -230,10 +200,8 @@ def main(liquidar_otras=None):
     crono.resumen()  # ⏱️ desglose por paso y sub-bloque
     control.resumen()
     # Lo que se anuncia sale de LO QUE QUEDO EN DISCO, no de una lista escrita
-    # a mano. Antes se nombraban REVISION_LIQUIDACION_<fecha>.xlsx y
-    # LIQUIDACION_FINAL/CONSTRUCCIONES_<fecha>.txt, que los genera el PASO 5
-    # -hoy comentado-, asi que el resumen mandaba a buscar dos archivos que no
-    # existian. Recorriendo las carpetas de salida y filtrando por fecha de
+    # a mano: una lista fija se desactualiza cuando se prende o apaga un
+    # paso. Recorriendo las carpetas de salida y filtrando por fecha de
     # modificacion se imprime lo que ESTA corrida escribio, y la lista no se
     # puede volver a desactualizar cuando se prenda o apague un paso.
     carpetas_salida = [
@@ -241,7 +209,6 @@ def main(liquidar_otras=None):
         './output',                         # parquets y reportes
         './results/LIQUIDACION_TABLAS',     # diagnosticos de tabla
         './results/COMPARACION_VIGENCIA',   # entregable de la comparacion
-        './results/LIQUIDACION_FINAL',      # PASO 5, cuando se reactive
     ]
     generados = []
     for carpeta in carpetas_salida:

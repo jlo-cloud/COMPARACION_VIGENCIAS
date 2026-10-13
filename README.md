@@ -112,9 +112,5 @@ lleve ID de predio ni número predial.
 
 ## Código que no se usa hoy
 
-- `Liquidacion_final.py` y `liquidar_avaluo_2026.py`: la preliquidación por
-  predio del ejercicio anterior (aprobados y no aprobados). Está apagada en el
-  main; habría que actualizarla a las vigencias de este año antes de volver a
-  usarla.
-- `post_inconsistencias.py` y `uso_principal_terr.py`: solo los usa
-  `Liquidacion_final.py`.
+- `post_inconsistencias.py`: el reporte de las construcciones con VM2 en 0
+  (hoja `VM2_CERO`). No lo llama el main.
