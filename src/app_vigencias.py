@@ -1655,7 +1655,7 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
     ruta_sin_tabla = ruta_version(sel_versiones[-1], NOMBRE_SIN_TABLA)
     if ruta_sin_tabla.exists():
         sin_tabla = pd.read_parquet(ruta_sin_tabla)
-        st.markdown("\n".join(f"- `{f.USO_LADM}` ({f.DESTINOCONS})"
+        st.markdown("\n".join(f"- `{f.USO_LADM}` ({f.TIPO} {f.CODIGO})"
                               for f in sin_tabla.itertuples())
                     or "Todos los usos tienen tabla.")
     else:
