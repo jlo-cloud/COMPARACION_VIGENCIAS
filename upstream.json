@@ -1,0 +1,20 @@
+{
+  "_comentario": "Fuente de las tablas de valor y de los modelos. Este repositorio NUNCA escribe en ella: solo trae las rutas de 'importar' con python src/sincronizar_upstream.py. Ver docs/UPSTREAM.md.",
+  "remoto": "upstream",
+  "url": "https://github.com/jlo-cloud/COMPARACION_VIGENCIAS.git",
+  "rama": "main",
+  "version_tablas": "V1",
+  "importar": {
+    "tablas": [
+      "input/tablas/input/*/Consolidado_*.xlsx",
+      "input/tablas/output/Tablas_Valor_Consolidado_*.xlsx",
+      "input/tablas/HOMOLOGACION_Y_TABLAS_DE_VALOR_USOS_LADM_*.xlsx",
+      "input/Reglas.xlsx"
+    ],
+    "modelos": [
+      "Modelos/models/*.pkl",
+      "Modelos/models_2024/*.pkl"
+    ]
+  },
+  "codigo_a_vigilar": ["src/"]
+}

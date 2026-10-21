@@ -1,0 +1,61 @@
+# =====================================================================
+# Este repositorio guarda el CODIGO de liquidacion, no los datos.
+#
+# La carpeta de trabajo pesa mas de 1 GB entre insumos catastrales,
+# parquets intermedios y reportes. Nada de eso entra aqui: son datos de
+# predios, cambian en cada corrida y GitHub no acepta archivos de ese
+# tamanio. Quien clone este repo necesita que le pasen los insumos por
+# otra via.
+#
+# Se ignora todo por defecto y se vuelve a incluir solo lo que hace falta
+# para leer y correr el codigo. Para agregar algo mas, otra linea con "!".
+# =====================================================================
+
+/*
+
+!/.gitignore
+!/README.md
+!/INSUMOS.md
+!/requirements.txt
+!/requirements-build.txt
+!/build_exe.ps1
+!/run_dev.ps1
+!/LiquidadorCatastral.spec
+!/tests
+!/tests/*.py
+!/src
+!/docs
+!/docs/*.md
+!/ejemplos
+!/ejemplos/*.json
+!/upstream.json
+!/UPSTREAM.lock.json
+
+# Datos y salidas: fuera, con dos excepciones.
+/input/
+/output/
+/results/
+/data/
+
+# RAMA PUBLICA (COMPARACION_VIGENCIAS es un repositorio publico): aqui NO
+# entran modelos, tablas de valor, Reglas.xlsx, notebooks ni datos de predios.
+# Las tablas y los modelos se traen con src/sincronizar_upstream.py o del Drive
+# del proyecto (ver INSUMOS.md y docs/UPSTREAM.md).
+/Modelos/
+/notebooks/
+
+# De notebooks entra el codigo, no los datos ni el historial de la consola.
+/notebooks/*.xlsx
+/notebooks/*.csv
+/notebooks/.Rhistory
+
+# Basura de Python
+__pycache__/
+*.pyc
+*.pyo
+.venv-build/
+build/
+dist/
+
+# Bloqueos que deja Excel al abrir un archivo
+~$*

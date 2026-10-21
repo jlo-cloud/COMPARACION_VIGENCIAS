@@ -1,0 +1,23 @@
+{
+  "_comentario": "Radicados de la comuna 02 (octubre 2026): construcciones con las tablas de la actualizacion 2025 (rigen la vigencia 2026), valores del grupo de 5 comunas (01) porque la 02 no esta en 2025, ZHF y terreno de la vigencia 2025, sin lo que va por modelo. Las rutas son de ejemplo: ajustarlas a donde esten los insumos.",
+  "nombre": "RADICADOS_COMUNA_02",
+  "predios": "C:/RUTA/A/LOS/INSUMOS/RADICADOS COMUNA.xlsx",
+  "base_construcciones": "C:/RUTA/A/LOS/INSUMOS/todas_las_construcciones.parquet",
+  "reglas": "2025",
+  "comuna_reglas": "01",
+  "comuna_referencia": "03",
+  "factor_catastral": 0.7,
+  "excluir_modelo": true,
+  "etiqueta_referencia": "VIG2025",
+  "etiqueta_nueva": "TABLAS_VIG2026",
+  "zhf": {"archivo": "C:/RUTA/A/LOS/INSUMOS/export_predio_20260717.parquet", "columnas": {"zhf": "ZHF"}},
+  "terreno": {
+    "archivo": "C:/RUTA/A/LOS/INSUMOS/predio_20251209_150206.parquet",
+    "columnas": {"avaluo": "AVALPRED", "terreno": "VTER", "construccion": "VCONST", "anexos": "VANEXO", "area_terreno": "AREAPRED"}
+  },
+  "actual": {"archivo": "C:/RUTA/A/LOS/INSUMOS/20260804_export_predio_zhf_2026.parquet", "columnas": {"avaluo": "AVALPRED"}},
+  "export_construcciones": "C:/RUTA/A/LOS/INSUMOS/export_construccion.txt",
+  "export_anexos": "C:/RUTA/A/LOS/INSUMOS/export_anexo.txt",
+  "zona_control": {"archivo": "C:/RUTA/A/LOS/INSUMOS/ZHG_2024_2025.parquet", "columnas": {"zona": "ZHG_2024"}},
+  "salida": "C:/RUTA/A/LOS/INSUMOS/reliquidacion"
+}
