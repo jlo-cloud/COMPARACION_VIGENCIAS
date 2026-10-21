@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import dill
+import insumos
 import sys
 import builtins
 
@@ -61,13 +62,13 @@ REPLICAR_DUMMY_COMUNA_2024 = MODO_DUMMY_2024 == 'cero'
 
 # El valor de suelo se obtiene de ZHG_2024/ZHG_2025 porque el export de predios
 # llega vacío para las unidades PH.
-RUTA_ZHG = './input/otros/ZHG_2024_2025.parquet'
+RUTA_ZHG = insumos.ruta('zhg', './input/otros/ZHG_2024_2025.parquet')
 
 # El avaluo de la vigencia 2025, con el que se compara la familia 2024. Es la
 # vigencia que ESE ejercicio produjo: contra la 2026 no cuadra nada, porque
 # lleva un anio mas encima. Pipe, decimal con COMA, y se cruza por
 # NUMERO_PREDIAL_NACIONAL -el ID_CONSTRUCCION cambio entre vigencias-.
-RUTA_EXPORT_2025 = './input/export_liq/export_predio_2025.txt'
+RUTA_EXPORT_2025 = insumos.ruta('export_predio_2025', './input/export_liq/export_predio_2025.txt')
 _vigencia_2025 = None
 
 # =====================================================================
@@ -83,7 +84,7 @@ _vigencia_2025 = None
 # O sea: la familia 2024 tiene que leer el export de 2025 y la 2025 el de 2026.
 # Con el export de las tablas, casi la mitad de las construcciones de 2024
 # entraria al modelo con una ZHF que ese modelo nunca vio.
-RUTA_EXPORT_2026 = './input/export_liq/export_predio_20260717.parquet'
+RUTA_EXPORT_2026 = insumos.ruta('predio_anterior', './input/export_liq/export_predio_20260717.parquet')
 _vigencia_2026 = None
 
 # El VALOR_M2_SUELO sale del export de cada vigencia CUANDO ese export lo trae.
@@ -150,10 +151,10 @@ MODO_INFORME = None
 # El frame completo de construcciones que deja el pipeline. El informe se arma
 # de aqui y no de LIQUIDACION_TABLAS.parquet porque en aquel el reparto por
 # comuna ya esta hecho, y hecho a favor de 2025 en las comunas 03 y 22.
-RUTA_CONSTRUCCIONES = './output/todas_las_construcciones.parquet'
+RUTA_CONSTRUCCIONES = insumos.base_construcciones('./output/todas_las_construcciones.parquet')
 
-RUTA_MODELOS_2025 = './Modelos/models'
-RUTA_MODELOS_2024 = './Modelos/models_2024'
+RUTA_MODELOS_2025 = insumos.carpeta_modelos('models', './Modelos/models')
+RUTA_MODELOS_2024 = insumos.carpeta_modelos('models_2024', './Modelos/models_2024')
 # Los de PRODUCCION, los que nombra Modelos/models_2024/model_liq_consolidado.py.
 # El M4 es un CombinedModel con el RobustScaler adentro y se carga con
 # cloudpickle; el M4_OFICINAS_20241213.pkl que hay al lado es el estimador
@@ -455,7 +456,7 @@ def ejecutar_modelos(df_const):
     df_mod['NUM_CONST_TERR'] = pd.to_numeric(df_mod.get('NUM_CONST_TERR'),
                                              errors='coerce')
     try:
-        df_num_terr = pd.read_csv('./input/otros/modelo_uso28.txt', sep='|',
+        df_num_terr = pd.read_csv(insumos.ruta('modelo_uso28', './input/otros/modelo_uso28.txt'), sep='|',
                                   dtype={'ZHF': 'object', 'ID_PREDIO': 'object'})
         df_num_terr = (df_num_terr[['ID_PREDIO', 'NUM_CONST_TERR']]
                        .drop_duplicates('ID_PREDIO'))
@@ -1653,7 +1654,7 @@ ETIQ_VALOR = ['0 a 10 millones', '10 a 50 millones', '50 a 100 millones',
 # Se cruza por NUMERO_PREDIAL_NACIONAL, no por ID_CONSTRUCCION: ese cambio
 # entre vigencias y contra la tabla de 2025 la cobertura por ID es del 0,0%
 # contra 99,9% por predial.
-RUTA_CONSTRUCCION_2025 = './input/export_liq/export_construccion_2025.txt'
+RUTA_CONSTRUCCION_2025 = insumos.ruta('export_construccion_2025', './input/export_liq/export_construccion_2025.txt')
 COLUMNAS_CONSTRUCCION_2025 = ['PUNTCONS', 'TPISCONS', 'ANOCONST', 'ACONCONS']
 PATRON_ESCENARIO_POR_GRUPO = {
     '2024': './input/export_liq/Escenarios/export_construccion_{esc}.parquet',

@@ -18,7 +18,7 @@ from openpyxl.utils import get_column_letter
 # CONFIGURACION
 # =============================================================================
 
-RAIZ = Path(__file__).resolve().parent.parent
+RAIZ = Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
 # Version de las tablas con que se liquida: cada una tiene su carpeta en
 # input/tablas/input/ (V1, V2...) con su Consolidado_<fecha>.xlsx. Para volver a
 # una version anterior basta con cambiar esta linea, o correr con la variable

@@ -153,6 +153,12 @@ import glob
 import os
 import re
 
+import insumos
+
+# Clave de cada archivo en el manifiesto de la ventana (insumos.py).
+CLAVE_INSUMO = {"predio": "predio_zhf", "no_conv": "construcciones_noconv",
+                "conv": "construcciones_conv"}
+
 def procesar_construcciones(base_path=None):
     """
     Carga los archivos de predios y construcciones desde la carpeta input.
@@ -161,7 +167,8 @@ def procesar_construcciones(base_path=None):
     """
 
     if base_path is None:
-        base_path = Path(__file__).resolve().parent.parent / "input" / "export_liq"
+        base_path = (Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
+                     / "input" / "export_liq")
     else:
         base_path = Path(base_path)
 
@@ -214,6 +221,9 @@ def procesar_construcciones(base_path=None):
              if re.search(pattern, os.path.basename(f), re.IGNORECASE)
              and f not in usados),
             key=lambda f: os.path.basename(f), reverse=True)
+        # Con manifiesto (la ventana) manda el archivo que se eligio alli.
+        if insumos.ruta(CLAVE_INSUMO[name]):
+            matched_files = [insumos.ruta(CLAVE_INSUMO[name])]
         if matched_files:
             usados.add(matched_files[0])
 
@@ -235,6 +245,8 @@ def procesar_construcciones(base_path=None):
         (f for f in files
          if re.search(r"export_predio_\d{8}", os.path.basename(f), re.IGNORECASE)),
         key=lambda f: os.path.basename(f), reverse=True)
+    if insumos.ruta("predio_anterior"):
+        predios = [insumos.ruta("predio_anterior")]
     if dataframes["predio"] is not None and predios:
         anterior = predios[0]
         try:
@@ -320,6 +332,10 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     df_predio['CONDICION'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(int)
     df_predio['COMUNA'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[9:11].astype(str)
     df_predio = df_predio[~df_predio['COMUNA'].isin(COMUNAS_EXCLUIDAS)]
+    # Las comunas marcadas en la ventana; sin manifiesto entran todas.
+    if insumos.comunas():
+        df_predio = df_predio[df_predio['COMUNA'].isin(insumos.comunas())]
+        print(f"Comunas elegidas ({len(insumos.comunas())}): {', '.join(insumos.comunas())}")
     print("Total de predios:", df_predio.shape)
 
            
@@ -446,6 +462,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
         df_const['COMUNA'].notna() &
         ~df_const['COMUNA'].isin(COMUNAS_EXCLUIDAS)
     ]
+    if insumos.comunas():
+        df_const = df_const[df_const['COMUNA'].isin(insumos.comunas())]
 
     print("Después:", len(df_const))
     print(f"Convencionales: {df_conv.shape}, No convencionales: {df_noconv.shape}")
@@ -762,7 +780,7 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
 
    
     control.marca("llave CONSTRUCCION_ID", df_const_predio)
-    df_const_predio.to_parquet("./output/todas_las_construcciones.parquet")
+    df_const_predio.to_parquet(insumos.base_construcciones("./output/todas_las_construcciones.parquet"))
     del df_predio_usop, df_const, df_conv, df_noconv
     gc.collect()
 

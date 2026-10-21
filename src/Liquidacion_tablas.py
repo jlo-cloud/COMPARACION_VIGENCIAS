@@ -12,6 +12,7 @@ from datetime import datetime
 import gc
 
 from model_liq import ejecutar_modelos
+import insumos
 from perf import crono  # ⏱️ medición de tiempos
 from consolidar_tablas import tabla_valor_vigente
 from control_filas import control
@@ -153,7 +154,7 @@ def tablas_liquidacion(df_const):
     # en TABLA_ORIGEN = 'MODELO': una tabla no reemplaza a un modelo. Este
     # interruptor solo decide si se CORREN los modelos. En False no se corren y
     # esas construcciones quedan con VM2 = 0, pendientes de modelo.
-    LIQUIDAR_CON_MODELO = False
+    LIQUIDAR_CON_MODELO = insumos.modelos_activos(2027, False)
 
     df_const['ACONCONS'] = pd.to_numeric(df_const['ACONCONS'], errors='coerce')
 

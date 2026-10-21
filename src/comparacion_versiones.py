@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-RAIZ = Path(__file__).resolve().parent.parent
+RAIZ = Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
 CARPETA_VERSIONES = RAIZ / "output" / "versiones"
 CARPETA_SALIDA = RAIZ / "results" / "COMPARACION_VERSIONES"
 NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"

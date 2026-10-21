@@ -61,17 +61,22 @@ except Exception:  # pragma: no cover
     crono = _CronoDummy()
 
 
-RAIZ = Path(__file__).resolve().parent.parent
+RAIZ = Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
 
 
 # =====================================================================
 # CONFIGURACION
 # =====================================================================
 from consolidar_tablas import tabla_valor_vigente, VERSION_TABLAS
+import insumos
 
 # Cada version de las tablas deja sus salidas en su propia carpeta, para que la
 # app y el Excel de versiones puedan comparar unas contra otras.
 CARPETA_VERSION = RAIZ / "output" / "versiones" / VERSION_TABLAS
+# Una corrida de la ventana que no actualiza los datos de la app (por ejemplo,
+# con solo algunas comunas) deja estas salidas en su propia carpeta.
+if os.environ.get("PRELIQ_CARPETA_VERSION"):
+    CARPETA_VERSION = Path(os.environ["PRELIQ_CARPETA_VERSION"])
 
 
 CONFIG = {
@@ -108,8 +113,9 @@ CONFIG = {
     # Terreno proyectado (VTERR_COM_2027, ya comercial) para el lado de la
     # liquidacion; el catastral es ese valor x factor_comercial_terreno. El predio
     # que no esta en el insumo -PH, las 5 faltantes, rural- conserva su VTER.
-    "insumo_terreno_proyectado": str(RAIZ / "input" / "export_liq" /
-                                     "insumo_proyección_comuna_valor_terreno_20260930.parquet"),
+    "insumo_terreno_proyectado": insumos.ruta("terreno_proyectado", str(
+        RAIZ / "input" / "export_liq" /
+        "insumo_proyección_comuna_valor_terreno_20260930.parquet")),
 
     "comunas_act_2024_2025": [1, 2, 3, 4, 8, 9, 10, 11, 12, 17, 19, 22],
     "factor_comercial_act": 0.7,      # comunas actualizadas 2024-2025

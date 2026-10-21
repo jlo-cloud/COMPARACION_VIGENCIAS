@@ -12,6 +12,7 @@ from datetime import datetime
 import gc
 
 from model_liq import ejecutar_modelos
+import insumos
 from tabla_construccion import convertir_a_cero, convertir_a_float,convertir_a_string
 
 
@@ -1787,7 +1788,12 @@ def tablas_liquidacion(df_const):
 
     tabla_especiales['INTEGRAL_ESP_2026'] = 1
     
-    df_liq_modelo = ejecutar_modelos(df_const)
+    # La casilla de modelos de la ventana, en una corrida de la vigencia 2026.
+    if insumos.modelos_activos(2026, True):
+        df_liq_modelo = ejecutar_modelos(df_const)
+    else:
+        print("   Modelos apagados: lo que va por modelo queda en 0")
+        df_liq_modelo = pd.DataFrame()
     #df_liq_modelo.to_excel('./output/liquidacion_modelo.xlsx')
     print(f'COLUMNAS MODELO {len(df_liq_modelo)}')
 

@@ -1,4 +1,5 @@
 
+import os
 import re
 import shutil
 from datetime import datetime
@@ -10,11 +11,12 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.hyperlink import Hyperlink
 
+import insumos
 from consolidar_tablas import VERSION_TABLAS, tabla_valor_vigente
 from tabla_construccion import (COMUNAS_7, COMUNAS_10, COMUNAS_5, COMUNAS_5N,
                                 COMUNAS_FALTANTES)
 
-RAIZ = Path(__file__).resolve().parent.parent
+RAIZ = Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
 CARPETA_HOMOLOGACION = RAIZ / "input" / "tablas"
 HOJA = "USOS"
 # Tono clarito por categoria en las columnas del uso (A a H).
@@ -118,7 +120,7 @@ def motivo_no_liquidado(uso: str, cod: str, unico: bool = True) -> str:
     """Por que un uso del libro no aparece en la liquidacion: no esta en la
     base, solo esta en zona rural, o esta pero va a preinconsistencias."""
     if "base" not in _CACHE_ENERO:
-        ruta = RAIZ / "output" / "todas_las_construcciones.parquet"
+        ruta = Path(insumos.base_construcciones(str(RAIZ / "output" / "todas_las_construcciones.parquet")))
         if ruta.exists():
             b = pd.read_parquet(ruta, columns=["USO_LADM", "DESTINOCONS",
                                                "COMUNA"])

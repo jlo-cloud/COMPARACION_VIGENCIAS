@@ -13,11 +13,14 @@ import sys
 import numpy as np
 import pandas as pd
 
-RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RAIZ = (os.environ.get("PRELIQ_RAIZ")
+        or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if os.path.join(RAIZ, "src") not in sys.path:
     sys.path.insert(0, os.path.join(RAIZ, "src"))
 
-RUTA_BASE = os.path.join(RAIZ, "output", "todas_las_construcciones.parquet")
+import insumos  # noqa: E402
+
+RUTA_BASE = insumos.base_construcciones(os.path.join(RAIZ, "output", "todas_las_construcciones.parquet"))
 RUTA_SALIDA = os.path.join(RAIZ, "output", "ESCENARIOS.parquet")
 
 # CONSTRUCCION_ID no sirve para cruzar: se arma pegando predio, consecutivo y
@@ -146,7 +149,9 @@ def escenario_2024(base):
 
     # ejecutar_modelos devuelve SOLO las filas de MODELO: hay que pegar la
     # prediccion por llave, no reasignar el frame.
-    mod = model_liq.ejecutar_modelos(d)
+    # La casilla de modelos de la ventana, en una corrida de la vigencia 2025.
+    mod = (model_liq.ejecutar_modelos(d) if insumos.modelos_activos(2025, True)
+           else pd.DataFrame())
     if LLAVE in mod.columns and "VM2_MOD" in mod.columns:
         pred = (mod.drop_duplicates(LLAVE)
                    .assign(**{LLAVE: lambda x: x[LLAVE].astype(str)})
