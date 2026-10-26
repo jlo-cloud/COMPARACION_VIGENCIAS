@@ -32,10 +32,8 @@ reconoce cada archivo por su nombre.
 
 | Archivo | Peso | Para qué |
 |---|---|---|
-| `predio_20251209_150206.parquet` | 39,1 MB | Homologación |
-| `PREDIO_20260307.parquet` | 10,8 MB | Homologación |
-| `CAMBIO_NPN.xlsx` | 0,6 MB | Cambios de número predial nacional |
-| `modelo_uso28.txt` | 0,1 MB | Uso principal |
+| `ZHG_2024_2025.parquet` | 2,8 MB | Valor del suelo de los modelos (vigencias 2025 y 2026) |
+| `modelo_uso28.txt` | 0,1 MB | Apoyo del modelo de uso 028 |
 
 ### `input/tablas/`
 
@@ -66,19 +64,22 @@ Con todo eso en su sitio:
 python src/main.py
 ```
 
-## Solo para los escenarios 2024 y 2025
+## Vigencias 2025 y 2026 (reglas de los ejercicios 2024 y 2025)
 
-`escenarios.py` necesita además la familia de modelos 2024 completa y estos
-insumos, que hoy **no están** en la carpeta de trabajo:
+Se liquidan sobre la misma base de hoy, desde el ejecutable (`Liquidador.exe`,
+casillas de vigencias): no se necesita ningún export histórico. Con modelos
+hace falta además `ZHG_2024_2025.parquet` en `input/otros/` y los `.pkl` de
+`Modelos/`.
 
-| Archivo | Va en |
-|---|---|
-| `ZHG_2024_2025.parquet` | `input/otros/` |
-| `export_predio_2025.txt` | `input/export_liq/` |
-| `export_construccion_2025.txt` | `input/export_liq/` |
+`python src/main.py --todas` corre los mismos escenarios desde la línea de
+comandos; ahí `export_predio_2025.txt` en `input/export_liq/` es opcional:
+solo afina el modelo de apartamentos de la familia 2024.
 
-Si ya se corrió el main, `output/todas_las_construcciones.parquet` sirve de
-base y no hace falta regenerarla.
+## Liquidación 2027
+
+Además de lo de arriba, el export de predios de la liquidación 2027 de
+Sistemas (con `ID_PREDIO` y `AVALPRED`): cada predio se aprueba si el avalúo
+liquidado difiere menos de $1.000.
 
 ## Solo para la app
 

@@ -1,0 +1,22 @@
+# Las mismas versiones con que corre la preliquidacion en Python (pip freeze
+# del 2026-10-21): el .exe tiene que dar exactamente los mismos resultados.
+cloudpickle==3.1.2
+dbfread==2.0.7
+dill==0.4.0
+joblib==1.5.3
+matplotlib==3.10.8
+numpy==2.4.0
+openpyxl==3.1.5
+pandas==3.0.5
+patsy==1.0.2
+pyarrow==23.0.0
+python-dateutil==2.9.0.post0
+scikit-learn==1.5.2
+scipy==1.16.3
+statsmodels==0.14.6
+threadpoolctl==3.6.0
+tqdm==4.67.3
+tzdata==2025.3
+xgboost==2.1.2
+xlsxwriter==3.2.9
+pyinstaller==6.20.0

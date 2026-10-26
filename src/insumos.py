@@ -32,8 +32,8 @@ INSUMOS = [
     ("construcciones_noconv", "Construcciones no convencionales (anexos)", True,
      "Los anexos (T10)",
      lambda n, c: _tiene(c, "ID_PREDIO", "DESTANEX", "TIPOANEXO", "ACONANEX") and "DESTINOCONS" not in c),
-    ("predio_anterior", "Predios de la entrega anterior", True,
-     "ZHF_ANTERIOR (cambio de tipologia) y las variables de los modelos",
+    ("predio_anterior", "Predios de la entrega anterior", False,
+     "ZHF_ANTERIOR (cambio de tipologia) y la ZHF con que leen los modelos",
      lambda n, c: re.search(r"export_predio_\d{8}", n) is not None
      and _tiene(c, "ID_PREDIO", "ZHF", "NUMERO_PREDIAL_NACIONAL")),
     ("terreno_proyectado", "Terreno proyectado 2027", False,
@@ -42,21 +42,17 @@ INSUMOS = [
     ("zhg", "ZHG 2024-2025", False,
      "Valor del suelo de los modelos y de los escenarios",
      lambda n, c: _tiene(c, "ID_PREDIO", "ZHG_2024", "ZHG_2025")),
+    ("export_liquidacion", "Export de liquidacion 2027 (Sistemas)", False,
+     "Solo en una LIQUIDACION: el AVALPRED de Sistemas con que se aprueba cada predio",
+     lambda n, c: "liq" in n and _tiene(c, "ID_PREDIO", "AVALPRED")),
     ("modelo_uso28", "Apoyo del modelo de uso 028", False,
      "Solo los modelos (hoy apagados)",
      lambda n, c: _tiene(c, "ID_CONSTRUCCION", "ID_PREDIO", "NUM_CONST_TERR")),
-    ("export_predio_2025", "Export de predios 2025", False,
-     "Solo los escenarios 2024/2025",
-     lambda n, c: "2025" in n and "zhf" not in n
-     and _tiene(c, "ID_PREDIO", "AVALPRED", "VIGEPRED", "COMUNA")),
-    ("export_construccion_2025", "Export de construcciones 2025", False,
-     "Solo los escenarios 2024/2025",
-     lambda n, c: "2025" in n and _tiene(c, "ID_PREDIO", "ID_CONSTRUCCION", "DESTINOCONS", "CONSCONS")),
 ]
 ETIQUETA = {k: e for k, e, *_ in INSUMOS}
 OBLIGATORIO = {k: o for k, _, o, *_ in INSUMOS}
-# Los que necesitan los escenarios (--todas), ademas de los obligatorios.
-PARA_ESCENARIOS = ["zhg", "export_predio_2025", "export_construccion_2025"]
+# Los modelos (vigencias 2025 y 2026) necesitan ademas el valor del suelo.
+PARA_MODELOS = ["zhg"]
 # Pares que no pueden ser el mismo archivo: con la entrega anterior igual a la
 # actual, el cambio de tipologia sale en cero sin que nada avise.
 DISTINTOS = [("predio_zhf", "predio_anterior"),
@@ -83,8 +79,14 @@ def manifiesto() -> dict:
 
 
 def ruta(clave: str, por_defecto=None):
-    """El archivo que el manifiesto asigna a la clave, o la ruta de siempre."""
-    return (manifiesto().get("insumos") or {}).get(clave) or por_defecto
+    """El archivo que el manifiesto asigna a la clave. Sin manifiesto, la ruta
+    de siempre. Con manifiesto, NUNCA la de siempre: lo que no se eligio en la
+    ventana no se usa -asi no entra ningun export historico por la puerta de
+    atras-."""
+    m = manifiesto()
+    if not m:
+        return por_defecto
+    return (m.get("insumos") or {}).get(clave) or None
 
 
 def comunas():
@@ -108,16 +110,28 @@ VIGENCIAS = {
 }
 
 
-def vigencia() -> int:
-    return int(manifiesto().get("vigencia") or 2027)
+def comunas_que_valora(vigencia: int) -> list:
+    """Las comunas a las que esa vigencia les da valor. Sale de los mismos
+    motores, para no tener una segunda lista que se desincronice: 2025 y 2026
+    valoran solo las que actualizo su ejercicio (escenarios.py); 2027, las 22
+    urbanas -las tablas no traen valores para lo rural-."""
+    if vigencia == 2027:
+        return list(COMUNAS_URBANAS)
+    import escenarios
+    return sorted(escenarios.ACTUALIZO_2024 if vigencia == 2025 else escenarios.ACTUALIZO_2025)
+
+
+def vigencias() -> list:
+    """Las vigencias marcadas en la ventana."""
+    return [int(v) for v in (manifiesto().get("vigencias") or [])]
 
 
 def modelos_activos(vigencia_del_motor: int, por_defecto: bool) -> bool:
-    """Si el motor de esa vigencia corre los modelos. Lo decide la casilla de
-    la ventana, pero solo en una corrida de ESA vigencia: los escenarios que
-    acompanan a una corrida 2027 siguen como siempre."""
+    """Si el motor de esa vigencia corre los modelos. Sin manifiesto, lo de
+    siempre. Con manifiesto lo decide la casilla, y nunca en una vigencia que
+    no tiene modelos (2027)."""
     m = manifiesto()
-    if m.get("modelos") is None or vigencia() != vigencia_del_motor:
+    if not m or m.get("modelos") is None:
         return por_defecto
     if VIGENCIAS[vigencia_del_motor]["modelos"] is None:
         return False
@@ -189,12 +203,15 @@ def detectar(carpeta) -> dict:
     return salida
 
 
-def validar(asignados: dict, escenarios: bool = False, comunas_elegidas=None) -> tuple:
+def validar(asignados: dict, modelos: bool = False, comunas_elegidas=None,
+            liquidacion: bool = False) -> tuple:
     """(errores, avisos). Con errores la corrida no arranca."""
     errores, avisos = [], []
     necesarios = {k for k, o in OBLIGATORIO.items() if o}
-    if escenarios:
-        necesarios |= set(PARA_ESCENARIOS)
+    if modelos:
+        necesarios |= set(PARA_MODELOS)
+    if liquidacion:
+        necesarios.add("export_liquidacion")
     for clave, etiqueta, obligatorio, _, regla in INSUMOS:
         valor = (asignados.get(clave) or "").strip()
         if not valor:
@@ -202,6 +219,8 @@ def validar(asignados: dict, escenarios: bool = False, comunas_elegidas=None) ->
                 errores.append(f"Falta: {etiqueta}.")
             elif clave == "terreno_proyectado":
                 avisos.append(f"Sin {etiqueta}: en la comparacion cada predio conserva su VTER.")
+            elif clave == "predio_anterior":
+                avisos.append(f"Sin {etiqueta}: no hay cambio de tipologia y los modelos leen la ZHF de la vigencia.")
             continue
         p = Path(valor)
         if not p.is_file():

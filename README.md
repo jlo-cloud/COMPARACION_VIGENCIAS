@@ -19,6 +19,38 @@ La versión de las tablas de valor se elige con `VERSION_TABLAS` en
 VERSION_TABLAS=V1 python src/main.py
 ```
 
+## El ejecutable (Liquidador.exe)
+
+`dist/Liquidador/Liquidador.exe` es el mismo código con una ventana
+(`src/preliquidar_app.py`). No necesita Python: se copia la carpeta
+`dist/Liquidador` completa y se elige la carpeta del proyecto (la que tiene
+`input/` y `Modelos/`).
+
+- **Insumos:** se detectan por nombre y columnas y se pueden cambiar a mano.
+  No se usa ningún export histórico (`src/insumos.py`).
+- **Comunas** a liquidar.
+- **Vigencias** 2025, 2026 y 2027: cada una con las reglas de su ejercicio
+  sobre la base de hoy. Solo se liquida lo marcado y la salida
+  (`LIQUIDACION_VIGENCIAS.parquet`) trae las columnas `*_VIG_<vigencia>`
+  (`src/liquidar_vigencias.py`). Los modelos aplican a 2025 y 2026; 2027 no
+  tiene.
+- **Tipo de corrida:**
+  - *Preliquidación*: parquet y resumen en Excel; los avisos dejan seguir.
+  - *Liquidación* (solo 2027): además el avalúo de cada predio en formato
+    Sistemas y su aprobación contra el export de liquidación de Sistemas
+    (aprobado si la diferencia con `AVALPRED` es menor a $1.000,
+    `src/avaluo_liquidacion.py`). Cualquier aviso detiene la corrida.
+
+Cada corrida queda en `corridas/<fecha>_<tipo>_<vigencias>/` con su
+manifiesto, el log y lo que produjo. Sin la ventana, `python src/main.py`
+corre igual que siempre.
+
+Para recompilarlo (la política del equipo no deja correr `.ps1` sin firma):
+
+```
+sh empaquetado/construir.sh
+```
+
 ## Qué hace el main
 
 | Paso | Qué hace | Módulo |

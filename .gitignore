@@ -19,6 +19,10 @@
 !/requirements.txt
 !/.streamlit
 !/src
+# El empaquetado del Liquidador.exe: solo la receta (spec, script y versiones),
+# no el log ni lo que genera (dist/, build/, .venv-exe/ quedan fuera).
+!/empaquetado
+/empaquetado/*.log
 
 # Del output entra UN SOLO archivo: el recorte anonimo que lee la app.
 # El detalle completo (COMPARACION_VIGENCIA_DETALLE.parquet) lleva ID_PREDIO y

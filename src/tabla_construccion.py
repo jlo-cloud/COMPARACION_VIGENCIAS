@@ -195,20 +195,27 @@ def procesar_construcciones(base_path=None):
 
     dataframes = {k: None for k in file_patterns}
 
-    print(f"📂 Buscando archivos en: {base_path}")
-
-    files = (
-        glob.glob(str(base_path / "*.txt")) +
-        glob.glob(str(base_path / "*.parquet")) +
-        glob.glob(str(base_path / "*.csv"))
-    )
-
-    print("📂 Archivos encontrados:")
-    if files:
-        for f in files:
-            print(" -", os.path.basename(f))
+    if insumos.manifiesto():
+        # Con la ventana no se busca en la carpeta: solo los archivos elegidos.
+        files = []
+        print("📂 Insumos elegidos en la ventana:")
+        for clave, ruta in (insumos.manifiesto().get("insumos") or {}).items():
+            print(f" - {clave}: {os.path.basename(ruta)}")
     else:
-        print("⚠️ No se encontraron archivos en la carpeta.")
+        print(f"📂 Buscando archivos en: {base_path}")
+
+        files = (
+            glob.glob(str(base_path / "*.txt")) +
+            glob.glob(str(base_path / "*.parquet")) +
+            glob.glob(str(base_path / "*.csv"))
+        )
+
+        print("📂 Archivos encontrados:")
+        if files:
+            for f in files:
+                print(" -", os.path.basename(f))
+        else:
+            print("⚠️ No se encontraron archivos en la carpeta.")
 
     usados = set()
     for name, pattern in file_patterns.items():
@@ -221,9 +228,11 @@ def procesar_construcciones(base_path=None):
              if re.search(pattern, os.path.basename(f), re.IGNORECASE)
              and f not in usados),
             key=lambda f: os.path.basename(f), reverse=True)
-        # Con manifiesto (la ventana) manda el archivo que se eligio alli.
-        if insumos.ruta(CLAVE_INSUMO[name]):
-            matched_files = [insumos.ruta(CLAVE_INSUMO[name])]
+        # Con manifiesto (la ventana) manda el archivo que se eligio alli, y
+        # solo ese: no se busca nada mas en la carpeta.
+        if insumos.manifiesto():
+            elegido = insumos.ruta(CLAVE_INSUMO[name])
+            matched_files = [elegido] if elegido else []
         if matched_files:
             usados.add(matched_files[0])
 
@@ -245,8 +254,8 @@ def procesar_construcciones(base_path=None):
         (f for f in files
          if re.search(r"export_predio_\d{8}", os.path.basename(f), re.IGNORECASE)),
         key=lambda f: os.path.basename(f), reverse=True)
-    if insumos.ruta("predio_anterior"):
-        predios = [insumos.ruta("predio_anterior")]
+    if insumos.manifiesto():
+        predios = [insumos.ruta("predio_anterior")] if insumos.ruta("predio_anterior") else []
     if dataframes["predio"] is not None and predios:
         anterior = predios[0]
         try:

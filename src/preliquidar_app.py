@@ -1,12 +1,27 @@
 """
 Ventana para correr la preliquidacion sin abrir una terminal.
 
-La vigencia 2027 es el mismo main.py de siempre; la 2025 y la 2026 se
-liquidan con las reglas del ejercicio que las produjo (liquidar_vigencia.py).
+Se marcan las vigencias que se liquidan -2025, 2026 y 2027- y todas salen de
+la data ACTUAL, cada una con las reglas de su ejercicio; no se usa ningun
+export historico. Lo que no se marca no se liquida. Si 2027 esta marcada corre
+ademas el main.py de siempre (comparacion con la vigencia y datos de la app).
+La salida por vigencias (liquidar_vigencias.py) es una fila por construccion
+con las columnas de cada una terminadas en _VIG_<vigencia>.
+
 La ventana elige la carpeta del proyecto (la que tiene input/, Modelos/ y
-output/), la vigencia, que archivo es cada insumo, que comunas se liquidan,
-las tablas (version, en 2027), si se corren los modelos y con que carpeta de
-modelos; valida antes de empezar y muestra el log mientras corre.
+output/), que archivo es cada insumo, que comunas se liquidan, la version de
+las tablas 2027, si se corren los modelos (2025 y 2026; 2027 no tiene) y con
+que carpeta de modelos; valida antes de empezar y muestra el log.
+
+Tipo de corrida:
+  Preliquidacion  parquet + resumen en Excel; los avisos de la validacion
+                  (por ejemplo, comunas que una vigencia no valora) dejan seguir.
+  Liquidacion     solo la vigencia 2027. Ademas del .txt por construccion, el
+                  avaluo de cada predio (AVALUO_PREDIOS_VIG_2027.txt, formato
+                  Sistemas) y su APROBACION contra el export de liquidacion de
+                  Sistemas: aprobado si |avaluo - AVALPRED| < $1.000
+                  (avaluo_liquidacion.py). La validacion es estricta: cualquier
+                  aviso detiene.
 
 Cada corrida queda en corridas/<AAAA-MM-DD_HHMM>_<version>/ con:
   manifiesto.json   que se uso (insumos con tamano y fecha, comunas, opciones)
@@ -24,8 +39,8 @@ version de las tablas se lee al importar consolidar_tablas, y al terminar se
 libera la memoria.
 
 Uso:  python src/preliquidar_app.py
-      Preliquidacion.exe
-      Preliquidacion.exe --correr <carpeta de la corrida>
+      Liquidador.exe
+      Liquidador.exe --correr <carpeta de la corrida>
 """
 import json
 import os
@@ -84,11 +99,11 @@ def correr(carpeta: Path) -> int:
     man = json.loads(man_path.read_text(encoding="utf-8"))
     raiz = Path(man["raiz"])
     version = man["version_tablas"]
-    vigencia = int(man.get("vigencia") or 2027)
+    vigs = [int(v) for v in man["vigencias"]]
     os.environ["VERSION_TABLAS"] = version
     os.environ["PRELIQ_RAIZ"] = str(raiz)
     os.environ["PRELIQ_MANIFIESTO"] = str(man_path)
-    if vigencia != 2027 or not man["actualizar_app"]:
+    if 2027 not in vigs or not man["actualizar_app"]:
         os.environ["PRELIQ_CARPETA_VERSION"] = str(carpeta / "salidas" / "versiones" / version)
         os.environ["PRELIQ_BASE_CONSTRUCCIONES"] = str(carpeta / "salidas" / "todas_las_construcciones.parquet")
         (carpeta / "salidas").mkdir(parents=True, exist_ok=True)
@@ -99,17 +114,24 @@ def correr(carpeta: Path) -> int:
     inicio = time.time()
     estado = "ERROR"
     try:
-        if vigencia != 2027:
-            import liquidar_vigencia
-            liquidar_vigencia.correr(vigencia, carpeta / "salidas")
-        else:
+        import liquidar_vigencias
+        if 2027 in vigs:
+            # La preliquidacion de siempre: arma la base y compara con la vigencia.
             import main as preliquidacion
-            preliquidacion.main(liquidar_otras=man["escenarios"])
-        if vigencia == 2027 and man["detalle_excel"]:
-            print("\n=== Detalle en Excel ===")
-            sys.argv = ["exportar_detalle.py"]
-            import exportar_detalle
-            exportar_detalle.main()
+            preliquidacion.main(liquidar_otras=False)
+        else:
+            liquidar_vigencias.armar_base()
+        liquidar_vigencias.correr(vigs, carpeta / "salidas", man["detalle_excel"],
+                                  txt_sistemas=man.get("tipo_corrida") == "liquidacion")
+        if man.get("tipo_corrida") == "liquidacion":
+            # El avaluo de cada predio y su aprobacion contra Sistemas.
+            import avaluo_liquidacion
+            from comparacion_vigencia import CONFIG as CONFIG_VIG, terreno_proyectado
+            import insumos as _ins
+            avaluo_liquidacion.correr(CONFIG_VIG["parquet_liquidacion"], man["insumos"]["export_liquidacion"],
+                                      terreno_proyectado(), carpeta / "salidas",
+                                      ruta_predio=man["insumos"]["predio_zhf"], comunas=man.get("comunas"),
+                                      ruta_base=_ins.base_construcciones("./output/todas_las_construcciones.parquet"))
         estado = "OK"
     except BaseException:
         import traceback
@@ -147,17 +169,16 @@ def ventana():
     from tkinter.scrolledtext import ScrolledText
 
     w = tk.Tk()
-    w.title("Preliquidacion")
+    w.title("Liquidador")
     w.geometry("1050x760")
 
     raiz = tk.StringVar(value=str(raiz_por_defecto()))
     carpeta_insumos = tk.StringVar(value=str(Path(raiz.get()) / "input"))
     version = tk.StringVar()
-    escenarios = tk.BooleanVar(value=False)
     detalle = tk.BooleanVar(value=False)
+    tipo = tk.StringVar(value="Preliquidación")
     actualizar_app = tk.BooleanVar(value=True)
-    etiquetas = {v["etiqueta"]: k for k, v in insumos.VIGENCIAS.items()}
-    vigencia_txt = tk.StringVar(value=insumos.VIGENCIAS[2027]["etiqueta"])
+    marcadas = {v: tk.BooleanVar(value=(v == 2027)) for v in sorted(insumos.VIGENCIAS)}
     modelos = tk.BooleanVar(value=False)
     modelos_txt = tk.StringVar()
     carpeta_modelos = tk.StringVar(value=str(Path(raiz.get()) / "Modelos"))
@@ -219,8 +240,8 @@ def ventana():
         ttk.Button(caja, text="...", width=3, command=elegir_archivo).grid(row=i, column=2)
         ttk.Label(caja, textvariable=nota[clave], width=26, foreground="#555").grid(row=i, column=3, sticky="w", padx=4)
     caja.columnconfigure(1, weight=1)
-    ttk.Label(t1, text="* obligatorio. El ZHG se pide si se liquida con modelos o con escenarios; los exports "
-                       "2025, solo con escenarios.", foreground="#555").pack(anchor="w")
+    ttk.Label(t1, text="* obligatorio. El ZHG se pide solo con modelos y el export de liquidación de Sistemas solo en "
+                       "una Liquidación. No se usa ningún export histórico.", foreground="#555").pack(anchor="w")
 
     def detectar():
         if not Path(carpeta_insumos.get()).is_dir():
@@ -263,13 +284,21 @@ def ventana():
     op.pack(fill="x", pady=4)
     f1 = ttk.Frame(op)
     f1.pack(fill="x")
-    ttk.Label(f1, text="Vigencia:").pack(side="left")
-    ttk.Combobox(f1, textvariable=vigencia_txt, values=list(etiquetas), width=34,
-                 state="readonly").pack(side="left", padx=(4, 14))
-    ttk.Label(f1, text="Tablas:").pack(side="left")
-    combo = ttk.Combobox(f1, textvariable=version, width=6, state="readonly")
+    ttk.Label(f1, text="Tipo de corrida:").pack(side="left")
+    ttk.Combobox(f1, textvariable=tipo, values=["Preliquidación", "Liquidación"], width=15,
+                 state="readonly").pack(side="left", padx=(4, 18))
+    chk_vig = {}
+    ttk.Label(f1, text="Vigencias a liquidar:").pack(side="left")
+    for v in sorted(insumos.VIGENCIAS):
+        chk_vig[v] = ttk.Checkbutton(f1, text=insumos.VIGENCIAS[v]["etiqueta"], variable=marcadas[v],
+                                     command=lambda: al_cambiar_vigencia())
+        chk_vig[v].pack(side="left", padx=(6, 0))
+    f1b = ttk.Frame(op)
+    f1b.pack(fill="x", pady=(6, 0))
+    ttk.Label(f1b, text="Tablas 2027:").pack(side="left")
+    combo = ttk.Combobox(f1b, textvariable=version, width=6, state="readonly")
     combo.pack(side="left", padx=4)
-    ttk.Label(f1, textvariable=tablas_txt, foreground="#555").pack(side="left", padx=(4, 0))
+    ttk.Label(f1b, textvariable=tablas_txt, foreground="#555").pack(side="left", padx=(4, 0))
 
     f2 = ttk.Frame(op)
     f2.pack(fill="x", pady=(6, 0))
@@ -287,39 +316,48 @@ def ventana():
 
     f3 = ttk.Frame(op)
     f3.pack(fill="x", pady=(6, 0))
-    chk_esc = ttk.Checkbutton(f3, text="Escenarios 2024 / 2025 (más lento)", variable=escenarios)
-    chk_esc.pack(side="left")
-    chk_det = ttk.Checkbutton(f3, text="Detalle en Excel al terminar", variable=detalle)
-    chk_det.pack(side="left", padx=10)
+    chk_det = ttk.Checkbutton(f3, text="Detalle por vigencias en Excel (tarda unos minutos)", variable=detalle)
+    chk_det.pack(side="left", padx=(0, 10))
     chk_app = ttk.Checkbutton(f3, text="Actualizar los datos de la app (output/versiones)",
                               variable=actualizar_app)
     chk_app.pack(side="left")
 
-    def vig() -> int:
-        return etiquetas[vigencia_txt.get()]
+    def vigs() -> list:
+        return [v for v, var in marcadas.items() if var.get()]
+
+    def al_cambiar_tipo(*_):
+        # En una liquidacion solo cuenta la vigencia 2027.
+        liq = tipo.get() == "Liquidación"
+        for v, chk in chk_vig.items():
+            if v != 2027:
+                if liq:
+                    marcadas[v].set(False)
+                chk.state(["disabled" if liq else "!disabled"])
+        if liq:
+            marcadas[2027].set(True)
+        chk_vig[2027].state(["disabled" if liq else "!disabled"])
+        al_cambiar_vigencia()
 
     def al_cambiar_vigencia(*_):
-        v = vig()
-        hay_modelos = insumos.VIGENCIAS[v]["modelos"] is not None
-        modelos.set(hay_modelos)
-        chk_mod.state(["!disabled" if hay_modelos else "disabled"])
-        modelos_txt.set(f"(familia {insumos.VIGENCIAS[v]['modelos']})" if hay_modelos
-                        else "(no hay modelos para esta vigencia: quedan en $0)")
-        es_2027 = v == 2027
-        combo.state(["!disabled" if es_2027 else "disabled"])
-        tablas_txt.set("" if es_2027 else insumos.VIGENCIAS[v]["tablas"])
-        for chk in (chk_esc, chk_det):
-            chk.state(["!disabled" if es_2027 else "disabled"])
-        if not es_2027:
-            escenarios.set(False)
-            detalle.set(False)
+        vs = vigs()
+        con_modelos = [v for v in vs if insumos.VIGENCIAS[v]["modelos"] is not None]
+        if con_modelos:
+            chk_mod.state(["!disabled"])
+            modelos_txt.set("(familias " + ", ".join(insumos.VIGENCIAS[v]["modelos"] for v in con_modelos)
+                            + "; 2027 no tiene modelos)")
+        else:
+            modelos.set(False)
+            chk_mod.state(["disabled"])
+            modelos_txt.set("(2027 no tiene modelos: quedan en $0)")
+        combo.state(["!disabled" if 2027 in vs else "disabled"])
+        otras = [f"{v}: {insumos.VIGENCIAS[v]['tablas']}" for v in vs if v != 2027]
+        tablas_txt.set("   " + " | ".join(otras) if otras else "")
         al_cambiar_comunas()
-    vigencia_txt.trace_add("write", al_cambiar_vigencia)
 
     def al_cambiar_comunas():
         # Con solo algunas comunas, o con otra vigencia, no se pisan los datos
         # de la app.
-        if elegidas() is None and vig() == 2027:
+        if elegidas() is None and 2027 in vigs():
             chk_app.state(["!disabled"])
         else:
             actualizar_app.set(False)
@@ -339,19 +377,40 @@ def ventana():
         asignados = {k: v.get() for k, v in archivo.items()}
         com = elegidas()
         errores, avisos = insumos.validar(
-            asignados, escenarios.get(),
-            com if com is not None else list(comuna))
-        if vig() == 2027 and not version.get():
+            asignados, modelos.get(),
+            com if com is not None else list(comuna),
+            liquidacion=tipo.get() == "Liquidación")
+        if not vigs():
+            errores.append("No hay ninguna vigencia marcada.")
+        es_liq = tipo.get() == "Liquidación"
+        if not es_liq and asignados.get("export_liquidacion"):
+            avisos.append("El export de liquidación de Sistemas solo se usa en una Liquidación: aquí se ignora.")
+        if es_liq and vigs() != [2027]:
+            errores.append("Una liquidación es solo de la vigencia 2027.")
+        marcadas_com = com if com is not None else list(comuna)
+        for v in vigs():
+            fuera = [c for c in marcadas_com if c not in insumos.comunas_que_valora(v)]
+            if fuera:
+                txt = (f"La vigencia {v} no valora las comunas {', '.join(fuera)}: quedarán en 0"
+                       if len(fuera) <= 12 else
+                       f"La vigencia {v} no valora {len(fuera)} de las comunas marcadas "
+                       f"(solo {', '.join(insumos.comunas_que_valora(v))}): las demás quedarán en 0")
+                (errores if es_liq else avisos).append(txt + ".")
+        if not version.get():
             errores.append("No hay versiones de tablas en input/tablas/input/.")
         if modelos.get():
             cm = Path(carpeta_modelos.get())
-            sub = insumos.VIGENCIAS[vig()]["modelos"]
-            if not list((cm / sub).glob("*.pkl")):
-                errores.append(f"Liquidar con modelos: no hay modelos (.pkl) en {cm / sub}.")
-            if not asignados.get("zhg"):
-                errores.append("Liquidar con modelos: falta el insumo ZHG 2024-2025 (valor del suelo).")
+            for v in vigs():
+                sub = insumos.VIGENCIAS[v]["modelos"]
+                if sub and not list((cm / sub).glob("*.pkl")):
+                    errores.append(f"Liquidar con modelos: no hay modelos (.pkl) en {cm / sub}.")
+        if es_liq and avisos:
+            # En una liquidacion no se sigue con avisos.
+            errores += [f"(liquidación) {a}" for a in avisos]
+            avisos = []
         if errores:
-            messagebox.showerror("Validar insumos", "No se puede preliquidar:\n\n- " + "\n- ".join(errores)
+            messagebox.showerror("Validar insumos", f"No se puede {'liquidar' if es_liq else 'preliquidar'}:\n\n- "
+                                 + "\n- ".join(errores)
                                  + ("\n\nAvisos:\n- " + "\n- ".join(avisos) if avisos else ""))
             estado.set(f"Validación: {len(errores)} error(es)")
             return False
@@ -371,7 +430,7 @@ def ventana():
             return
         r = Path(raiz.get())
         com = elegidas()
-        etiqueta_corrida = version.get() if vig() == 2027 else f"VIG{vig()}"
+        etiqueta_corrida = ("LIQ_" if tipo.get() == "Liquidación" else "PRELIQ_") + "VIG" + "_".join(str(v) for v in vigs()) + (f"_{version.get()}" if 2027 in vigs() else "")
         nombre = (f"{datetime.now():%Y-%m-%d_%H%M}_{etiqueta_corrida}" + ("_modelos" if modelos.get() else "")
                   + ("" if com is None else f"_{len(com)}comunas"))
         carpeta = r / "corridas" / nombre
@@ -384,15 +443,15 @@ def ventana():
             "raiz": str(r.resolve()),
             "inicio": datetime.now().isoformat(timespec="seconds"),
             "codigo": commit(r),
-            "vigencia": vig(),
-            "reglas": insumos.VIGENCIAS[vig()]["reglas"],
-            "version_tablas": version.get() if vig() == 2027 else insumos.VIGENCIAS[vig()]["tablas"],
-            "modelos": modelos.get() and insumos.VIGENCIAS[vig()]["modelos"] is not None,
+            "tipo_corrida": "liquidacion" if tipo.get() == "Liquidación" else "preliquidacion",
+            "vigencias": vigs(),
+            "reglas": {v: insumos.VIGENCIAS[v]["reglas"] for v in vigs()},
+            "version_tablas": version.get(),
+            "modelos": modelos.get(),
             "carpeta_modelos": str(Path(carpeta_modelos.get()).resolve()),
             "comunas": com,
-            "escenarios": escenarios.get(),
             "detalle_excel": detalle.get(),
-            "actualizar_app": actualizar_app.get() and com is None and vig() == 2027,
+            "actualizar_app": actualizar_app.get() and com is None and 2027 in vigs(),
             "insumos": {k: str(Path(v.get()).resolve()) for k, v in archivo.items() if v.get().strip()},
             "insumos_detalle": {k: describir(v.get()) for k, v in archivo.items() if v.get().strip()},
         }
@@ -403,13 +462,13 @@ def ventana():
         corrida.update(p=subprocess.Popen(cmd, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)),
                        carpeta=carpeta, pos=0, t0=time.time())
         estado.set(f"Corriendo {etiqueta_corrida}... (pestaña 2)")
-        estado2.set(f"Corriendo {vigencia_txt.get()} · {carpeta}")
+        estado2.set(f"Corriendo vigencias {', '.join(map(str, vigs()))} · {carpeta}")
         b_pre.state(["disabled"])
         pestanas.select(t2)
         w.after(500, leer_log)
 
     ttk.Button(botones, text="Validar insumos", command=validar).pack(side="left")
-    b_pre = ttk.Button(botones, text="Preliquidar", command=preliquidar)
+    b_pre = ttk.Button(botones, text="Generar", command=preliquidar)
     b_pre.pack(side="left", padx=8)
 
     # --- Pestana 2: log -------------------------------------------------------
@@ -449,11 +508,11 @@ def ventana():
         estado2.set(msg)
         b_pre.state(["!disabled"])
         corrida["p"] = None
-        (messagebox.showinfo if ok else messagebox.showerror)("Preliquidacion", msg)
+        (messagebox.showinfo if ok else messagebox.showerror)("Liquidador", msg)
 
     def cerrar():
         if corrida["p"] is not None and corrida["p"].poll() is None:
-            if not messagebox.askyesno("Preliquidacion",
+            if not messagebox.askyesno("Liquidador",
                                        "La preliquidación sigue corriendo. ¿Detenerla y salir?"):
                 return
             corrida["p"].terminate()
@@ -461,6 +520,7 @@ def ventana():
 
     w.protocol("WM_DELETE_WINDOW", cerrar)
     refrescar_versiones()
+    tipo.trace_add("write", al_cambiar_tipo)
     al_cambiar_vigencia()
     w.after(100, detectar)
     w.mainloop()
