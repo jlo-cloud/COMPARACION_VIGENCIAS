@@ -1607,8 +1607,8 @@ with hoja_anexos:
         pref = "VM2" if medida_anx == "Valor por m²" else "VALOR"
         a_vig, a_liq = f"{pref}_{b}_VIGENCIA", f"{pref}_{b}_LIQ"
         a_var = f"VARIACION_{pref}_{b}_PCT"
-        n_base = f"MEDIANA_{V_BASE}"
-        n_liq = f"MEDIANA_{V_LIQ}"
+        n_base = f"VALOR ACTUAL {V_BASE}"
+        n_liq = f"VALOR TABLA {V_LIQ}"
 
         st.subheader(f"{familia_anx} · {medida_anx.lower()} · base "
                      f"{etiqueta_base.lower()}")
@@ -1617,8 +1617,9 @@ with hoja_anexos:
         else:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Construcciones", entero(len(a)))
-            k2.metric(f"Mediana vigencia {V_BASE}", pesos(a[a_vig].median()))
-            k3.metric(f"Mediana vigencia {V_LIQ}", pesos(a[a_liq].median()))
+            k2.metric(f"Valor actual {V_BASE} (mediana)",
+                      pesos(a[a_vig].median()))
+            k3.metric(f"Valor tabla {V_LIQ} (mediana)", pesos(a[a_liq].median()))
             k4.metric("Variación mediana", pct(a[a_var].median(), 2, signo=True))
 
             # VALOR_TABLA va en la llave: en la T12 una misma clave tiene un
@@ -1631,24 +1632,29 @@ with hoja_anexos:
                 "CONSTRUCCIONES": g.size(),
                 n_base: g[a_vig].median(),
                 n_liq: g[a_liq].median(),
-                "VAR_MEDIANA_%": g[a_var].median(),
+                "VARIACIÓN_%": g[a_var].median(),
                 "BAJAN_%": g[a_var].apply(lambda s: (s.dropna() < 0).mean() * 100),
                 "SUBEN_%": g[a_var].apply(lambda s: (s.dropna() > 0).mean() * 100),
             }).reset_index()
             t = t[t["CONSTRUCCIONES"] > 0]
+            t.insert(t.columns.get_loc(n_liq) + 1, "DIFERENCIA",
+                     t[n_liq] - t[n_base])
+            # VALOR_TABLA viene en comercial y las medianas en la base elegida:
+            # mostrarla al lado confundia (362.076 contra 253.500 en catastral,
+            # que es el mismo valor x 0,7). Se queda solo como llave.
+            t = t.drop(columns="VALOR_TABLA")
 
-            formato = {"CONSTRUCCIONES": entero, "VALOR_TABLA": pesos,
-                       n_base: pesos, n_liq: pesos,
-                       "VAR_MEDIANA_%": lambda v: pct(v, 2, signo=True),
+            formato = {"CONSTRUCCIONES": entero,
+                       n_base: pesos, n_liq: pesos, "DIFERENCIA": pesos_signo,
+                       "VARIACIÓN_%": lambda v: pct(v, 2, signo=True),
                        "BAJAN_%": lambda v: pct(v, 1),
                        "SUBEN_%": lambda v: pct(v, 1)}
             sty = t.style.format({c: f for c, f in formato.items()
                                   if c in t.columns})
-            if "VAR_MEDIANA_%" in t.columns:
-                sty = sty.map(
-                    lambda v: "" if pd.isna(v) or v == 0 else
-                    f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
-                    subset=["VAR_MEDIANA_%"])
+            sty = sty.map(
+                lambda v: "" if pd.isna(v) or v == 0 else
+                f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
+                subset=["DIFERENCIA", "VARIACIÓN_%"])
             st.markdown(f"**Por uso y clave** · {entero(len(t))} claves")
             st.dataframe(
                 sty, width="stretch", hide_index=True,
@@ -1660,14 +1666,19 @@ with hoja_anexos:
                     "UNIDAD": st.column_config.Column(
                         help="En qué viene el valor de la tabla: por m² o por "
                              "cupo (garajes y parqueaderos)."),
-                    "VALOR_TABLA": st.column_config.Column(
-                        help=f"Lo que trae la tabla {V_LIQ} para esa clave, "
-                             f"comercial, por la unidad de la columna UNIDAD."),
                     n_base: st.column_config.Column(
-                        help=f"Mediana de lo que trae hoy la base "
-                             f"({V_BASE})."),
+                        help=f"Lo que trae hoy la base ({V_BASE}): mediana "
+                             f"del grupo."),
                     n_liq: st.column_config.Column(
-                        help=f"Mediana con la tabla ({V_LIQ})."),
+                        help=f"Lo que da la tabla {V_LIQ}, en la misma base: "
+                             f"en catastral es el valor comercial de la tabla "
+                             f"x 0,7. Mediana del grupo."),
+                    "DIFERENCIA": st.column_config.Column(
+                        help=f"Valor tabla {V_LIQ} menos valor actual "
+                             f"{V_BASE}."),
+                    "VARIACIÓN_%": st.column_config.Column(
+                        help="Mediana de la variación de cada construcción "
+                             "contra sí misma."),
                 })
     st.caption(f"Solo entran las construcciones cuya clave tiene valor en la "
                f"tabla {V_LIQ}; las demás se excluyen. Fuente: "
