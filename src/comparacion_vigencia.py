@@ -93,6 +93,11 @@ CONFIG = {
     # Los usos que todavia no tienen tabla, solo los nombres: la app los
     # muestra en la hoja Reglas.
     "parquet_sin_tabla": str(CARPETA_VERSION / "USOS_SIN_TABLA.parquet"),
+    # Anexos (T10) y parqueaderos (T12), sin identificadores: la app los
+    # muestra en su propia hoja porque no tienen PUNTCONS ni se valoran por m2
+    # de la misma forma que las demas tablas.
+    "parquet_publico_anexos": str(CARPETA_VERSION /
+                                  "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"),
 
     # Comercial -> catastral.
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
@@ -428,6 +433,100 @@ def usos_sin_tabla(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
                           "CODIGO": np.where(anexo, t["DESTANEX"], t["DESTINOCONS"]),
                           "USO_LADM": t["USO_LADM"]})
             .drop_duplicates().sort_values(["TIPO", "CODIGO"], ignore_index=True))
+
+
+# Anexos y parqueaderos no entran a la comparacion principal: no tienen
+# PUNTCONS, el anexo guarda su valor en VALOANEX y no en VALORCONS, y el garaje
+# se liquida por cupo. Cada uno se compara con su propia llave y en su unidad:
+#   anexo     -> CLAVE DESTANEX_TIPOANEXO, VM2 de la T10 x area
+#   garaje    -> LIQ_PARQUEADERO (VM2 por cupo x factor de area), destinos
+#                007, 008, 036 y 037
+#   deposito  -> VM2 por m2 x area, destinos 006 y 027
+COLUMNAS_ANEXOS = ["TABLA_ORIGEN", "COMUNA", "USO_LADM", "DESTINOCONS",
+                   "DESTANEX", "TIPOANEXO", "TIPO_PARQ", "AREA_CONST",
+                   "VALOANEX", "VALORCONS", "VM2", "LIQ_PARQUEADERO"]
+TABLAS_ANEXOS = ("T10_ANEXOS", "T12_PARQUEADEROS")
+
+
+def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Una fila por anexo o parqueadero, SIN identificadores, con las dos vigencias."""
+    if df_liq is not None:
+        d = df_liq[[c for c in COLUMNAS_ANEXOS if c in df_liq.columns]]
+    else:
+        import pyarrow.parquet as pq
+        hay = set(pq.ParquetFile(CONFIG["parquet_liquidacion"]).schema_arrow.names)
+        d = pd.read_parquet(CONFIG["parquet_liquidacion"],
+                            columns=[c for c in COLUMNAS_ANEXOS if c in hay])
+    d = d[d["TABLA_ORIGEN"].astype(str).isin(TABLAS_ANEXOS)].copy()
+    for c in ("AREA_CONST", "VALOANEX", "VALORCONS", "VM2", "LIQ_PARQUEADERO",
+              "TIPOANEXO"):
+        d[c] = (pd.to_numeric(d[c], errors="coerce") if c in d.columns
+                else np.nan)
+
+    es_anexo = d["TABLA_ORIGEN"].astype(str).eq("T10_ANEXOS").to_numpy()
+    area = d["AREA_CONST"].to_numpy(dtype="float64")
+    vm2 = d["VM2"].fillna(0).to_numpy(dtype="float64")
+    destino = d["DESTINOCONS"].astype(str).str.strip().str.zfill(3)
+    # Por destino y no por LIQ_PARQUEADERO: en el deposito esa columna llega en
+    # 0, no vacia. Son los mismos destinos de actualizar_valores() en
+    # Liquidacion_tablas.py.
+    por_cupo = ~es_anexo & destino.isin(["007", "008", "036", "037"]).to_numpy()
+    liq_com = np.where(por_cupo, d["LIQ_PARQUEADERO"].fillna(0), vm2 * area)
+    # Sin valor de tabla no hay liquidacion que comparar: vacio, no una baja
+    # de -100%.
+    liq_com = np.where(vm2 > 0, liq_com, np.nan)
+    vig_cat = np.where(es_anexo, d["VALOANEX"], d["VALORCONS"])
+    f_com = factor_comercial(d).to_numpy()
+    factor = CONFIG["factor_catastral"]
+
+    destanex = d["DESTANEX"].astype(str).str.strip().str.zfill(3)
+    tipo_anexo = d["TIPOANEXO"].astype("Int64").astype(str)
+    tipo_parq = d["TIPO_PARQ"].astype(str).replace({"nan": "", "None": ""})
+    tipo = np.where(es_anexo, tipo_anexo,
+                    np.where(por_cupo, tipo_parq.where(tipo_parq != "", "Sin tipo"),
+                             "Por m²"))
+
+    out = pd.DataFrame({
+        "FAMILIA": np.where(es_anexo, "ANEXOS", "PARQUEADEROS"),
+        "TABLA_ORIGEN": d["TABLA_ORIGEN"].astype(str).to_numpy(),
+        "COMUNA": d["COMUNA"].astype(str).str.strip().str.zfill(2).to_numpy(),
+        "ACTUALIZACION": np.where(f_com == CONFIG["factor_comercial_act"],
+                                  "ACT 2024-2025", "SIN ACTUALIZAR"),
+        "USO_LADM": d["USO_LADM"].astype(str).to_numpy(),
+        # La llave con que la tabla da el valor: DESTANEX_TIPO en el anexo, y
+        # destino + tipo de parqueadero en la T12.
+        "CLAVE": np.where(es_anexo, destanex + "_" + tipo_anexo,
+                          destino + "_" + pd.Series(tipo, index=d.index)),
+        "TIPO": tipo,
+        "UNIDAD": np.where(por_cupo, "cupo", "m²"),
+        # El valor que trae la tabla para esa llave: $/m2 o $/cupo, comercial.
+        "VALOR_TABLA": vm2,
+        "CON_VALOR": (vm2 > 0).astype(int),
+        "VALOR_CAT_VIGENCIA": vig_cat,
+        "VALOR_CAT_LIQ": liq_com * factor,
+        "VALOR_COM_VIGENCIA": vig_cat / f_com,
+        "VALOR_COM_LIQ": liq_com,
+    })
+    con_area = np.where(area > 0, area, np.nan)
+    for b in ("CAT", "COM"):
+        out[f"VM2_{b}_VIGENCIA"] = out[f"VALOR_{b}_VIGENCIA"] / con_area
+        out[f"VM2_{b}_LIQ"] = out[f"VALOR_{b}_LIQ"] / con_area
+
+    # Como en los otros recortes publicos: el valor exacto es una llave igual
+    # de buena que el ID, asi que sale redondeado y reordenado. Paso mas fino
+    # que el del avaluo porque un anexo de pocos m2 vale menos de $100.000.
+    for col, paso in {"VALOR_CAT_VIGENCIA": 10_000, "VALOR_CAT_LIQ": 10_000,
+                      "VALOR_COM_VIGENCIA": 10_000, "VALOR_COM_LIQ": 10_000,
+                      "VM2_CAT_VIGENCIA": 100, "VM2_CAT_LIQ": 100,
+                      "VM2_COM_VIGENCIA": 100, "VM2_COM_LIQ": 100}.items():
+        out[col] = (out[col] / paso).round() * paso
+    for pref in ("VALOR", "VM2"):
+        for b in ("CAT", "COM"):
+            vig = out[f"{pref}_{b}_VIGENCIA"]
+            out[f"VARIACION_{pref}_{b}_PCT"] = (
+                (out[f"{pref}_{b}_LIQ"] / vig.where(vig > 0) - 1) * 100).round(2)
+    return out.sort_values(["FAMILIA", "CLAVE", "COMUNA", "VM2_CAT_VIGENCIA"],
+                           kind="stable", ignore_index=True)
 
 
 def grupo_comunas(d: pd.DataFrame) -> pd.Series:
@@ -2069,6 +2168,12 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         print(f"   Usos sin tabla:                   "
               f"{CONFIG['parquet_sin_tabla']} ({len(sin_tabla)} usos)")
 
+        pub_anexos = anexos_y_parqueaderos(df_liq)
+        pub_anexos.to_parquet(CONFIG["parquet_publico_anexos"], index=False)
+        print(f"   Anexos y parqueaderos:            "
+              f"{CONFIG['parquet_publico_anexos']} ({len(pub_anexos):,} filas, "
+              f"{int(pub_anexos['CON_VALOR'].sum()):,} con valor de tabla)")
+
         # Con dos o mas versiones guardadas, el libro que las compara.
         if not CONFIG["excel_versiones"]:
             print("\n   Comparacion de versiones: APAGADA "
@@ -2142,7 +2247,16 @@ def _cli():
                    help="deja entrar tambien los predios con construcciones "
                         "sin liquidar, cuyo valor total queda corto (solo "
                         "para diagnosticar)")
+    p.add_argument("--solo-anexos", action="store_true",
+                   help="solo rehace el recorte de anexos y parqueaderos "
+                        "desde LIQUIDACION_TABLAS.parquet, sin la comparacion")
     a = p.parse_args()
+    if a.solo_anexos:
+        pub_anexos = anexos_y_parqueaderos()
+        pub_anexos.to_parquet(CONFIG["parquet_publico_anexos"], index=False)
+        print(f"{CONFIG['parquet_publico_anexos']}: {len(pub_anexos):,} filas, "
+              f"{int(pub_anexos['CON_VALOR'].sum()):,} con valor de tabla")
+        return
     if a.sin_graficos:
         CONFIG["generar_graficos"] = False
     if a.sin_filtro_tablas:

@@ -31,6 +31,10 @@ HOJAS_NC = [
     'NO_CONVENCIONAL_10C',
     'NO_CONVENCIONAL_7C',
 ]
+# Desde la V2 la T10 llega en una sola hoja con CLAVE (DESTANEX_TIPO) y una
+# columna de valor, p. ej. 'T10_NO_CONVENCIONAL_17C'. Cualquier hoja con este
+# patron se lee como no convencional; el sufijo _<n>C es el grupo de comunas.
+PATRON_HOJA_NC = re.compile(r'NO_CONVENCIONAL_\d+C$', re.IGNORECASE)
 
 HOJAS = [
     'T1_RESIDENCIAL_7C',
@@ -296,8 +300,38 @@ def ubicar_encabezado(df_raw):
     return None, {}
 
 
+def hojas_nc(xls) -> list:
+    """Hojas no convencionales del libro: las de HOJAS_NC y las del patron."""
+    return [h for h in xls.sheet_names
+            if h in HOJAS_NC or PATRON_HOJA_NC.search(str(h).strip())]
+
+
+def procesar_hoja_nc_clave(df_raw, nombre_hoja: str) -> pd.DataFrame:
+    """Hoja con CLAVE (077_60) en la columna A y el valor en la B."""
+    filas, crudos_nc = [], []
+    for i in range(1, df_raw.shape[0]):
+        clave, val = df_raw.iat[i, 0], df_raw.iat[i, 1]
+        if pd.isna(clave) and pd.isna(val):
+            continue
+        m = re.fullmatch(r'\s*(\d+)\s*_\s*(\d+)\s*', str(clave))
+        if not m:
+            print(f"  AVISO: CLAVE no valida en fila Excel {i + 1}: {clave!r}")
+            continue
+        crudos_nc.append(val)
+        filas.append({'HOJA': nombre_hoja, 'DESTANEX': m.group(1).zfill(3),
+                      'USO_LADM': '', 'TIPO': int(m.group(2)),
+                      'VALOR': limpiar_valor(val)})
+    return pd.DataFrame(filas), crudos_nc
+
+
 def procesar_hoja_nc(xls, nombre_hoja: str) -> pd.DataFrame:
     df_raw = pd.read_excel(xls, sheet_name=nombre_hoja, header=None)
+
+    if df_raw.shape[1] >= 2 and norm(df_raw.iat[0, 0]) == 'clave':
+        print("  Formato CLAVE | VALOR")
+        df, crudos_nc = procesar_hoja_nc_clave(df_raw, nombre_hoja)
+        return _cerrar_hoja_nc(df, crudos_nc, nombre_hoja)
+
     f_hdr, cols = ubicar_encabezado(df_raw)
 
     if f_hdr is None:
@@ -335,7 +369,11 @@ def procesar_hoja_nc(xls, nombre_hoja: str) -> pd.DataFrame:
             'VALOR':    limpiar_valor(val),
         })
 
-    df = pd.DataFrame(filas)
+    return _cerrar_hoja_nc(pd.DataFrame(filas), crudos_nc, nombre_hoja)
+
+
+def _cerrar_hoja_nc(df, crudos_nc, nombre_hoja: str) -> pd.DataFrame:
+    """Auditoria y avisos comunes a los dos formatos de hoja NC."""
     if df.empty:
         print(f"  AVISO: '{nombre_hoja}' con 0 filas leidas")
         return df
@@ -365,10 +403,11 @@ def leer_no_convencionales(xls) -> pd.DataFrame:
     print("=" * 60)
 
     partes = []
-    for nombre_hoja in HOJAS_NC:
-        if nombre_hoja not in xls.sheet_names:
-            print(f"AVISO: hoja '{nombre_hoja}' no encontrada, se salta.\n")
-            continue
+    hojas = hojas_nc(xls)
+    if not hojas:
+        print(f"AVISO: ninguna hoja no convencional ({HOJAS_NC} o "
+              f"*NO_CONVENCIONAL_<n>C) en el libro.\n")
+    for nombre_hoja in hojas:
         print(f"Hoja: '{nombre_hoja}'")
         parte = procesar_hoja_nc(xls, nombre_hoja)
         if not parte.empty:
@@ -475,8 +514,11 @@ def leer_convencionales(xls) -> pd.DataFrame:
     print("=" * 60)
 
     todas = {}
+    # La T10 tambien empieza por 'T10_' pero es no convencional: se excluye.
+    no_conv = set(hojas_nc(xls))
     hojas_disponibles = [nombre for nombre in xls.sheet_names
-                         if re.match(r'^T\d+_', str(nombre), re.IGNORECASE)]
+                         if re.match(r'^T\d+_', str(nombre), re.IGNORECASE)
+                         and nombre not in no_conv]
     for nombre_hoja in hojas_disponibles:
         print(f"Hoja: '{nombre_hoja}'")
         todas.update(procesar_hoja(xls, nombre_hoja))
@@ -749,7 +791,7 @@ def consolidar_tablas(ruta_entrada=None, ruta_salida=None) -> str:
                      .pivot_table(index='CLAVE', columns='HOJA', values='VALOR',
                                   aggfunc='first')
                      .reset_index())
-        df_nc_out = df_nc_out[['CLAVE'] + [h for h in HOJAS_NC
+        df_nc_out = df_nc_out[['CLAVE'] + [h for h in hojas_nc(xls)
                                            if h in df_nc_out.columns]]
     else:
         df_nc_out = pd.DataFrame(columns=['CLAVE'] + HOJAS_NC)

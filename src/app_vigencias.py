@@ -18,6 +18,9 @@ NOMBRE_PREDIO = "COMPARACION_VIGENCIA_PUBLICO_PREDIO.parquet"
 # Los usos que todavia no tienen tabla (los nombres, como recordatorio).
 NOMBRE_SIN_TABLA = "USOS_SIN_TABLA.parquet"
 NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"
+# Anexos (T10) y parqueaderos (T12): su propia hoja, porque no tienen puntaje y
+# se comparan con su llave y en su unidad (m2 o cupo).
+NOMBRE_ANEXOS = "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"
 
 
 def _orden_version(v: str) -> tuple:
@@ -635,6 +638,18 @@ df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion",
                                    marcas_de(NOMBRE_DATOS))
 
 
+@st.cache_resource(show_spinner="Leyendo anexos y parqueaderos…", max_entries=2)
+def cargar_anexos(marcas: tuple):
+    """El recorte de anexos y parqueaderos de cada version, con VERSION."""
+    partes = []
+    for v, _ in marcas:
+        d = pd.read_parquet(ruta_version(v, NOMBRE_ANEXOS))
+        d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+        d["GRUPO_COMUNAS"] = d["COMUNA"].map(COMUNA_A_GRUPO).fillna("sin grupo")
+        partes.append(_a_categoria(d).assign(VERSION=v))
+    return _unir(partes) if partes else None
+
+
 # =====================================================================
 # FILTROS (uno solo para todas las hojas)
 # =====================================================================
@@ -857,8 +872,8 @@ st.markdown(
         ({V_BASE}) · tablas <b>{" y ".join(sel_versiones)}</b> ·
         {titulo_medida.lower()}, base {etiqueta_base.lower()}. Solo predios con
         todas sus construcciones valoradas por tabla en las dos vigencias.
-        El anexo no se revalora: la T10 no está entregada, así que su valor
-        entra igual en las dos.</p>
+        Los anexos (T10) y los parqueaderos (T12) se comparan aparte, en su
+        propia hoja.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1038,9 +1053,9 @@ def resumen(d: pd.DataFrame, col: str,
     return pd.concat([t, pd.DataFrame(filas)[t.columns]], ignore_index=True)
 
 
-hoja_tablas, hoja_graf, hoja_detalle, hoja_reglas = st.tabs(
+hoja_tablas, hoja_graf, hoja_detalle, hoja_anexos, hoja_reglas = st.tabs(
     ["📊 Tablas", "📈 Gráficos", "🔎 Detalle",
-     "📋 Reglas"])
+     "🧱 Anexos y parqueaderos", "📋 Reglas"])
 
 # Todo se arma una sola vez aca arriba: las tres hojas y el Excel leen de estos
 # mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
@@ -1543,6 +1558,132 @@ with hoja_detalle:
                 st.caption("Cambió la selección: vuelva a preparar la "
                            "descarga para no bajar lo de antes.")
 
+
+
+# ---------------------------------------------------------------------
+# HOJA - ANEXOS Y PARQUEADEROS
+# ---------------------------------------------------------------------
+# No pasan por la comparacion principal: no tienen PUNTCONS y no se valoran
+# igual que las demas tablas. El anexo se busca por CLAVE (DESTANEX_TIPO) y va
+# por m2; el garaje va por cupo y el deposito por m2. De la barra lateral se
+# toman la version, la base y las comunas; lo demas es propio de esta hoja.
+with hoja_anexos:
+    marcas_anx = marcas_de(NOMBRE_ANEXOS)
+    if not marcas_anx:
+        st.info(f"Ninguna versión trae {NOMBRE_ANEXOS}. Sale de correr "
+                f"`python src/comparacion_vigencia.py`.")
+    else:
+        anx = cargar_anexos(marcas_anx)
+        a = anx[anx["VERSION"].isin(sel_versiones)]
+        if sel_comuna:
+            a = a[a["COMUNA"].isin(sel_comuna)]
+        if sel_grupo:
+            a = a[a["GRUPO_COMUNAS"].isin(sel_grupo)]
+
+        f1, f2, f3 = st.columns(3)
+        familia_anx = f1.segmented_control(
+            "Qué se compara", ["Anexos", "Parqueaderos"], default="Anexos",
+            selection_mode="single") or "Anexos"
+        medida_anx = f2.segmented_control(
+            "Medida", ["Valor por m²", "Valor de la construcción"],
+            default=("Valor por m²" if familia_anx == "Anexos"
+                     else "Valor de la construcción"),
+            selection_mode="single",
+            help="En el garaje la tabla da un valor por cupo, así que su valor "
+                 "por m² depende del área. Para los parqueaderos se lee mejor "
+                 "el valor de la construcción.") or "Valor por m²"
+        estado_anx = f3.segmented_control(
+            "Valor en la tabla", ["Con valor", "Sin valor", "Todos"],
+            default="Con valor", selection_mode="single") or "Con valor"
+
+        a = a[a["FAMILIA"] == familia_anx.upper()]
+        sel_uso_anx = st.multiselect("Uso", sorted(a["USO_LADM"].unique()),
+                                     key="uso_anexos")
+        if sel_uso_anx:
+            a = a[a["USO_LADM"].isin(sel_uso_anx)]
+        con_valor = a["CON_VALOR"] == 1
+        if estado_anx == "Con valor":
+            a = a[con_valor]
+        elif estado_anx == "Sin valor":
+            a = a[~con_valor]
+
+        b = "CAT" if BASES[etiqueta_base] == "CATASTRAL" else "COM"
+        pref = "VM2" if medida_anx == "Valor por m²" else "VALOR"
+        a_vig, a_liq = f"{pref}_{b}_VIGENCIA", f"{pref}_{b}_LIQ"
+        a_var = f"VARIACION_{pref}_{b}_PCT"
+        n_base = f"MEDIANA_{V_BASE}"
+        n_liq = f"MEDIANA_{V_LIQ}"
+
+        st.subheader(f"{familia_anx} · {medida_anx.lower()} · base "
+                     f"{etiqueta_base.lower()}")
+        if a.empty:
+            st.info("Ninguna construcción cumple los filtros elegidos.")
+        else:
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Construcciones", entero(len(a)),
+                      f"{pct(a['CON_VALOR'].mean() * 100, 1)} con valor de tabla")
+            k2.metric(f"Mediana vigencia {V_BASE}", pesos(a[a_vig].median()))
+            k3.metric(f"Mediana vigencia {V_LIQ}", pesos(a[a_liq].median()))
+            k4.metric("Variación mediana", pct(a[a_var].median(), 2, signo=True))
+
+            # VALOR_TABLA va en la llave: en la T12 una misma clave tiene un
+            # valor por estrato o actividad, y mezclarlos daria una mediana
+            # de tablas distintas.
+            llave = (["VERSION"] if varias_versiones else []) + [
+                "USO_LADM", "CLAVE", "TIPO", "UNIDAD", "VALOR_TABLA"]
+            g = a.groupby(llave, observed=True, sort=True)
+            t = pd.DataFrame({
+                "CONSTRUCCIONES": g.size(),
+                n_base: g[a_vig].median(),
+                n_liq: g[a_liq].median(),
+                "VAR_MEDIANA_%": g[a_var].median(),
+                "BAJAN_%": g[a_var].apply(lambda s: (s.dropna() < 0).mean() * 100),
+                "SUBEN_%": g[a_var].apply(lambda s: (s.dropna() > 0).mean() * 100),
+            }).reset_index()
+            t = t[t["CONSTRUCCIONES"] > 0]
+            if estado_anx == "Sin valor":
+                t = t.drop(columns=["VALOR_TABLA", n_liq, "VAR_MEDIANA_%",
+                                    "BAJAN_%", "SUBEN_%"])
+
+            formato = {"CONSTRUCCIONES": entero, "VALOR_TABLA": pesos,
+                       n_base: pesos, n_liq: pesos,
+                       "VAR_MEDIANA_%": lambda v: pct(v, 2, signo=True),
+                       "BAJAN_%": lambda v: pct(v, 1),
+                       "SUBEN_%": lambda v: pct(v, 1)}
+            sty = t.style.format({c: f for c, f in formato.items()
+                                  if c in t.columns})
+            if "VAR_MEDIANA_%" in t.columns:
+                sty = sty.map(
+                    lambda v: "" if pd.isna(v) or v == 0 else
+                    f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
+                    subset=["VAR_MEDIANA_%"])
+            st.markdown(f"**Por uso y clave** · {entero(len(t))} claves")
+            st.dataframe(
+                sty, width="stretch", hide_index=True,
+                column_config={
+                    "CLAVE": st.column_config.Column(
+                        help="La llave con que la tabla da el valor: "
+                             "DESTANEX_TIPO en el anexo; destino_tipo de "
+                             "parqueadero en la T12."),
+                    "UNIDAD": st.column_config.Column(
+                        help="En qué viene el valor de la tabla: por m² o por "
+                             "cupo (garajes y parqueaderos)."),
+                    "VALOR_TABLA": st.column_config.Column(
+                        help=f"Lo que trae la tabla {V_LIQ} para esa clave, "
+                             f"comercial, por la unidad de la columna UNIDAD."),
+                    n_base: st.column_config.Column(
+                        help=f"Mediana de lo que trae hoy la base "
+                             f"({V_BASE})."),
+                    n_liq: st.column_config.Column(
+                        help=f"Mediana con la tabla ({V_LIQ})."),
+                })
+            if estado_anx != "Con valor":
+                st.caption("Sin valor = la clave no está en la tabla de valor: "
+                           "esas construcciones quedan en $ 0 en la "
+                           f"liquidación {V_LIQ}.")
+    st.caption(f"Fuente: output/versiones/<versión>/{NOMBRE_ANEXOS}. Los "
+               f"valores vienen redondeados a $10.000 y el valor por m² a "
+               f"$100.")
 
 
 # ---------------------------------------------------------------------
