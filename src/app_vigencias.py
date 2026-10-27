@@ -1566,7 +1566,7 @@ with hoja_detalle:
 # No pasan por la comparacion principal: no tienen PUNTCONS y no se valoran
 # igual que las demas tablas. El anexo se busca por CLAVE (DESTANEX_TIPO) y va
 # por m2; el garaje va por cupo y el deposito por m2. De la barra lateral se
-# toman la version, la base y las comunas; lo demas es propio de esta hoja.
+# toman la version y las comunas; la base y lo demas son propios de esta hoja.
 with hoja_anexos:
     marcas_anx = marcas_de(NOMBRE_ANEXOS)
     if not marcas_anx:
@@ -1584,7 +1584,7 @@ with hoja_anexos:
         # liquidacion y no hay nada que comparar.
         a = a[a["CON_VALOR"] == 1]
 
-        f1, f2 = st.columns(2)
+        f1, f2, f3 = st.columns(3)
         familia_anx = f1.segmented_control(
             "Qué se compara", ["Anexos", "Parqueaderos"], default="Anexos",
             selection_mode="single") or "Anexos"
@@ -1596,6 +1596,15 @@ with hoja_anexos:
             help="En el garaje la tabla da un valor por cupo, así que su valor "
                  "por m² depende del área. Para los parqueaderos se lee mejor "
                  "el valor total de la construcción.") or "Valor por m²"
+        # Base propia y en comercial por defecto: es la base en que viene la
+        # tabla de valor, asi que el valor por m2 coincide con el Excel. En
+        # catastral seria el de la tabla x 0,7.
+        base_anx = f3.segmented_control(
+            "Base de valor", list(BASES), default="Comercial",
+            selection_mode="single", key="base_anexos",
+            help="Comercial: el valor de la tabla tal como viene en el Excel, "
+                 "y el actual dividido por el factor de su comuna. Catastral: "
+                 "la tabla x 0,7 y el actual como lo trae la base.")             or "Comercial"
 
         a = a[a["FAMILIA"] == familia_anx.upper()]
         sel_uso_anx = st.multiselect("Uso", sorted(a["USO_LADM"].unique()),
@@ -1603,7 +1612,7 @@ with hoja_anexos:
         if sel_uso_anx:
             a = a[a["USO_LADM"].isin(sel_uso_anx)]
 
-        b = "CAT" if BASES[etiqueta_base] == "CATASTRAL" else "COM"
+        b = "CAT" if BASES[base_anx] == "CATASTRAL" else "COM"
         pref = "VM2" if medida_anx == "Valor por m²" else "VALOR"
         a_vig, a_liq = f"{pref}_{b}_VIGENCIA", f"{pref}_{b}_LIQ"
         a_var = f"VARIACION_{pref}_{b}_PCT"
@@ -1611,7 +1620,7 @@ with hoja_anexos:
         n_liq = f"VALOR TABLA {V_LIQ}"
 
         st.subheader(f"{familia_anx} · {medida_anx.lower()} · base "
-                     f"{etiqueta_base.lower()}")
+                     f"{base_anx.lower()}")
         if a.empty:
             st.info("Ninguna construcción cumple los filtros elegidos.")
         else:

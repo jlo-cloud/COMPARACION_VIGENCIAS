@@ -520,6 +520,13 @@ def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
                       "VM2_CAT_VIGENCIA": 100, "VM2_CAT_LIQ": 100,
                       "VM2_COM_VIGENCIA": 100, "VM2_COM_LIQ": 100}.items():
         out[col] = (out[col] / paso).round() * paso
+    # Por m2, lo liquidado ES el valor de la tabla: va exacto, para que cuadre
+    # peso a peso con el Excel. No identifica a nadie, es igual para toda la
+    # clave. (En el cupo no: dividido por el area, la delataria.)
+    por_m2 = out["UNIDAD"].eq("m²") & out["CON_VALOR"].eq(1)
+    out.loc[por_m2, "VM2_COM_LIQ"] = out.loc[por_m2, "VALOR_TABLA"]
+    out.loc[por_m2, "VM2_CAT_LIQ"] = (out.loc[por_m2, "VALOR_TABLA"]
+                                      * factor).round()
     for pref in ("VALOR", "VM2"):
         for b in ("CAT", "COM"):
             vig = out[f"{pref}_{b}_VIGENCIA"]
