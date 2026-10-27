@@ -197,17 +197,30 @@ AGRUPACIONES_TABLAS = [
      ["05", "06", "13", "16", "18"]),
     ("10C", "Las de 5C y 5C_N juntas",
      ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
+    ("17C", "Las de 7C y 10C juntas",
+     ["01", "02", "03", "04", "07", "08", "09", "10", "11", "12", "14", "15",
+      "17", "19", "20", "21", "22"]),
 ]
 
-# Los tres grupos en que se reparten las 22 comunas.
-GRUPOS_FILTRO = {
-    "10 comunas": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
-    "7 comunas": ["02", "03", "04", "08", "17", "19", "22"],
-    "5 comunas (extra)": ["05", "06", "13", "16", "18"],
-}
+# Los cuatro grupos en que se reparten las 22 comunas, sin repetir ninguna:
+# son los mismos de AGRUPACIONES_TABLAS.
+GRUPOS_BASE = {g: cs for g, _, cs in AGRUPACIONES_TABLAS
+               if g not in ("10C", "17C")}
 
-# comuna -> grupo, para armar la columna con la que se filtra y se abre.
-COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_FILTRO.items() for c in cs}
+# Lo que ofrece el filtro: los cuatro grupos y sus dos uniones. 10C y 17C se
+# traslapan con los otros, asi que se filtra por las comunas del grupo y no
+# por la columna GRUPO_COMUNAS.
+GRUPOS_FILTRO = {g: cs for g, _, cs in AGRUPACIONES_TABLAS}
+
+
+def comunas_de_grupos(grupos) -> set:
+    """Las comunas de los grupos elegidos en el filtro, juntas."""
+    return {c for g in grupos for c in GRUPOS_FILTRO.get(g, [])}
+
+
+# comuna -> grupo, para armar la columna con la que se abre: cada comuna en
+# uno solo de los cuatro grupos.
+COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_BASE.items() for c in cs}
 
 # --- Factor de valor comercial ---------------------------------------------
 # El comercial de la vigencia es el catastral dividido por este factor. Sale de
@@ -839,7 +852,7 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
     if sel_actividad:
         d = d[d["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
     if sel_grupo:
-        d = d[d["GRUPO_COMUNAS"].isin(sel_grupo)]
+        d = d[d["COMUNA"].isin(comunas_de_grupos(sel_grupo))]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
         d = d[d["N_CONST_PREDIO"].isin(sel_n_const)]
     if "N_CONST_PREDIO" in d.columns:
@@ -1578,7 +1591,7 @@ with hoja_anexos:
         if sel_comuna:
             a = a[a["COMUNA"].isin(sel_comuna)]
         if sel_grupo:
-            a = a[a["GRUPO_COMUNAS"].isin(sel_grupo)]
+            a = a[a["COMUNA"].isin(comunas_de_grupos(sel_grupo))]
 
         # Solo lo que tiene valor en la tabla: lo que no, queda en $ 0 en la
         # liquidacion y no hay nada que comparar.
