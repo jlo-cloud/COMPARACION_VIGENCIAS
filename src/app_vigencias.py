@@ -1580,32 +1580,28 @@ with hoja_anexos:
         if sel_grupo:
             a = a[a["GRUPO_COMUNAS"].isin(sel_grupo)]
 
-        f1, f2, f3 = st.columns(3)
+        # Solo lo que tiene valor en la tabla: lo que no, queda en $ 0 en la
+        # liquidacion y no hay nada que comparar.
+        a = a[a["CON_VALOR"] == 1]
+
+        f1, f2 = st.columns(2)
         familia_anx = f1.segmented_control(
             "Qué se compara", ["Anexos", "Parqueaderos"], default="Anexos",
             selection_mode="single") or "Anexos"
         medida_anx = f2.segmented_control(
-            "Medida", ["Valor por m²", "Valor de la construcción"],
+            "Medida", ["Valor por m²", "Valor total de la construcción"],
             default=("Valor por m²" if familia_anx == "Anexos"
-                     else "Valor de la construcción"),
+                     else "Valor total de la construcción"),
             selection_mode="single",
             help="En el garaje la tabla da un valor por cupo, así que su valor "
                  "por m² depende del área. Para los parqueaderos se lee mejor "
-                 "el valor de la construcción.") or "Valor por m²"
-        estado_anx = f3.segmented_control(
-            "Valor en la tabla", ["Con valor", "Sin valor", "Todos"],
-            default="Con valor", selection_mode="single") or "Con valor"
+                 "el valor total de la construcción.") or "Valor por m²"
 
         a = a[a["FAMILIA"] == familia_anx.upper()]
         sel_uso_anx = st.multiselect("Uso", sorted(a["USO_LADM"].unique()),
                                      key="uso_anexos")
         if sel_uso_anx:
             a = a[a["USO_LADM"].isin(sel_uso_anx)]
-        con_valor = a["CON_VALOR"] == 1
-        if estado_anx == "Con valor":
-            a = a[con_valor]
-        elif estado_anx == "Sin valor":
-            a = a[~con_valor]
 
         b = "CAT" if BASES[etiqueta_base] == "CATASTRAL" else "COM"
         pref = "VM2" if medida_anx == "Valor por m²" else "VALOR"
@@ -1620,8 +1616,7 @@ with hoja_anexos:
             st.info("Ninguna construcción cumple los filtros elegidos.")
         else:
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Construcciones", entero(len(a)),
-                      f"{pct(a['CON_VALOR'].mean() * 100, 1)} con valor de tabla")
+            k1.metric("Construcciones", entero(len(a)))
             k2.metric(f"Mediana vigencia {V_BASE}", pesos(a[a_vig].median()))
             k3.metric(f"Mediana vigencia {V_LIQ}", pesos(a[a_liq].median()))
             k4.metric("Variación mediana", pct(a[a_var].median(), 2, signo=True))
@@ -1641,9 +1636,6 @@ with hoja_anexos:
                 "SUBEN_%": g[a_var].apply(lambda s: (s.dropna() > 0).mean() * 100),
             }).reset_index()
             t = t[t["CONSTRUCCIONES"] > 0]
-            if estado_anx == "Sin valor":
-                t = t.drop(columns=["VALOR_TABLA", n_liq, "VAR_MEDIANA_%",
-                                    "BAJAN_%", "SUBEN_%"])
 
             formato = {"CONSTRUCCIONES": entero, "VALOR_TABLA": pesos,
                        n_base: pesos, n_liq: pesos,
@@ -1677,13 +1669,10 @@ with hoja_anexos:
                     n_liq: st.column_config.Column(
                         help=f"Mediana con la tabla ({V_LIQ})."),
                 })
-            if estado_anx != "Con valor":
-                st.caption("Sin valor = la clave no está en la tabla de valor: "
-                           "esas construcciones quedan en $ 0 en la "
-                           f"liquidación {V_LIQ}.")
-    st.caption(f"Fuente: output/versiones/<versión>/{NOMBRE_ANEXOS}. Los "
-               f"valores vienen redondeados a $10.000 y el valor por m² a "
-               f"$100.")
+    st.caption(f"Solo entran las construcciones cuya clave tiene valor en la "
+               f"tabla {V_LIQ}; las demás se excluyen. Fuente: "
+               f"output/versiones/<versión>/{NOMBRE_ANEXOS}. Los valores vienen "
+               f"redondeados a $10.000 y el valor por m² a $100.")
 
 
 # ---------------------------------------------------------------------
