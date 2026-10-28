@@ -141,6 +141,7 @@ CONFIG = {
                  ("T4_INDUSTRIAL", "INDUSTRIAL"),
                  ("T5_INSTITUCIONAL_ED", "INSTITUCIONAL_ED"),
                  ("T6_INSTITUCIONAL_SA", "INSTITUCIONAL_SA"),
+                 ("T8_INSTITUCIONAL_IG", "INSTITUCIONAL_IG"),
                  ("T9_HOTELES", "HOTELES"),
                  ("T11_CCOMERCIALES", "CCOMERCIALES"),
                  ("T13_UNIDAD_DEPORTIVA", "UNIDAD_DEPORTIVA")],

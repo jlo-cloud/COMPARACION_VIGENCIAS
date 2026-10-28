@@ -338,7 +338,7 @@ SIN_VALORES = (" La asignación ya está definida, pero el consolidado todavía 
 EXC_T7 = ("Se liquida con T7_INSTITUCIONAL_SER_17C en el grupo 17C; no depende "
           "de la ZHF ni del estrato." + SIN_VALORES)
 EXC_T8 = ("Se liquida con T8_INSTITUCIONAL_IG_17C en el grupo 17C; no depende "
-          "de la ZHF ni del estrato." + SIN_VALORES)
+          "de la ZHF ni del estrato.")
 EXC_T9 = "Se liquida con T9_HOTELES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T11 = "Se liquida con T11_CCOMERCIALES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T13 = "Se liquida con T13_UNIDAD_DEPORTIVA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
