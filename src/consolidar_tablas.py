@@ -923,6 +923,7 @@ def escribir_por_version(fecha: str):
                                            'entregas': []})
         info['entregas'].append(consolidado)
         info['version'] = version
+        info.setdefault('versiones', []).append(version)
         info['cambia'] = cambia
 
     for v, ruta in versiones.items():
@@ -1003,12 +1004,22 @@ def escribir_por_version(fecha: str):
     indice = indice.iloc[sorted(range(len(indice)), key=lambda i: (
         _numero_tabla(indice['TABLA'].iat[i]), i))]
 
+    # RESUMEN: una fila por tabla y una X en cada version que se entrego.
+    n_versiones = max(i['version'] for i in registro.values())
+    resumen = pd.DataFrame([
+        {'TABLA': c,
+         **{f'VERSION{k}': 'X' if k in info['versiones'] else ''
+            for k in range(1, n_versiones + 1)}}
+        for (_, c), info in registro.items()])
+    resumen = resumen.set_index('TABLA').loc[indice['TABLA']].reset_index()
+
     hojas_conv = {f"{HOJA_CONV}_{v}": d[sorted(d.columns, key=_numero_tabla)]
                   for v, d in conv_hojas.items()}
     hojas_nc = {f"{HOJA_NC}_{v}": d.reset_index() for v, d in nc_hojas.items()}
     salida = CARPETA_SALIDA / f"Tablas_Valor_Por_Version_{fecha}.xlsx"
     try:
         with pd.ExcelWriter(salida, engine='openpyxl') as writer:
+            resumen.to_excel(writer, index=False, sheet_name='RESUMEN')
             indice.to_excel(writer, index=False, sheet_name='INDICE')
             for h, d in {**hojas_conv, **hojas_nc}.items():
                 d.to_excel(writer, index=False, sheet_name=h)
@@ -1019,6 +1030,7 @@ def escribir_por_version(fecha: str):
             _formatear(salida, None, d, None, hoja_conv=None, hoja_nc=h,
                        hoja_ctrl=None)
         _formatear_indice(salida)
+        _formatear_resumen(salida)
     except PermissionError:
         print(f"   AVISO: no se pudo escribir '{salida.name}' (abierto en "
               f"Excel); el consolidado si quedo.")
@@ -1052,6 +1064,32 @@ def _formatear_indice(ruta):
     ws.freeze_panes = 'B2'
     ws.auto_filter.ref = f"A1:J{ws.max_row}"
     wb.save(ruta)
+
+
+def _formatear_resumen(ruta):
+    """TABLA | VERSION1 | VERSION2...: X centrada, bordes y filtro."""
+    wb = load_workbook(ruta)
+    ws = wb['RESUMEN']
+    thin = Side(style='thin', color='808080')
+    borde = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for celda in ws[1]:
+        celda.fill = PatternFill('solid', fgColor=COLOR_CTRL_HDR)
+        celda.font = Font(bold=True, color='FFFFFF', size=10)
+        celda.alignment = Alignment(horizontal='center', vertical='center')
+        celda.border = borde
+    for fila in ws.iter_rows(min_row=2):
+        for j, celda in enumerate(fila):
+            celda.border = borde
+            if j:
+                celda.alignment = Alignment(horizontal='center')
+                celda.font = Font(bold=True)
+    ws.column_dimensions['A'].width = 34
+    for j in range(2, ws.max_column + 1):
+        ws.column_dimensions[get_column_letter(j)].width = 12
+    ws.freeze_panes = 'B2'
+    ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    wb.save(ruta)
+
 
 if __name__ == "__main__":
     import sys
