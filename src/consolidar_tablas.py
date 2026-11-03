@@ -642,111 +642,116 @@ HOJA_CTRL = "CONTROL"
 # ESCRITURA
 # =============================================================================
 
-def _formatear(ruta, df_tablas, df_nc_out, df_control):
-    """Colores, anchos y bordes sobre el libro ya escrito."""
+def _formatear(ruta, df_tablas, df_nc_out, df_control, hoja_conv=HOJA_CONV,
+               hoja_nc=HOJA_NC, hoja_ctrl=HOJA_CTRL):
+    """Colores, anchos y bordes sobre el libro ya escrito. Cada hoja se puede
+    llamar distinto, o saltarse con None."""
     wb = load_workbook(ruta)
     thin = Side(style='thin', color='BFBFBF')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     fmt_numero = '#,##0'
 
     # --- CONVENCIONALES ---
-    ws = wb[HOJA_CONV]
-    columnas = list(df_tablas.columns)
-    for col_idx, col_name in enumerate(columnas, start=1):
-        letra = get_column_letter(col_idx)
-        es_puntaje = (col_name == 'PUNTAJE')
-        if es_puntaje:
-            color_hdr, color_body = COLOR_PUNTAJE_HDR, COLOR_PUNTAJE_BODY
-            ancho = ANCHO_PUNTAJE
-        else:
-            color_body, color_hdr = get_color(col_name)
-            ancho = max(len(col_name) + HOLGURA, ANCHO_MINIMO)
+    if hoja_conv:
+        ws = wb[hoja_conv]
+        columnas = list(df_tablas.columns)
+        for col_idx, col_name in enumerate(columnas, start=1):
+            letra = get_column_letter(col_idx)
+            es_puntaje = (col_name == 'PUNTAJE')
+            if es_puntaje:
+                color_hdr, color_body = COLOR_PUNTAJE_HDR, COLOR_PUNTAJE_BODY
+                ancho = ANCHO_PUNTAJE
+            else:
+                color_body, color_hdr = get_color(col_name)
+                ancho = max(len(col_name) + HOLGURA, ANCHO_MINIMO)
 
-        cell_hdr = ws[f'{letra}1']
-        cell_hdr.fill = PatternFill('solid', fgColor=color_hdr)
-        cell_hdr.font = Font(bold=True, color=_texto_contraste(color_hdr), size=10)
-        cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
-        cell_hdr.border = border
+            cell_hdr = ws[f'{letra}1']
+            cell_hdr.fill = PatternFill('solid', fgColor=color_hdr)
+            cell_hdr.font = Font(bold=True, color=_texto_contraste(color_hdr), size=10)
+            cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
+            cell_hdr.border = border
 
-        fill_body = PatternFill('solid', fgColor=color_body)
-        for row_idx in range(2, len(df_tablas) + 2):
-            cell = ws[f'{letra}{row_idx}']
-            cell.fill = fill_body
-            cell.border = border
-            cell.alignment = Alignment(horizontal='right', vertical='center')
-            if not es_puntaje:
-                cell.number_format = fmt_numero
-        ws.column_dimensions[letra].width = ancho
+            fill_body = PatternFill('solid', fgColor=color_body)
+            for row_idx in range(2, len(df_tablas) + 2):
+                cell = ws[f'{letra}{row_idx}']
+                cell.fill = fill_body
+                cell.border = border
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+                if not es_puntaje:
+                    cell.number_format = fmt_numero
+            ws.column_dimensions[letra].width = ancho
 
-    ws.row_dimensions[1].height = 22
-    ws.freeze_panes = 'B2'
+        ws.row_dimensions[1].height = 22
+        ws.freeze_panes = 'B2'
 
     # --- NO_CONVENCIONALES ---
-    ws_nc = wb[HOJA_NC]
-    n_nc = len(df_nc_out)
-    for col_idx, col_name in enumerate(df_nc_out.columns, start=1):
-        letra = get_column_letter(col_idx)
-        es_clave = (col_name == 'CLAVE')
-        if es_clave:
-            color_hdr, color_body = COLOR_CLAVE_HDR, COLOR_CLAVE_BODY
-            alin, fmt, ancho = 'left', None, ANCHO_CLAVE
-        else:
-            color_hdr, color_body = COLOR_NC_HDR, COLOR_NC_BODY
-            alin, fmt = 'right', fmt_numero
-            ancho = max(len(str(col_name)) + HOLGURA, ANCHO_MINIMO)
+    if hoja_nc:
+        ws_nc = wb[hoja_nc]
+        n_nc = len(df_nc_out)
+        for col_idx, col_name in enumerate(df_nc_out.columns, start=1):
+            letra = get_column_letter(col_idx)
+            es_clave = (col_name == 'CLAVE')
+            if es_clave:
+                color_hdr, color_body = COLOR_CLAVE_HDR, COLOR_CLAVE_BODY
+                alin, fmt, ancho = 'left', None, ANCHO_CLAVE
+            else:
+                color_hdr, color_body = COLOR_NC_HDR, COLOR_NC_BODY
+                alin, fmt = 'right', fmt_numero
+                ancho = max(len(str(col_name)) + HOLGURA, ANCHO_MINIMO)
 
-        cell_hdr = ws_nc[f'{letra}1']
-        cell_hdr.fill = PatternFill('solid', fgColor=color_hdr)
-        cell_hdr.font = Font(bold=True, color=_texto_contraste(color_hdr), size=10)
-        cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
-        cell_hdr.border = border
+            cell_hdr = ws_nc[f'{letra}1']
+            cell_hdr.fill = PatternFill('solid', fgColor=color_hdr)
+            cell_hdr.font = Font(bold=True, color=_texto_contraste(color_hdr), size=10)
+            cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
+            cell_hdr.border = border
 
-        fill_body = PatternFill('solid', fgColor=color_body)
-        for row_idx in range(2, n_nc + 2):
-            cell = ws_nc[f'{letra}{row_idx}']
-            cell.fill = fill_body
-            cell.border = border
-            cell.alignment = Alignment(horizontal=alin, vertical='center')
-            if fmt:
-                cell.number_format = fmt
-        ws_nc.column_dimensions[letra].width = ancho
+            fill_body = PatternFill('solid', fgColor=color_body)
+            for row_idx in range(2, n_nc + 2):
+                cell = ws_nc[f'{letra}{row_idx}']
+                cell.fill = fill_body
+                cell.border = border
+                cell.alignment = Alignment(horizontal=alin, vertical='center')
+                if fmt:
+                    cell.number_format = fmt
+            ws_nc.column_dimensions[letra].width = ancho
 
-    ws_nc.row_dimensions[1].height = 22
-    ws_nc.freeze_panes = 'B2'
+        ws_nc.row_dimensions[1].height = 22
+        ws_nc.freeze_panes = 'B2'
 
     # --- CONTROL ---
-    ws_ct = wb[HOJA_CTRL]
-    n_ct = len(df_control)
-    cols_ct = list(df_control.columns)
-    anchos_ct = {'TABLA': 32, 'FILA': 10, 'ALERTA': 20, 'DETALLE': 48,
-                 'VALOR_ORIGEN': 24, 'VALOR_FINAL': 16}
-    for col_idx, col_name in enumerate(cols_ct, start=1):
-        letra = get_column_letter(col_idx)
-        cell_hdr = ws_ct[f'{letra}1']
-        cell_hdr.fill = PatternFill('solid', fgColor=COLOR_CTRL_HDR)
-        cell_hdr.font = Font(bold=True, color=_texto_contraste(COLOR_CTRL_HDR),
-                             size=10)
-        cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
-        cell_hdr.border = border
+    if hoja_ctrl:
+        ws_ct = wb[hoja_ctrl]
+        n_ct = len(df_control)
+        cols_ct = list(df_control.columns)
+        anchos_ct = {'TABLA': 32, 'FILA': 10, 'ALERTA': 20, 'DETALLE': 48,
+                     'VALOR_ORIGEN': 24, 'VALOR_FINAL': 16}
+        for col_idx, col_name in enumerate(cols_ct, start=1):
+            letra = get_column_letter(col_idx)
+            cell_hdr = ws_ct[f'{letra}1']
+            cell_hdr.fill = PatternFill('solid', fgColor=COLOR_CTRL_HDR)
+            cell_hdr.font = Font(bold=True, color=_texto_contraste(COLOR_CTRL_HDR),
+                                 size=10)
+            cell_hdr.alignment = Alignment(horizontal='center', vertical='center')
+            cell_hdr.border = border
 
-        for row_idx in range(2, n_ct + 2):
-            cell = ws_ct[f'{letra}{row_idx}']
-            alerta = ws_ct[f'C{row_idx}'].value
-            cell.fill = PatternFill('solid',
-                                    fgColor=(COLOR_CTRL_GRAVE if alerta in GRAVES
-                                             else COLOR_CTRL_LEVE))
-            cell.border = border
-            cell.alignment = Alignment(
-                horizontal='right' if col_name in ('FILA', 'VALOR_FINAL') else 'left',
-                vertical='center')
-            if col_name == 'VALOR_FINAL':
-                cell.number_format = fmt_numero
-        ws_ct.column_dimensions[letra].width = anchos_ct.get(col_name, ANCHO_MINIMO)
+            for row_idx in range(2, n_ct + 2):
+                cell = ws_ct[f'{letra}{row_idx}']
+                alerta = ws_ct[f'C{row_idx}'].value
+                cell.fill = PatternFill('solid',
+                                        fgColor=(COLOR_CTRL_GRAVE if alerta in GRAVES
+                                                 else COLOR_CTRL_LEVE))
+                cell.border = border
+                cell.alignment = Alignment(
+                    horizontal='right' if col_name in ('FILA', 'VALOR_FINAL') else 'left',
+                    vertical='center')
+                if col_name == 'VALOR_FINAL':
+                    cell.number_format = fmt_numero
+            ws_ct.column_dimensions[letra].width = anchos_ct.get(col_name, ANCHO_MINIMO)
 
-    ws_ct.row_dimensions[1].height = 22
-    ws_ct.freeze_panes = 'A2'
-    if n_ct:
-        ws_ct.auto_filter.ref = f'A1:{get_column_letter(len(cols_ct))}{n_ct + 1}'
+        ws_ct.row_dimensions[1].height = 22
+        ws_ct.freeze_panes = 'A2'
+        if n_ct:
+            ws_ct.auto_filter.ref = f'A1:{get_column_letter(len(cols_ct))}{n_ct + 1}'
 
     try:
         wb.save(ruta)
@@ -829,8 +834,224 @@ def consolidar_tablas(ruta_entrada=None, ruta_salida=None) -> str:
     if SIN_PALETA:
         print(f"   AVISO: {len(SIN_PALETA)} familias sin color en FAMILIAS "
               f"(se asigno uno automatico): {sorted(SIN_PALETA)}")
+    if not ruta_salida:
+        escribir_por_version(fecha)
     return str(salida)
 
+
+def _numero_version(v: str) -> int:
+    """'V2' -> 2, para ordenar V10 despues de V9."""
+    m = re.search(r'(\d+)', v)
+    return int(m.group(1)) if m else 0
+
+
+def familia_tabla(columna: str) -> str:
+    """'T1_RESIDENCIAL_10C_COND_0_011' -> 'T1_RESIDENCIAL'; T5_INSTITUCIONAL_ED_17C
+    -> 'T5_INSTITUCIONAL_ED'. Lo que va antes del grupo de comunas."""
+    partes = str(columna).split('_')
+    for i, p in enumerate(partes):
+        if re.fullmatch(r'\d+C', p):
+            return '_'.join(partes[:i])
+    return str(columna)
+
+
+def _numero_tabla(c) -> int:
+    """'T8_INSTITUCIONAL_IG_17C' -> 8; PUNTAJE y CLAVE primero."""
+    if c in ('PUNTAJE', 'CLAVE'):
+        return 0
+    m = re.match(r'T(\d+)_', str(c))
+    return int(m.group(1)) if m else 999
+
+
+def consolidados_por_version() -> dict:
+    """{version: Tablas_Valor_Consolidado_<version>_<fecha>.xlsx mas reciente},
+    de la V1 a la ultima."""
+    hallados = {}
+    for f in CARPETA_SALIDA.glob("Tablas_Valor_Consolidado_*_*.xlsx"):
+        if f.name.startswith("~$"):
+            continue
+        m = re.match(r"Tablas_Valor_Consolidado_(V\d+)_", f.name)
+        if m and (m.group(1) not in hallados
+                  or f.stat().st_mtime > hallados[m.group(1)].stat().st_mtime):
+            hallados[m.group(1)] = f
+    return dict(sorted(hallados.items(), key=lambda kv: _numero_version(kv[0])))
+
+
+def escribir_por_version(fecha: str):
+    """
+    Tablas_Valor_Por_Version_<fecha>.xlsx: el REGISTRO de todas las versiones
+    de las tablas de valor, en un solo libro y con el formato del consolidado.
+
+      INDICE                   una fila por tabla: su version vigente,
+                               cuantas veces se entrego, si el valor cambia
+                               frente a la entrega anterior, en que
+                               consolidado llego y en que hoja esta.
+      CONVENCIONALES_V1        la PRIMERA entrega de cada tabla, llegara en el
+                               consolidado que llegara (la T8 llego en el V2
+                               y va aqui: tiene un solo valor).
+      CONVENCIONALES_V2...     la segunda entrega, la tercera...: la familia
+                               completa cuando trae alguna columna nueva o con
+                               otros valores. Las 5C y 5C_N de edificios son
+                               su V2, porque reemplazan a la 10C.
+      NO_CONVENCIONALES_Vn     los anexos, con la misma regla.
+
+    Se rehace en cada consolidacion leyendo los Tablas_Valor_Consolidado_<V>
+    de input/tablas/output. El consolidado que se liquida sigue siendo el
+    completo; este nombre NO empieza por Tablas_Valor_Consolidado_, que es lo
+    que busca tabla_valor_vigente().
+    """
+    versiones = consolidados_por_version()
+    if len(versiones) < 2:
+        return None
+
+    ultima = list(versiones)[-1]
+    # Las hojas van por VERSION DE LA TABLA, no por consolidado: la primera
+    # entrega de cada tabla es su V1 y cada reentrega suma una. La T8 llego en
+    # el consolidado V2 pero tiene un solo valor: es su V1.
+    conv_hojas, nc_hojas = {}, {}       # 'V1', 'V2'... -> DataFrame de la hoja
+    vigente_conv, vigente_nc = {}, {}   # columna -> valores vigentes
+    version_familia = {}                # familia -> cuantas entregas lleva
+    registro = {}                       # (tipo, columna) -> info del indice
+    en_ultima = set()
+
+    def iguales(a, b):
+        return pd.Series(a).reset_index(drop=True).equals(
+            pd.Series(b).reset_index(drop=True))
+
+    def anotar(clave, consolidado, version, cambia):
+        info = registro.setdefault(clave, {'llego': consolidado,
+                                           'entregas': []})
+        info['entregas'].append(consolidado)
+        info['version'] = version
+        info['cambia'] = cambia
+
+    for v, ruta in versiones.items():
+        conv = pd.read_excel(ruta, sheet_name=HOJA_CONV)
+        nc = pd.read_excel(ruta, sheet_name=HOJA_NC, dtype={'CLAVE': str})
+        nc = nc.set_index('CLAVE') if 'CLAVE' in nc.columns else pd.DataFrame()
+        # Una hoja NC sin anexos trae solo los encabezados: no es una tabla.
+        nc = nc.dropna(axis=1, how='all')
+        if v == ultima:
+            en_ultima = ({('CONV', c) for c in conv.columns if c != 'PUNTAJE'}
+                         | {('NC', c) for c in nc.columns})
+
+        # --- convencionales: se decide por familia ---
+        por_familia = {}
+        for c in conv.columns:
+            if c != 'PUNTAJE':
+                por_familia.setdefault(familia_tabla(c), []).append(c)
+        for fam, cs in por_familia.items():
+            if fam not in version_familia:
+                k = version_familia[fam] = 1
+            elif any(c not in vigente_conv or not iguales(conv[c], vigente_conv[c])
+                     for c in cs):
+                k = version_familia[fam] = version_familia[fam] + 1
+            else:
+                continue                      # no se volvio a entregar
+            hoja = conv_hojas.setdefault(f"V{k}", pd.DataFrame(
+                {'PUNTAJE': conv['PUNTAJE'].values}))
+            for c in cs:
+                # Una columna nueva dentro de una familia reentregada se
+                # compara con la que reemplaza: la de la misma tipologia que
+                # ya no viene (5C_011 y 5C_N_011 contra la 10C_011 de la V1).
+                antes = vigente_conv.get(c)
+                if antes is None:
+                    tip = str(c).rsplit('_', 1)[-1]
+                    previas = [k for k in vigente_conv
+                               if familia_tabla(k) == fam and k not in cs
+                               and str(k).rsplit('_', 1)[-1] == tip]
+                    antes = vigente_conv[previas[0]] if previas else None
+                cambia = antes is None or not iguales(conv[c], antes)
+                anotar(('CONV', c), v, k, cambia if k > 1 else None)
+                vigente_conv[c] = conv[c]
+                hoja[c] = conv[c].values
+
+        # --- no convencionales: cada columna es una tabla ---
+        for c in nc.columns:
+            if c not in vigente_nc:
+                k = 1
+            elif not nc[c].sort_index().equals(vigente_nc[c].sort_index()):
+                k = registro[('NC', c)]['version'] + 1
+            else:
+                continue
+            anotar(('NC', c), v, k, True if k > 1 else None)
+            vigente_nc[c] = nc[c]
+            actual = nc_hojas.get(f"V{k}")
+            nc_hojas[f"V{k}"] = (nc[[c]] if actual is None
+                                 else actual.join(nc[[c]], how='outer'))
+
+    filas = []
+    for (tipo, c), info in registro.items():
+        vk = f"V{info['version']}"
+        filas.append({
+            'TABLA': c,
+            'FAMILIA': familia_tabla(c),
+            'TIPO': 'Convencional' if tipo == 'CONV' else 'No convencional',
+            'VERSIÓN VIGENTE': vk,
+            'VERSIONES ENTREGADAS': info['version'],
+            # Frente a la version anterior de la tabla; en la V1 no aplica.
+            '¿CAMBIA EL VALOR?': ('-' if info['cambia'] is None
+                                  else 'Sí' if info['cambia'] else 'No'),
+            'LLEGÓ EN EL CONSOLIDADO': info['llego'],
+            'ENTREGAS POR CONSOLIDADO': ', '.join(info['entregas']),
+            f'SE USA EN EL CONSOLIDADO {ultima}':
+                'Sí' if (tipo, c) in en_ultima else 'No',
+            'HOJA CON EL VALOR VIGENTE':
+                f"{HOJA_CONV if tipo == 'CONV' else HOJA_NC}_{vk}",
+        })
+    indice = pd.DataFrame(filas)
+    indice = indice.iloc[sorted(range(len(indice)), key=lambda i: (
+        _numero_tabla(indice['TABLA'].iat[i]), i))]
+
+    hojas_conv = {f"{HOJA_CONV}_{v}": d[sorted(d.columns, key=_numero_tabla)]
+                  for v, d in conv_hojas.items()}
+    hojas_nc = {f"{HOJA_NC}_{v}": d.reset_index() for v, d in nc_hojas.items()}
+    salida = CARPETA_SALIDA / f"Tablas_Valor_Por_Version_{fecha}.xlsx"
+    try:
+        with pd.ExcelWriter(salida, engine='openpyxl') as writer:
+            indice.to_excel(writer, index=False, sheet_name='INDICE')
+            for h, d in {**hojas_conv, **hojas_nc}.items():
+                d.to_excel(writer, index=False, sheet_name=h)
+        for h, d in hojas_conv.items():
+            _formatear(salida, d, None, None, hoja_conv=h, hoja_nc=None,
+                       hoja_ctrl=None)
+        for h, d in hojas_nc.items():
+            _formatear(salida, None, d, None, hoja_conv=None, hoja_nc=h,
+                       hoja_ctrl=None)
+        _formatear_indice(salida)
+    except PermissionError:
+        print(f"   AVISO: no se pudo escribir '{salida.name}' (abierto en "
+              f"Excel); el consolidado si quedo.")
+        return None
+    print(f"   Registro de versiones: {salida.name} -> "
+          + ", ".join(f"{h} ({len(d.columns) - 1})"
+                      for h, d in {**hojas_conv, **hojas_nc}.items()))
+    return salida
+
+
+def _formatear_indice(ruta):
+    """Encabezado oscuro, bordes, filtro y en amarillo lo reentregado."""
+    wb = load_workbook(ruta)
+    ws = wb['INDICE']
+    thin = Side(style='thin', color='BFBFBF')
+    borde = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for celda in ws[1]:
+        celda.fill = PatternFill('solid', fgColor=COLOR_CTRL_HDR)
+        celda.font = Font(bold=True, color='FFFFFF', size=10)
+        celda.alignment = Alignment(horizontal='center', vertical='center')
+        celda.border = borde
+    for fila in ws.iter_rows(min_row=2):
+        reentregada = (fila[4].value or 1) > 1
+        for celda in fila:
+            celda.border = borde
+            if reentregada:
+                celda.fill = PatternFill('solid', fgColor=COLOR_CTRL_LEVE)
+    for letra, ancho in zip('ABCDEFGHIJ',
+                            (34, 24, 16, 12, 12, 12, 14, 18, 16, 30)):
+        ws.column_dimensions[letra].width = ancho
+    ws.freeze_panes = 'B2'
+    ws.auto_filter.ref = f"A1:J{ws.max_row}"
+    wb.save(ruta)
 
 if __name__ == "__main__":
     import sys

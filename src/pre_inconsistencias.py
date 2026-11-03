@@ -26,9 +26,29 @@ MOTIVOS_QUE_DESCUENTAN = {
 }
 
 
-# El reporte_pre_inconsistencias_<fecha>.xlsx. Apagado: por ahora solo se
-# piden el detalle y las tablas de valor. Los predios se descuentan igual.
-EXCEL_REPORTE = False
+# Los reportes en Excel: uno general, reporte_pre_inconsistencias_<fecha>.xlsx,
+# y uno por dependencia responsable, reporte_pre_inconsistencias_<RESPONSABLE>_
+# <fecha>.xlsx. Apagado, los predios se descuentan igual pero no sale ninguno.
+EXCEL_REPORTE = True
+
+# Que dependencia revisa y corrige cada tipo de inconsistencia. La llave es el
+# nombre de la hoja del reporte. Sin ZHF y las coordenadas son datos
+# espaciales: Cartografia. Sin puntaje, sin area, sin uso y el uso que no
+# cuadra con la condicion son informacion fisica de la construccion:
+# Reconocimiento. Un tipo nuevo que no este aqui sale como POR_DEFINIR.
+RESPONSABLES = {
+    'SIN_ZHF': 'CARTOGRAFIA',
+    'SIN_LONGITUD': 'CARTOGRAFIA',
+    'SIN_LATITUD': 'CARTOGRAFIA',
+    'SIN_PUNTAJE': 'RECONOCIMIENTO',
+    'SIN_AREA_CONSTRUIDA': 'RECONOCIMIENTO',
+    'SIN_USO_LADM': 'RECONOCIMIENTO',
+    'USO_INCONSISTENTE': 'RECONOCIMIENTO',
+}
+
+# Las columnas que van primero en cada hoja; el resto sigue detras.
+COLUMNAS_PRIMERO = ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'COMUNA',
+                    'MOTIVO_INCONSISTENCIA', 'RESPONSABLE', 'DESCUENTA_PREDIO']
 
 
 # Usos de no PH cuyo par en PH se liquida por MODELO en condicion 9.
@@ -303,40 +323,67 @@ def generar_reporte_inconsistencias(
         print(f"✅ Predios limpios: {df_limpio['ID_PREDIO'].nunique()}")
         return df_limpio
 
-    os.makedirs(output_path, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d')
-    archivo = f"{output_path}reporte_pre_inconsistencias_{timestamp}.xlsx"
-
-    total_predios = df['ID_PREDIO'].nunique()
-
-    # xlsxwriter y no openpyxl: openpyxl escribe celda por celda y con
-    # decenas de miles de filas por ~70 columnas la corrida se cuelga.
-    motor = 'xlsxwriter'
-    try:
-        import xlsxwriter  # noqa: F401
-    except ImportError:
-        motor = 'openpyxl'
-
-    with pd.ExcelWriter(archivo, engine=motor) as writer:
-
-        resumen = [{
-            'Tipo': k,
-            'Registros': v['total'],
-            'Predios': v['predios_unicos'],
-            '% Predios': round(v['predios_unicos'] / total_predios * 100, 2)
-        } for k, v in inconsistencias.items()]
-
-        pd.DataFrame(resumen).to_excel(writer, sheet_name='RESUMEN', index=False)
-
-        for nombre, data in inconsistencias.items():
-            if len(data['detalle']) > 0:
-                data['detalle'].to_excel(
-                    writer,
-                    sheet_name=nombre[:31],
-                    index=False
-                )
-
-    print(f"\n✅ Archivo generado: {archivo}")
+    exportar_reportes(inconsistencias, set(a_descontar),
+                      df['ID_PREDIO'].nunique(), output_path)
     print(f"✅ Predios limpios: {df_limpio['ID_PREDIO'].nunique()}")
 
     return df_limpio
+
+
+def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
+    """El reporte general y uno por responsable, con el mismo formato."""
+    os.makedirs(output_path, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d')
+
+    # Cada hoja con su responsable y con la marca de si el predio sale de la
+    # liquidacion: es lo primero que pregunta quien recibe el reporte.
+    hojas = {}
+    for nombre, data in inconsistencias.items():
+        d = data['detalle'].copy()
+        d['RESPONSABLE'] = RESPONSABLES.get(nombre, 'POR_DEFINIR')
+        d['DESCUENTA_PREDIO'] = np.where(d['ID_PREDIO'].isin(descontados),
+                                         'Sí', 'No')
+        primero = [c for c in COLUMNAS_PRIMERO if c in d.columns]
+        hojas[nombre] = d[primero + [c for c in d.columns if c not in primero]]
+
+    def resumen_de(nombres):
+        return pd.DataFrame([{
+            'Tipo': k,
+            'Responsable': RESPONSABLES.get(k, 'POR_DEFINIR'),
+            'Registros': inconsistencias[k]['total'],
+            'Predios': inconsistencias[k]['predios_unicos'],
+            'Predios que se descuentan': int(
+                hojas[k].loc[hojas[k]['DESCUENTA_PREDIO'] == 'Sí',
+                             'ID_PREDIO'].nunique()),
+            '% Predios': round(inconsistencias[k]['predios_unicos']
+                               / total_predios * 100, 2),
+        } for k in nombres])
+
+    def escribir(archivo, nombres):
+        # xlsxwriter y no openpyxl: openpyxl escribe celda por celda y con
+        # decenas de miles de filas por ~70 columnas la corrida se cuelga.
+        motor = 'xlsxwriter'
+        try:
+            import xlsxwriter  # noqa: F401
+        except ImportError:
+            motor = 'openpyxl'
+        with pd.ExcelWriter(archivo, engine=motor) as writer:
+            resumen_de(nombres).to_excel(writer, sheet_name='RESUMEN',
+                                         index=False)
+            for nombre in nombres:
+                if len(hojas[nombre]) > 0:
+                    hojas[nombre].to_excel(writer, sheet_name=nombre[:31],
+                                           index=False)
+        print(f"   ✅ {archivo}")
+
+    print("\n   Reportes de pre-inconsistencias:")
+    escribir(f"{output_path}reporte_pre_inconsistencias_{timestamp}.xlsx",
+             list(hojas))
+    por_responsable = {}
+    for nombre in hojas:
+        por_responsable.setdefault(RESPONSABLES.get(nombre, 'POR_DEFINIR'),
+                                   []).append(nombre)
+    for responsable, nombres in por_responsable.items():
+        if any(len(hojas[n]) for n in nombres):
+            escribir(f"{output_path}reporte_pre_inconsistencias_"
+                     f"{responsable}_{timestamp}.xlsx", nombres)

@@ -141,6 +141,9 @@ CONFIG = {
                  ("T4_INDUSTRIAL", "INDUSTRIAL"),
                  ("T5_INSTITUCIONAL_ED", "INSTITUCIONAL_ED"),
                  ("T6_INSTITUCIONAL_SA", "INSTITUCIONAL_SA"),
+                 # Sin valores todavia: sus construcciones quedan con VM2 = 0
+                 # y la comparacion las descarta sola, hasta que llegue la T7.
+                 ("T7_INSTITUCIONAL_SER", "INSTITUCIONAL_SER"),
                  ("T8_INSTITUCIONAL_IG", "INSTITUCIONAL_IG"),
                  ("T9_HOTELES", "HOTELES"),
                  ("T11_CCOMERCIALES", "CCOMERCIALES"),
@@ -276,6 +279,13 @@ def _mapa_tablas_valor(ruta: str) -> dict:
 def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
     """De que columna del Excel de tablas salio el VM2 de cada construccion."""
     vacio = pd.Series("", index=d.index, dtype=object)
+    # Se vuelve a buscar AQUI y no solo al importar: el main importa este
+    # modulo antes del PASO 0, que es el que deja el consolidado del dia, y la
+    # ruta quedaba en el de la vispera. El 28/10 eso dejo vacia la TABLA_VALOR
+    # de la T8, que no estaba en el consolidado del 27.
+    _hoy = tabla_valor_vigente()
+    if _hoy:
+        CONFIG["excel_tablas_valor"] = str(_hoy)
     ruta = CONFIG["excel_tablas_valor"]
     if not os.path.exists(ruta):
         print(f"   (no se encontro {os.path.basename(ruta)}: la columna "
@@ -449,15 +459,25 @@ COLUMNAS_ANEXOS = ["TABLA_ORIGEN", "COMUNA", "USO_LADM", "DESTINOCONS",
 TABLAS_ANEXOS = ("T10_ANEXOS", "T12_PARQUEADEROS")
 
 
-def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Una fila por anexo o parqueadero, SIN identificadores, con las dos vigencias."""
+IDS_ANEXOS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL"]
+
+
+def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None,
+                          con_identificadores: bool = False) -> pd.DataFrame:
+    """Una fila por anexo o parqueadero, con las dos vigencias.
+
+    Por defecto SIN identificadores, redondeado y reordenado: es el recorte
+    publico de la app. Con con_identificadores=True trae ID_PREDIO, numero
+    predial y area, con el valor exacto: es el detalle para revisar a mano, y
+    NO puede salir del equipo."""
+    columnas = COLUMNAS_ANEXOS + (IDS_ANEXOS if con_identificadores else [])
     if df_liq is not None:
-        d = df_liq[[c for c in COLUMNAS_ANEXOS if c in df_liq.columns]]
+        d = df_liq[[c for c in columnas if c in df_liq.columns]]
     else:
         import pyarrow.parquet as pq
         hay = set(pq.ParquetFile(CONFIG["parquet_liquidacion"]).schema_arrow.names)
         d = pd.read_parquet(CONFIG["parquet_liquidacion"],
-                            columns=[c for c in COLUMNAS_ANEXOS if c in hay])
+                            columns=[c for c in columnas if c in hay])
     d = d[d["TABLA_ORIGEN"].astype(str).isin(TABLAS_ANEXOS)].copy()
     for c in ("AREA_CONST", "VALOANEX", "VALORCONS", "VM2", "LIQ_PARQUEADERO",
               "TIPOANEXO"):
@@ -513,6 +533,19 @@ def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
         out[f"VM2_{b}_VIGENCIA"] = out[f"VALOR_{b}_VIGENCIA"] / con_area
         out[f"VM2_{b}_LIQ"] = out[f"VALOR_{b}_LIQ"] / con_area
 
+    if con_identificadores:
+        for c in IDS_ANEXOS:
+            out.insert(IDS_ANEXOS.index(c), c, d[c].astype(str).to_numpy())
+        out.insert(out.columns.get_loc("UNIDAD") + 1, "AREA", area)
+        for pref in ("VALOR", "VM2"):
+            for b in ("CAT", "COM"):
+                vig = out[f"{pref}_{b}_VIGENCIA"]
+                out[f"VARIACION_{pref}_{b}_PCT"] = (
+                    (out[f"{pref}_{b}_LIQ"] / vig.where(vig > 0) - 1) * 100
+                ).round(2)
+        return out.sort_values(["FAMILIA", "COMUNA", "ID_PREDIO"],
+                               kind="stable", ignore_index=True)
+
     # Como en los otros recortes publicos: el valor exacto es una llave igual
     # de buena que el ID, asi que sale redondeado y reordenado. Paso mas fino
     # que el del avaluo porque un anexo de pocos m2 vale menos de $100.000.
@@ -538,11 +571,13 @@ def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
 
 
 def grupo_comunas(d: pd.DataFrame) -> pd.Series:
-    """A que grupo pertenece la comuna de cada fila: 10, 7 o 5 comunas."""
+    """A que grupo pertenece la comuna de cada fila: 7C, 5C, 5C_N o 5C_E, los
+    mismos nombres del filtro de la app. Rural y sin comuna: 'sin grupo'."""
     c = d["COMUNA"].astype(str).str.strip().str.zfill(2)
     return pd.Series(
-        np.select([c.isin(CONFIG["comunas_7"]), c.isin(CONFIG["comunas_5"])],
-                  ["7 comunas", "5 comunas (extra)"], default="10 comunas"),
+        np.select([c.isin(CONFIG["comunas_7"]), c.isin(CONFIG["comunas_5c"]),
+                   c.isin(CONFIG["comunas_5c_n"]), c.isin(CONFIG["comunas_5"])],
+                  ["7C", "5C", "5C_N", "5C_E"], default="sin grupo"),
         index=d.index)
 
 
@@ -1343,16 +1378,21 @@ DICCIONARIO_DETALLE = [
      "liquidadas. El avaluo de la fila es el del PREDIO y viene repetido en "
      "cada una de sus construcciones"),
     ("CON_ANEXO", "1 si el predio tiene anexo, 0 si no",
-     "de VANEXO > 0. El anexo NO se liquida -la T10 no esta aprobada-, asi "
-     "que en los predios con 1 el avaluo lleva ese valor igual en las dos "
-     "vigencias y su variacion sale amortiguada"),
-    ("COMUNA", "Comuna", "de la base"),
+     "de VANEXO > 0. La comparacion de construcciones y de avaluo solo admite "
+     "predios SIN anexo; los anexos se liquidan con la T10 y salen en sus "
+     "propias filas (TABLA_ORIGEN = T10_ANEXOS)"),
+    ("COMUNA", "Comuna del predio",
+     "posiciones 10 y 11 del numero predial nacional. 01 a 22 son las "
+     "comunas urbanas; 51 a 64 son rurales (corregimientos) y solo aparecen "
+     "en filas de parqueadero (T12), la unica tabla que se aplica en lo "
+     "rural"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
-     "10 comunas (01,07,09,10,11,12,14,15,20,21), 7 comunas (02,03,04,08,17,"
-     "19,22) o 5 comunas extra (05,06,13,16,18), que se liquidan con las "
-     "columnas *_10C_*, salvo EDIFICIOS e INDUSTRIAL, que van con *_5C_N_*. "
-     "En esas dos tablas las 10 comunas se parten en 5C (01,09,10,11,12) y "
-     "5C_N (07,14,15,20,21)"),
+     "7C (02,03,04,08,17,19,22), 5C (01,09,10,11,12), 5C_N (07,14,15,20,21) "
+     "o 5C_E (05,06,13,16,18). 5C y 5C_N juntas son la 10C de las tablas, y "
+     "7C y 10C juntas, la 17C. Las 5C_E no tienen tabla propia: se liquidan "
+     "con las columnas *_10C_*, salvo EDIFICIOS e INDUSTRIAL, que van con "
+     "*_5C_N_*, y en las tablas 17C con la misma columna. 'sin grupo' son "
+     "las rurales"),
     ("ESTRPRED", "Estrato del predio", "de la base; 0 donde no viene"),
     ("ACTUALIZACION", "Si la comuna se actualizo en 2024-2025", ""),
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",
@@ -1370,10 +1410,17 @@ DICCIONARIO_DETALLE = [
      "solo en el grano por PREDIO; sale de TABLA_ORIGEN.nunique() por "
      "predio y es lo que cuenta los predios mixtos"),
     ("TABLA_ORIGEN", "Tabla de valor que le asigno la liquidacion",
-     "nombre normalizado: no distingue el grupo de comunas ni la condicion"),
+     "nombre normalizado: no distingue el grupo de comunas ni la condicion. "
+     "T10_ANEXOS y T12_PARQUEADEROS son filas de anexo y de parqueadero: no "
+     "pasan por la comparacion de construcciones, solo entran las que tienen "
+     "valor en la tabla, y lo que no les aplica (puntaje, ZHF, terreno, "
+     "avaluo, rangos) va en 0 o vacio"),
     ("TABLA_VALOR", "Columna EXACTA del Excel de tablas de la que salio el VM2",
      "por (TABLA_ORIGEN, PUNTCONS, COMUNA); el grupo 7C o 10C lo decide la "
-     "comuna. Abriendo esa columna en la fila del PUNTCONS sale el VM2"),
+     "comuna. Abriendo esa columna en la fila del PUNTCONS sale el VM2. En "
+     "los anexos es T10_NO_CONVENCIONAL_17C (se busca por CLAVE, no por "
+     "puntaje) y en los parqueaderos T12_PARQUEADEROS (valor fijo por "
+     "destino, estrato y actividad)"),
     ("ZHF", "Codigo de la zona homogenea fisica", "de la base"),
     ("TIPOLOGIA_ZHF", "Tipologia de la ZHF",
      "de la base; son los ultimos 3 digitos del ZHF y coinciden en el 100% "
@@ -1398,10 +1445,17 @@ DICCIONARIO_DETALLE = [
     ("ACTIVIDAD_ECONOMICA", "Actividad de la ZHF donde esta la construccion",
      "residencial 011-016, comercial 021-023, industrial 031-033, el resto "
      "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF"),
-    ("CLAVE", "TABLA_ORIGEN + ACTIVIDAD_ECONOMICA", "bloque del reporte"),
-    ("PUNTCONS", "Puntaje de la construccion", "de la base; con el se busca en la tabla"),
-    ("ACONCONS", "Area construida segun la base", ""),
-    ("AREA_CONST", "Area construida con que liquida 2026", "igual a ACONCONS"),
+    ("CLAVE", "TABLA_ORIGEN + ACTIVIDAD_ECONOMICA",
+     "bloque del reporte. En los anexos es la llave de la T10, DESTANEX_TIPO "
+     "(101_40 = Ramadas tipo 40); en los parqueaderos, destino_tipo "
+     "(008_Sencillo = garaje en PH sencillo; 006_Por m2 = deposito)"),
+    ("PUNTCONS", "Puntaje de la construccion",
+     "de la base; con el se busca en la tabla. 0 en anexos y parqueaderos, "
+     "que no se liquidan por puntaje"),
+    ("ACONCONS", "Area construida segun la base",
+     "0 en anexos y parqueaderos: su area va en AREA_CONST"),
+    ("AREA_CONST", "Area construida con que liquida 2026",
+     "igual a ACONCONS; en los anexos es el area del anexo (ACONANEX)"),
     ("VTER_CAT_BASE", "Terreno catastral 2026: el VTER de la base", "de la base"),
     ("VTER_COM_BASE", "Terreno comercial 2026: VTER / 0.7", "calculado"),
     ("VTER_CAT_PROYECTADO", "Terreno catastral 2027: VTERR_COM_2027 del insumo de proyeccion x 0.7; sin el, VTER_CAT_BASE", "calculado"),
@@ -1413,9 +1467,12 @@ DICCIONARIO_DETALLE = [
     ("VALORCONS", "Valor de la construccion HOY (catastral)", "de la base"),
     ("VALORCONS_CAT_VIGENCIA", "Valor TOTAL de la construccion HOY (catastral)",
      "el mismo VALORCONS de la base, repetido con este nombre para leer la "
-     "medida en paralelo con las otras"),
+     "medida en paralelo con las otras. En los anexos es VALOANEX, el valor "
+     "del anexo en la base"),
     ("VALORCONS_CAT_LIQ", "Valor total de la construccion liquidado (catastral)",
-     "AREA_CONST x VM2 x 0.7"),
+     "AREA_CONST x VM2 x 0.7. Anexo: valor de la T10 x area x 0.7. Garaje y "
+     "parqueadero (007, 008, 036, 037): valor del cupo x factor de area x "
+     "0.7. Deposito (006, 027): valor por m2 x area x 0.7"),
     ("DIF_VALORCONS_CAT", "Diferencia del valor total (catastral)",
      "VALORCONS_CAT_LIQ - VALORCONS_CAT_VIGENCIA"),
     ("VARIACION_VALORCONS_CAT_PCT", "Variacion del valor total catastral (%)",
@@ -1427,11 +1484,14 @@ DICCIONARIO_DETALLE = [
     ("VARIACION_VALORCONS_COM_PCT", "Variacion del valor total comercial (%)",
      ""),
     ("VALORCONS_COM_LIQ", "Valor de la construccion liquidado (comercial)",
-     "AREA_CONST x VM2"),
+     "AREA_CONST x VM2; en anexos y parqueaderos, la misma regla de "
+     "VALORCONS_CAT_LIQ sin el 0.7"),
     ("VM2_CAT_VIGENCIA", "VM2 catastral de la vigencia base",
-     "VALORCONS / ACONCONS"),
+     "VALORCONS / ACONCONS; en anexos y parqueaderos, el valor total / "
+     "AREA_CONST"),
     ("VM2_CAT_LIQ", "VM2 catastral que daria la liquidacion",
-     "VM2 de tabla x 0.7"),
+     "VM2 de tabla x 0.7. En el garaje, que la tabla da por cupo, es el valor "
+     "liquidado / AREA_CONST"),
     ("DIF_CAT_ABS", "Diferencia de VM2 catastral",
      "VM2_CAT_LIQ - VM2_CAT_VIGENCIA"),
     ("VARIACION_CAT_PCT", "Variacion del VM2 catastral (%)",
@@ -1466,9 +1526,10 @@ DICCIONARIO_DETALLE = [
      "VTER_CAT_BASE - 1; el terreno que no esta en el insumo sale 'Igual a "
      "0%' y el que no tiene VTER en la base, '19. Sin comparacion'"),
     ("RANGO_ANEXO", "Rango de la variacion del valor del anexo",
-     "crear_rango_variacion() sobre VANEXO; hoy sale '19. Sin comparacion' en "
-     "todas las filas porque la T10 no esta aprobada y ningun anexo se "
-     "revaloriza"),
+     "en las filas de anexo (TABLA_ORIGEN = T10_ANEXOS), crear_rango_variacion() "
+     "sobre la variacion del valor catastral del anexo: VALORCONS_CAT_LIQ "
+     "contra VALORCONS_CAT_VIGENCIA. En las construcciones y parqueaderos "
+     "sale '19. Sin comparacion', porque solo entran predios sin anexo"),
     ("FUERA_TOLERANCIA", "Si se pasa de la tolerancia configurada", ""),
     ("AVALUO_CAT_VIGENCIA", "Avaluo catastral de la vigencia base",
      "VTER_CAT_BASE + VALORCONS + VANEXO"),
@@ -1518,8 +1579,11 @@ COLUMNAS_EXCEL_DETALLE = [
 
 
 def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
-                           muestra: int | None = None) -> str:
-    """El detalle liquidado a Excel, para revisar casos a mano."""
+                           muestra: int | None = None,
+                           extras: dict | None = None) -> str:
+    """El detalle liquidado a Excel, para revisar casos a mano. 'extras' son
+    hojas adicionales {nombre: DataFrame} que van despues de Detalle, como los
+    anexos y parqueaderos, que no pasan por la comparacion principal."""
     # Solo las columnas de COLUMNAS_EXCEL_DETALLE y en ese orden. El parquet
     # lleva mas (SENTIDO, RANGO_VARIACION, FUERA_TOLERANCIA, CONSTRUCCION_ID,
     # AVALPRED) porque los usa el explorador de la app.
@@ -1570,28 +1634,36 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
             if "PCT" in c or "VARIACION" in c:
                 return f_pct, 15
             if c.startswith(("VM2", "VALORCONS", "AVALUO", "AVALPRED", "DIF",
-                             "VTER", "VANEXO")):
+                             "VTER", "VANEXO", "VALOR_")):
                 return f_money, 19
             if c in ("ACONCONS", "AREA_CONST", "PUNTCONS", "N_CONST_PREDIO",
-                     "F_COMERCIAL"):
+                     "F_COMERCIAL", "AREA"):
                 return f_num, 12
             return None, max(14, min(len(str(col)) + 4, 26))
 
         # El diccionario describe EXACTAMENTE las columnas de la hoja Detalle y
         # en su mismo orden: si listara las que no estan, mandaria a buscar
         # columnas que el archivo no trae.
-        desc = {c: q for c, q, _ in DICCIONARIO_DETALLE}
-        dic = pd.DataFrame([(c, desc.get(c, "")) for c in d.columns],
-                           columns=["VARIABLE", "DESCRIPCIÓN"])
-        for nombre, tabla, anchos in (("Detalle", d, None),
-                                      ("Diccionario", dic, (34, 72))):
+        desc = {c: (q, n) for c, q, n in DICCIONARIO_DETALLE}
+        dic = pd.DataFrame([(c, *desc.get(c, ("", ""))) for c in d.columns],
+                           columns=["VARIABLE", "DESCRIPCIÓN",
+                                    "DE DÓNDE SALE / NOTA"])
+        hojas_extra = []
+        for nombre_x, tabla_x in (extras or {}).items():
+            tabla_x = tabla_x.copy()
+            for c in tabla_x.columns:
+                if isinstance(tabla_x[c].dtype, pd.CategoricalDtype):
+                    tabla_x[c] = tabla_x[c].astype(str)
+            hojas_extra.append((nombre_x[:31], tabla_x, None))
+        for nombre, tabla, anchos in ([("Detalle", d, None)] + hojas_extra
+                                      + [("Diccionario", dic, (34, 60, 110))]):
             hoja = libro.add_worksheet(nombre)
             for i, col in enumerate(tabla.columns):
                 fmt, ancho = (_formato_col(col) if anchos is None
                               else (None, anchos[i]))
                 hoja.set_column(i, i, ancho, fmt)
                 hoja.write(0, i, str(col), f_head)
-            hoja.freeze_panes(1, 2 if nombre == "Detalle" else 0)
+            hoja.freeze_panes(1, 0 if nombre == "Diccionario" else 2)
             hoja.autofilter(0, 0, len(tabla), len(tabla.columns) - 1)
 
             fila = 1
