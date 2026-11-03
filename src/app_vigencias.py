@@ -21,6 +21,9 @@ NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"
 # Anexos (T10) y parqueaderos (T12): su propia hoja, porque no tienen puntaje y
 # se comparan con su llave y en su unidad (m2 o cupo).
 NOMBRE_ANEXOS = "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"
+# Que tablas se entregaron en cada version: una X por tabla y version. Lo
+# escribe consolidar_tablas.py con el registro de versiones.
+RUTA_TABLAS_POR_VERSION = CARPETA_VERSIONES / "TABLAS_POR_VERSION.parquet"
 
 
 def _orden_version(v: str) -> tuple:
@@ -1718,6 +1721,27 @@ with hoja_reglas:
                      "COMUNAS": st.column_config.TextColumn(width="medium"),
                      "EXCEPCIONES": st.column_config.TextColumn(width="large")})
     st.caption( "Se identifica el uso de la construcción, la condición jurídica, la tipología y la ZHF. " "Con esta información se determina la tabla de valor correspondiente a la comuna y se " "selecciona la columna asociada en el archivo de tablas de valor. Posteriormente, el VM² " "se obtiene de la intersección entre dicha columna y la fila correspondiente al puntaje " "de construcción (PUNTCONS), cuyo rango va de 1 a 100." )
+
+    st.divider()
+    st.markdown("**Tablas de valor por versión**")
+    if RUTA_TABLAS_POR_VERSION.exists():
+        por_version = pd.read_parquet(RUTA_TABLAS_POR_VERSION)
+        cols_v = [c for c in por_version.columns if c != "TABLA"]
+        st.dataframe(
+            por_version.style.set_properties(subset=cols_v,
+                                             **{"text-align": "center"}),
+            width="stretch", hide_index=True, height=420,
+            column_config={"TABLA": st.column_config.TextColumn(width="large"),
+                           **{c: st.column_config.TextColumn(width="small")
+                              for c in cols_v}})
+        st.caption("Una X en cada versión en que se entregó la tabla. Las "
+                   "tablas con X solo en VERSION1 tienen un único valor. En "
+                   "EDIFICIOS e INDUSTRIAL la 10C de la versión 1 se partió "
+                   "en la versión 2 en 5C y 5C_N, por eso esas tres tienen X "
+                   "en una sola versión.")
+    else:
+        st.info("Todavía no hay registro de versiones: sale al consolidar "
+                "las tablas (consolidar_tablas.py).")
 
     st.divider()
     st.markdown("**Grupos de comunas**")

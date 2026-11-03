@@ -47,6 +47,8 @@
 # Anexos y parqueaderos, una fila por construccion: comuna, uso, clave y
 # valores redondeados. Sin ID_PREDIO ni numero predial.
 !/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet
+# Que tablas de valor se entregaron en cada version: solo nombres y X.
+!/output/versiones/TABLAS_POR_VERSION.parquet
 
 
 # Basura de Python que vive dentro de src/

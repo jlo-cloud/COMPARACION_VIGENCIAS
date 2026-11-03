@@ -1012,6 +1012,14 @@ def escribir_por_version(fecha: str):
             for k in range(1, n_versiones + 1)}}
         for (_, c), info in registro.items()])
     resumen = resumen.set_index('TABLA').loc[indice['TABLA']].reset_index()
+    # La app lo muestra en la hoja Reglas. Va aparte del Excel -que es local-
+    # y antes de escribirlo, para que salga aunque el Excel este abierto.
+    # Solo nombres de tablas y X: se puede publicar.
+    try:
+        resumen.to_parquet(RAIZ / "output" / "versiones" /
+                           "TABLAS_POR_VERSION.parquet", index=False)
+    except OSError as e:                                  # pragma: no cover
+        print(f"   AVISO: no se pudo escribir TABLAS_POR_VERSION.parquet: {e}")
 
     hojas_conv = {f"{HOJA_CONV}_{v}": d[sorted(d.columns, key=_numero_tabla)]
                   for v, d in conv_hojas.items()}
