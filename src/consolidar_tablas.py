@@ -882,10 +882,13 @@ def escribir_por_version(fecha: str):
     Tablas_Valor_Por_Version_<fecha>.xlsx: el REGISTRO de todas las versiones
     de las tablas de valor, en un solo libro y con el formato del consolidado.
 
+      RESUMEN                  una fila por tabla y una X en cada version
+                               que se entrego (la misma tabla que muestra
+                               la hoja Reglas de la app).
       INDICE                   una fila por tabla: su version vigente,
                                cuantas veces se entrego, si el valor cambia
-                               frente a la entrega anterior, en que
-                               consolidado llego y en que hoja esta.
+                               frente a la entrega anterior y en que hoja
+                               esta.
       CONVENCIONALES_V1        la PRIMERA entrega de cada tabla, llegara en el
                                consolidado que llegara (la T8 llego en el V2
                                y va aqui: tiene un solo valor).
@@ -904,7 +907,6 @@ def escribir_por_version(fecha: str):
     if len(versiones) < 2:
         return None
 
-    ultima = list(versiones)[-1]
     # Las hojas van por VERSION DE LA TABLA, no por consolidado: la primera
     # entrega de cada tabla es su V1 y cada reentrega suma una. La T8 llego en
     # el consolidado V2 pero tiene un solo valor: es su V1.
@@ -912,16 +914,13 @@ def escribir_por_version(fecha: str):
     vigente_conv, vigente_nc = {}, {}   # columna -> valores vigentes
     version_familia = {}                # familia -> cuantas entregas lleva
     registro = {}                       # (tipo, columna) -> info del indice
-    en_ultima = set()
 
     def iguales(a, b):
         return pd.Series(a).reset_index(drop=True).equals(
             pd.Series(b).reset_index(drop=True))
 
-    def anotar(clave, consolidado, version, cambia):
-        info = registro.setdefault(clave, {'llego': consolidado,
-                                           'entregas': []})
-        info['entregas'].append(consolidado)
+    def anotar(clave, version, cambia):
+        info = registro.setdefault(clave, {})
         info['version'] = version
         info.setdefault('versiones', []).append(version)
         info['cambia'] = cambia
@@ -932,9 +931,6 @@ def escribir_por_version(fecha: str):
         nc = nc.set_index('CLAVE') if 'CLAVE' in nc.columns else pd.DataFrame()
         # Una hoja NC sin anexos trae solo los encabezados: no es una tabla.
         nc = nc.dropna(axis=1, how='all')
-        if v == ultima:
-            en_ultima = ({('CONV', c) for c in conv.columns if c != 'PUNTAJE'}
-                         | {('NC', c) for c in nc.columns})
 
         # --- convencionales: se decide por familia ---
         por_familia = {}
@@ -963,7 +959,7 @@ def escribir_por_version(fecha: str):
                                and str(k).rsplit('_', 1)[-1] == tip]
                     antes = vigente_conv[previas[0]] if previas else None
                 cambia = antes is None or not iguales(conv[c], antes)
-                anotar(('CONV', c), v, k, cambia if k > 1 else None)
+                anotar(('CONV', c), k, cambia if k > 1 else None)
                 vigente_conv[c] = conv[c]
                 hoja[c] = conv[c].values
 
@@ -975,7 +971,7 @@ def escribir_por_version(fecha: str):
                 k = registro[('NC', c)]['version'] + 1
             else:
                 continue
-            anotar(('NC', c), v, k, True if k > 1 else None)
+            anotar(('NC', c), k, True if k > 1 else None)
             vigente_nc[c] = nc[c]
             actual = nc_hojas.get(f"V{k}")
             nc_hojas[f"V{k}"] = (nc[[c]] if actual is None
@@ -993,10 +989,6 @@ def escribir_por_version(fecha: str):
             # Frente a la version anterior de la tabla; en la V1 no aplica.
             '¿CAMBIA EL VALOR?': ('-' if info['cambia'] is None
                                   else 'Sí' if info['cambia'] else 'No'),
-            'LLEGÓ EN EL CONSOLIDADO': info['llego'],
-            'ENTREGAS POR CONSOLIDADO': ', '.join(info['entregas']),
-            f'SE USA EN EL CONSOLIDADO {ultima}':
-                'Sí' if (tipo, c) in en_ultima else 'No',
             'HOJA CON EL VALOR VIGENTE':
                 f"{HOJA_CONV if tipo == 'CONV' else HOJA_NC}_{vk}",
         })
@@ -1066,11 +1058,10 @@ def _formatear_indice(ruta):
             celda.border = borde
             if reentregada:
                 celda.fill = PatternFill('solid', fgColor=COLOR_CTRL_LEVE)
-    for letra, ancho in zip('ABCDEFGHIJ',
-                            (34, 24, 16, 12, 12, 12, 14, 18, 16, 30)):
+    for letra, ancho in zip('ABCDEFG', (34, 24, 16, 16, 22, 18, 30)):
         ws.column_dimensions[letra].width = ancho
     ws.freeze_panes = 'B2'
-    ws.auto_filter.ref = f"A1:J{ws.max_row}"
+    ws.auto_filter.ref = f"A1:G{ws.max_row}"
     wb.save(ruta)
 
 
