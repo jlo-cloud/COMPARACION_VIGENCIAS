@@ -450,11 +450,14 @@ def tablas_liquidacion(df_const):
         df_const['DESTINOCONS'].isin(["030","031"]),
 
         # Anexos
-        df_const['DESTANEX'].isin([
-            "077","078","113","110","080","081","082","114","085","086","089",
-            "092","094","111","098","100","101","102","103","104","105","109",
-            "112","115","079","083","084","091","097","118","056","088","116"
-        ]),
+        # Todos los codigos de anexo LADM (077 a 120): asi todo anexo se busca
+        # en la T10 por su clave, y si la clave no tiene valor queda en 0 como
+        # "clave sin valor en la T10" y no como SIN TABLA. Antes era una lista
+        # parcial y el 087, que ya tenia valor en la T10, quedaba sin liquidar.
+        # El 056 viene de la lista anterior.
+        df_const['DESTANEX'].isin(
+            [f"{c:03d}" for c in range(77, 121)] + ["056"]
+        ),
 
         # C. comerciales
         df_const['DESTINOCONS'].isin(["019","043","022"]),
