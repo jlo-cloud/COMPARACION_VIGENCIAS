@@ -31,6 +31,11 @@ MOTIVOS_QUE_DESCUENTAN = {
 # <fecha>.xlsx. Apagado, los predios se descuentan igual pero no sale ninguno.
 EXCEL_REPORTE = True
 
+# Sin ZHF: apagado mientras Cartografia termina las zonas (05/11/2026). Ni se
+# reporta ni descuenta; el predio se liquida con su camino alterno (estrato,
+# T3_COMERCIAL_022 o T4_INDUSTRIAL_032).
+VALIDAR_ZHF = False
+
 # Que dependencia revisa y corrige cada tipo de inconsistencia. La llave es el
 # nombre de la hoja del reporte. Sin ZHF y las coordenadas son datos
 # espaciales: Cartografia. Sin puntaje, sin area, sin uso y el uso que no
@@ -59,7 +64,7 @@ USOS_PAR_DE_MODELO = {"Apartamentos_4_y_mas_pisos", "Comercio",
 def generar_reporte_inconsistencias(
     df,
     validar_coordenadas=True,
-    validar_zhf=True,
+    validar_zhf=VALIDAR_ZHF,
     validar_uso_ladm=True,
     validar_construcciones=True,
     output_path='./output/Pre_inconsistencias/'

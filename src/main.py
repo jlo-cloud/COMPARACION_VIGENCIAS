@@ -7,7 +7,7 @@ from tqdm import tqdm  # ✅ Barra de progreso
 # Importar funciones modulares
 from consolidar_tablas import (consolidar_tablas, consolidado_necesita_actualizacion,
                                tabla_valor_vigente)
-from tabla_construccion import procesar_construcciones, cruces_const_predio
+from tabla_construccion import procesar_construcciones, cruces_const_predio, leer_cambios
 from Liquidacion_tablas import tablas_liquidacion
 from comparacion_vigencia import comparacion_vigencia
 from perf import crono  # ⏱️ medición de tiempos
@@ -80,6 +80,7 @@ def main(liquidar_otras=None):
         print(f"{'='*60}")
         try:
             df_predio, df_conv, df_noconv = procesar_construcciones()
+            df_cambios = leer_cambios()
             
             if df_predio is None or df_conv is None or df_noconv is None:
                 raise ValueError("Error: No se pudieron cargar todos los archivos necesarios")
@@ -101,7 +102,8 @@ def main(liquidar_otras=None):
         print(f"=== PASO 2: {pasos[2]} ===")
         print(f"{'='*60}")
         try:
-            df_const_predio_final = cruces_const_predio(df_predio, df_conv, df_noconv)
+            df_const_predio_final = cruces_const_predio(df_predio, df_conv, df_noconv,
+                                                         df_cambios)
             
             print(f"✅ Cruces realizados correctamente")
             print(f"   - Construcciones-Predio: {len(df_const_predio_final):,}")

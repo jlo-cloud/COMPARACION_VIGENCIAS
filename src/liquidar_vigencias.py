@@ -29,13 +29,14 @@ CAMPOS = ("VM2", "TABLA", "FAMILIA", "METODO", "UNIDAD")
 
 def armar_base():
     """Pasos 1 y 2 del main: la base cruzada, sin liquidar (cuando no va 2027)."""
-    from tabla_construccion import procesar_construcciones, cruces_const_predio
+    from tabla_construccion import (procesar_construcciones, cruces_const_predio,
+                                    leer_cambios)
     print("\n=== PASO 1: base de construcciones y predios ===")
     df_predio, df_conv, df_noconv = procesar_construcciones()
     if df_predio is None or df_conv is None or df_noconv is None:
         raise ValueError("No se pudieron cargar los insumos de predios y construcciones.")
     print("\n=== PASO 2: cruces, homologacion y uso principal ===")
-    cruces_const_predio(df_predio, df_conv, df_noconv)
+    cruces_const_predio(df_predio, df_conv, df_noconv, leer_cambios())
 
 
 def escribir_txt(t: pd.DataFrame, ruta) -> None:

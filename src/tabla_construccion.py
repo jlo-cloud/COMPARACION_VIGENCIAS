@@ -12,6 +12,7 @@ from Homologacion import aplicar_homologacion, cruce_uso_ladm, homologar_rural
 from pre_inconsistencias import generar_reporte_inconsistencias
 from uso_principal import uso_principal_const
 from control_filas import control, acunar_llave
+from procesamiento_cambios import procesar_cambios
 
 
 # =====================================================================
@@ -45,6 +46,10 @@ COMUNAS_FALTANTES = ["05", "06", "13", "16", "18"]
 
 # Las que NO entran al proceso (se usa en los dos filtros de este archivo).
 COMUNAS_EXCLUIDAS = [] if INCLUIR_COMUNAS_FALTANTES else list(COMUNAS_FALTANTES)
+
+# Cambios fisicos (caracteristicas_unidad): apagado hasta que se apruebe
+# usarlos. El archivo del 03/11/2026 trae areas con el decimal perdido.
+APLICAR_CAMBIOS_FISICOS = False
 
 # Grupos con que se leen las tablas de valor (los usa Liquidacion_tablas.py).
 COMUNAS_7 = ['02', '03', '04', '08', '17', '19', '22']
@@ -190,7 +195,11 @@ def procesar_construcciones(base_path=None):
         # export_construccion_2025.txt -la entrega del anio pasado- le gano al
         # parquet por orden de nombre y el proceso empezo a leer los destinos
         # viejos, sin las columnas ESPECIAL, VALOR_M2 ni INTEGRAL.
-        "conv": r"convencional|construccion_homologado",
+        #
+        # El lookbehind deja fuera "no_convencional": con dos entregas de
+        # anexos en la carpeta, el patron suelto "convencional" se quedaba con
+        # el archivo VIEJO de anexos como si fuera el de convencionales.
+        "conv": r"(?<!no_)(?<!no-)(?<!no)convencional|construccion_homologado",
     }
 
     dataframes = {k: None for k in file_patterns}
@@ -289,6 +298,114 @@ def procesar_construcciones(base_path=None):
         dataframes["conv"],
         dataframes["no_conv"]
     )
+def leer_cambios(base_path=None):
+    """El archivo de cambios fisicos (caracteristicas_unidad_<fecha>) ya
+    procesado, o None si no hay. Toma el mas reciente de la carpeta de
+    insumos; con la ventana, el que se haya elegido alli."""
+    if not APLICAR_CAMBIOS_FISICOS:
+        print("ℹ️ Cambios fisicos apagados (APLICAR_CAMBIOS_FISICOS = False)")
+        return None
+    if insumos.manifiesto():
+        ruta = insumos.ruta("cambios_fisicos")
+        candidatos = [ruta] if ruta else []
+    else:
+        base = Path(base_path) if base_path else (
+            Path(os.environ.get("PRELIQ_RAIZ") or Path(__file__).resolve().parent.parent)
+            / "input" / "export_liq")
+        candidatos = sorted(
+            (f for f in glob.glob(str(base / "*"))
+             if re.search(r"caracteristicas_unidad", os.path.basename(f), re.IGNORECASE)),
+            key=lambda f: os.path.basename(f), reverse=True)
+    if not candidatos:
+        print("ℹ️ Sin archivo de cambios fisicos (caracteristicas_unidad): "
+              "la base se usa tal cual")
+        return None
+    print(f"✅ cambios fisicos: {os.path.basename(candidatos[0])}")
+    return procesar_cambios(leer_archivo(candidatos[0]))
+
+
+def aplicar_cambios_fisicos(df_const, df_predio, cambios):
+    """
+    Reemplaza las construcciones de los predios que tuvieron cambio fisico.
+
+    De cada predio del archivo de cambios se BORRA todo lo que la base tenia
+    -construcciones y anexos- y se ponen en su lugar las filas del archivo, que
+    traen el predio completo como quedo. Va despues de la homologacion porque
+    esas filas ya vienen en codigo LADM. Tambien se recalculan el area
+    construida (ARECPRED) y la de anexos (ACONANEXT) del predio.
+
+    Esas filas no traen el valor de la vigencia (VALORCONS, VALOANEX): van en
+    0, porque la construccion de antes ya no existe. CAMBIO_FISICO = 1 las
+    marca.
+    """
+    if cambios is None or cambios.empty:
+        df_const["CAMBIO_FISICO"] = 0
+        return df_const, df_predio
+
+    ids_predio = set(df_predio["ID_PREDIO"].astype(str))
+    cambios = cambios[cambios["ID_PREDIO"].astype(str).isin(ids_predio)].copy()
+    ids = set(cambios["ID_PREDIO"].astype(str))
+    if cambios.empty:
+        df_const["CAMBIO_FISICO"] = 0
+        print("ℹ️ Ningun predio con cambio fisico esta en la base de esta corrida")
+        return df_const, df_predio
+
+    quitar = df_const["ID_PREDIO"].astype(str).isin(ids)
+    print(f"🔁 Cambios fisicos: {len(ids):,} predios; se quitan "
+          f"{int(quitar.sum()):,} construcciones y anexos de la base y se "
+          f"agregan {len(cambios):,} del archivo de cambios")
+
+    predio = (df_predio.assign(ID_PREDIO=df_predio["ID_PREDIO"].astype(str))
+                       .drop_duplicates("ID_PREDIO").set_index("ID_PREDIO"))
+    nuevas = pd.DataFrame({
+        "ID_PREDIO": cambios["ID_PREDIO"].astype(str).to_numpy(),
+        "DESTINOCONS": cambios["DESTINOCONS"].to_numpy(),
+        "DESTANEX": cambios["DESTANEX"].to_numpy(),
+        # Ya es LADM: el "original" es el mismo codigo.
+        "DESTINOCONS_2025": cambios["DESTINOCONS"].to_numpy(),
+        "DESTANEX_2025": cambios["DESTANEX"].to_numpy(),
+        "USO_LADM": cambios["USO_LADM"].to_numpy(),
+        "PUNTCONS": cambios["PUNTCONS"].to_numpy(),
+        "TIPOANEXO": cambios["TIPOANEXO"].to_numpy(),
+        "TPISCONS": cambios["TPISCONS"].to_numpy(),
+        "ANOCONST": cambios["ANOCONST"].to_numpy(),
+        "ACONCONS": cambios["ACONCONS"].to_numpy(),
+        "ACONANEX": cambios["ACONANEX"].to_numpy(),
+        "VALORCONS": 0.0, "VALOANEX": 0.0, "ESPECIAL": 0, "INTEGRAL": 0,
+    })
+    npn = nuevas["ID_PREDIO"].map(predio["NUMERO_PREDIAL_NACIONAL"]).astype(str)
+    nuevas["NUMERO_PREDIAL_NACIONAL"] = npn
+    nuevas["COMUNA"] = npn.str[9:11]
+    nuevas["CONDICION"] = npn.str[21:22]
+    if "VIGEPRED" in predio.columns:
+        nuevas["VIGEPRED"] = nuevas["ID_PREDIO"].map(predio["VIGEPRED"])
+    nuevas["AREA_CONST"] = np.where(nuevas["ACONCONS"] == 0, nuevas["ACONANEX"],
+                                    nuevas["ACONCONS"])
+    nuevas["LLAVE_CONST"] = acunar_llave(nuevas, "F")
+    nuevas["CAMBIO_FISICO"] = 1
+
+    base = df_const[~quitar].copy()
+    base["CAMBIO_FISICO"] = 0
+    # Mismo tipo que la base: ESPECIAL e INTEGRAL llegan como texto ("0"/"1")
+    # y mezclados con enteros el parquet de salida no se puede escribir.
+    for c in ("ESPECIAL", "INTEGRAL"):
+        if c in base.columns and not pd.api.types.is_numeric_dtype(base[c]):
+            nuevas[c] = "0"
+    df_const = pd.concat([base, nuevas], ignore_index=True)
+
+    # Areas del predio con lo que quedo.
+    sumas = nuevas.groupby("ID_PREDIO")[["ACONCONS", "ACONANEX"]].sum()
+    dp = df_predio.copy()
+    llave = dp["ID_PREDIO"].astype(str)
+    con = llave.isin(sumas.index)
+    dp.loc[con, "ARECPRED"] = llave[con].map(sumas["ACONCONS"]).to_numpy()
+    dp.loc[con, "ACONANEXT"] = llave[con].map(sumas["ACONANEX"]).to_numpy()
+    control.marca("cambios fisicos", df_const,
+                  baja_ok="construcciones de predios con cambio fisico",
+                  alta_ok="filas del archivo de cambios fisicos")
+    return df_const, dp
+
+
 def renombrar_destinos(d):
     """
     Renombra el destino crudo a las columnas que espera Homologacion.
@@ -305,7 +422,7 @@ def renombrar_destinos(d):
                              "DESTANEX": "DESTANEX_2025"})
 
 
-def cruces_const_predio(df_predio, df_conv, df_noconv):
+def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
 
 
     print(f"Filas: {len(df_predio)}")
@@ -668,6 +785,10 @@ def cruces_const_predio(df_predio, df_conv, df_noconv):
     df_const['CONDICION'] = df_const['CONDICION'].fillna('0').astype(str)
 
     df_const = df_const.drop(columns='NUM_CONST_TERR') ### Aqui se elimina para luego cruzarla
+
+    # Predios con cambio fisico: su base se reemplaza por el archivo de cambios.
+    df_const, df_predio_usop = aplicar_cambios_fisicos(df_const, df_predio_usop,
+                                                       df_cambios)
 
     df_const = convertir_a_cero(df_const,['PUNTCONS', 'ACONCONS', 'TPISCONS', 'ANOCONST', 'ACONANEX', 'TIPOANEXO'])
     df_const = convertir_a_float(df_const, ['ACONCONS', 'ACONANEX'])

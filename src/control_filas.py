@@ -108,8 +108,9 @@ class Control:
         self._previa = None
 
     def marca(self, nombre, df=None, convencionales=None,
-              no_convencionales=None, baja_ok=None):
-        """Registra una etapa. baja_ok es el motivo por el que puede bajar."""
+              no_convencionales=None, baja_ok=None, alta_ok=None):
+        """Registra una etapa. baja_ok es el motivo por el que puede bajar y
+        alta_ok el motivo por el que pueden llegar filas nuevas."""
         if not self.activo:
             return
         t0 = time.perf_counter()
@@ -137,7 +138,7 @@ class Control:
                     llaves = (trozos[0].append(trozos[1:]) if len(trozos) > 1
                               else trozos[0])
 
-        dato.update(nombre=nombre, baja_ok=baja_ok,
+        dato.update(nombre=nombre, baja_ok=baja_ok, alta_ok=alta_ok,
                     perdidas=None, nuevas=None, ejemplos=[])
 
         if llaves is not None:
@@ -159,7 +160,7 @@ class Control:
         problemas = []
         if e["perdidas"] and not e["baja_ok"]:
             problemas.append(f"perdio {e['perdidas']:,} llaves")
-        if e["nuevas"]:
+        if e["nuevas"] and not e.get("alta_ok"):
             problemas.append(f"aparecieron {e['nuevas']:,} llaves nuevas")
         if not problemas:
             return
@@ -212,7 +213,7 @@ class Control:
                 alertas.append((e["nombre"],
                                 f"perdio {e['perdidas']:,} llaves",
                                 e["ejemplos"]))
-            if e["nuevas"]:
+            if e["nuevas"] and not e.get("alta_ok"):
                 alertas.append((e["nombre"],
                                 f"aparecieron {e['nuevas']:,} llaves", []))
 
@@ -222,6 +223,9 @@ class Control:
             if e["baja_ok"] and e["perdidas"]:
                 print(f"{'':<{ancho}}   baja prevista, "
                       f"{e['perdidas']:,}: {e['baja_ok']}")
+            if e.get("alta_ok") and e["nuevas"]:
+                print(f"{'':<{ancho}}   alta prevista, "
+                      f"{e['nuevas']:,}: {e['alta_ok']}")
 
         print("-" * (ancho + 62))
         ent, sal = self.etapas[0]["filas"], self.etapas[-1]["filas"]

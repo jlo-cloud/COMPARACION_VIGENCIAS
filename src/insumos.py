@@ -32,6 +32,10 @@ INSUMOS = [
     ("construcciones_noconv", "Construcciones no convencionales (anexos)", True,
      "Los anexos (T10)",
      lambda n, c: _tiene(c, "ID_PREDIO", "DESTANEX", "TIPOANEXO", "ACONANEX") and "DESTINOCONS" not in c),
+    ("cambios_fisicos", "Cambios fisicos (caracteristicas_unidad)", False,
+     "Predios con cambio fisico: se borran sus construcciones y se ponen las del archivo",
+     lambda n, c: "caracteristicas_unidad" in n
+     or _tiene([x.upper() for x in c], "ID_PREDIO", "TIPO_UNIDAD_CONSTRUCCION", "USO_LADM")),
     ("predio_anterior", "Predios de la entrega anterior", False,
      "ZHF_ANTERIOR (cambio de tipologia) y la ZHF con que leen los modelos",
      lambda n, c: re.search(r"export_predio_\d{8}", n) is not None
