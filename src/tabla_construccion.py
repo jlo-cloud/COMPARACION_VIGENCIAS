@@ -576,21 +576,17 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
 
     # Construcciones cuyo predio no esta en el export de predios: sin predio no
     # hay comuna, ZHF ni estrato con que liquidarlas. No se pierden en silencio:
-    # quedan en un archivo para Reconocimiento y el control las cuenta. Van en
-    # una sola hoja con las columnas tal como llegaron en los exports.
-    sin_predio = df_const[df_const['NUMERO_PREDIAL_NACIONAL'].isna()]
+    # salen en la hoja PREDIO de pre-inconsistencias, con las columnas tal
+    # como llegaron en los exports, y el control las cuenta.
+    sin_predio = (df_const[df_const['NUMERO_PREDIAL_NACIONAL'].isna()]
+                  .drop(columns=['NUMERO_PREDIAL_NACIONAL', 'VIGEPRED',
+                                 'LLAVE_CONST', 'ID_TERR', 'NUM_CONST_TERR'],
+                        errors='ignore')
+                  .rename(columns={'_NPN_EXPORT': 'NUMERO_PREDIAL_NACIONAL'}))
     if len(sin_predio):
-        os.makedirs("./output/Pre_inconsistencias", exist_ok=True)
-        ruta_sp = ("./output/Pre_inconsistencias/construcciones_sin_predio_"
-                   f"{datetime.now():%Y%m%d}.xlsx")
-        (sin_predio
-         .drop(columns=['NUMERO_PREDIAL_NACIONAL', 'VIGEPRED', 'LLAVE_CONST',
-                        'ID_TERR', 'NUM_CONST_TERR'], errors='ignore')
-         .rename(columns={'_NPN_EXPORT': 'NUMERO_PREDIAL_NACIONAL'})
-         .to_excel(ruta_sp, index=False))
         print(f"⚠️ {len(sin_predio):,} construcciones de "
               f"{sin_predio['ID_PREDIO'].nunique():,} predios que no estan en "
-              f"el export de predios: {ruta_sp}")
+              f"el export de predios (hoja PREDIO de pre-inconsistencias)")
     df_const = (df_const.dropna(subset=['NUMERO_PREDIAL_NACIONAL'])
                 .drop(columns=['_NPN_EXPORT'], errors='ignore').copy())
     control.marca("cruce con export de predios", df_const,
@@ -946,7 +942,8 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
     # inconsistentes, que es lo pedido -no se liquidan hasta que los ajusten-.
     # Con los criterios de hoy son ~64.000 predios, el 8.8%. Para volver a
     # correr sin descontar, comente la primera linea y descomente la segunda.
-    df_const_predio_clean = generar_reporte_inconsistencias(df_const_predio)
+    df_const_predio_clean = generar_reporte_inconsistencias(
+        df_const_predio, sin_predio=sin_predio)
     control.marca("pre_inconsistencias", df_const_predio_clean,
                   baja_ok="predios a los que les falta informacion")
     # df_const_predio_clean = df_const_predio.copy()

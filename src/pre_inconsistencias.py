@@ -49,6 +49,7 @@ RESPONSABLES = {
     'AREA_CONSTRUIDA': 'RECONOCIMIENTO',
     'HOMOLOGACION': 'RECONOCIMIENTO',
     'CONSISTENCIA_USO': 'RECONOCIMIENTO',
+    'PREDIO': 'RECONOCIMIENTO',
 }
 
 # Las columnas que van primero en cada hoja; el resto sigue detras.
@@ -77,7 +78,8 @@ def generar_reporte_inconsistencias(
     validar_zhf=VALIDAR_ZHF,
     validar_uso_ladm=True,
     validar_construcciones=True,
-    output_path='./output/Pre_inconsistencias/'
+    output_path='./output/Pre_inconsistencias/',
+    sin_predio=None,
 ):
 
     print("\n" + "="*80)
@@ -86,6 +88,16 @@ def generar_reporte_inconsistencias(
 
     inconsistencias = {}
     predios_con_inconsistencias = {}
+
+    # Construcciones cuyo predio no esta en el export de predios. Salen antes
+    # (en el cruce con predios, sin predio no hay con que liquidarlas); aqui
+    # solo se reportan, con las columnas tal como llegaron en el export.
+    if sin_predio is not None and len(sin_predio):
+        inconsistencias['PREDIO'] = {
+            'total': len(sin_predio),
+            'predios_unicos': sin_predio['ID_PREDIO'].nunique(),
+            'detalle': sin_predio,
+        }
 
     # ------------------------------------------------------------------
     # 1️⃣ VALIDAR ZHF
@@ -350,7 +362,10 @@ def generar_reporte_inconsistencias(
         print(f"✅ Predios limpios: {df_limpio['ID_PREDIO'].nunique()}")
         return df_limpio
 
-    exportar_reportes(inconsistencias, set(a_descontar),
+    no_liquidan = set(a_descontar)
+    if 'PREDIO' in inconsistencias:
+        no_liquidan |= set(inconsistencias['PREDIO']['detalle']['ID_PREDIO'])
+    exportar_reportes(inconsistencias, no_liquidan,
                       df['ID_PREDIO'].nunique(), output_path)
     print(f"✅ Predios limpios: {df_limpio['ID_PREDIO'].nunique()}")
 
