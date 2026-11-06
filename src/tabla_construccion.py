@@ -559,9 +559,11 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
     
 
     
+    # El NPN de la construccion se reemplaza por el del predio, pero se guarda
+    # aparte para el archivo de construcciones sin predio.
     if 'NUMERO_PREDIAL_NACIONAL' in df_const.columns:
-        df_const.drop(columns=['NUMERO_PREDIAL_NACIONAL'], inplace=True)
-        print("✅ NUMERO_PREDIAL_NACIONAL eliminada")
+        df_const.rename(columns={'NUMERO_PREDIAL_NACIONAL': '_NPN_EXPORT'},
+                        inplace=True)
     else:
         print("ℹ️ NUMERO_PREDIAL_NACIONAL no existe en df_const")
         
@@ -572,7 +574,27 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
     )
     print("Antes:", len(df_const))
 
-    df_const = df_const.dropna(subset=['NUMERO_PREDIAL_NACIONAL']).copy()
+    # Construcciones cuyo predio no esta en el export de predios: sin predio no
+    # hay comuna, ZHF ni estrato con que liquidarlas. No se pierden en silencio:
+    # quedan en un archivo para Reconocimiento y el control las cuenta. Van en
+    # una sola hoja con las columnas tal como llegaron en los exports.
+    sin_predio = df_const[df_const['NUMERO_PREDIAL_NACIONAL'].isna()]
+    if len(sin_predio):
+        os.makedirs("./output/Pre_inconsistencias", exist_ok=True)
+        ruta_sp = ("./output/Pre_inconsistencias/construcciones_sin_predio_"
+                   f"{datetime.now():%Y%m%d}.xlsx")
+        (sin_predio
+         .drop(columns=['NUMERO_PREDIAL_NACIONAL', 'VIGEPRED', 'LLAVE_CONST',
+                        'ID_TERR', 'NUM_CONST_TERR'], errors='ignore')
+         .rename(columns={'_NPN_EXPORT': 'NUMERO_PREDIAL_NACIONAL'})
+         .to_excel(ruta_sp, index=False))
+        print(f"⚠️ {len(sin_predio):,} construcciones de "
+              f"{sin_predio['ID_PREDIO'].nunique():,} predios que no estan en "
+              f"el export de predios: {ruta_sp}")
+    df_const = (df_const.dropna(subset=['NUMERO_PREDIAL_NACIONAL'])
+                .drop(columns=['_NPN_EXPORT'], errors='ignore').copy())
+    control.marca("cruce con export de predios", df_const,
+                  baja_ok="construcciones sin predio en el export de predios")
 
     print("Después filtro comunas:", len(df_const))
    
@@ -893,19 +915,25 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
     df_const_predio = pd.concat([df_conv_ord, df_noconv_ord], ignore_index=True)
 
     
-    # Sufijo: DESTINOCONS si es > 0, si no DESTANEX si es > 0, si no nada.
+    # CONSTRUCCION_ID = ID_PREDIO-<C|A><consecutivo 2>-<destino 3>, p. ej.
+    # 123456-C01-012 (un predio no pasa de 50 construcciones; con 2 digitos
+    # llega a 99). Con separadores y ancho fijo no se repite: pegado sin
+    # guiones, la 1 con destino 12 y la 11 con destino 2 daban la misma llave
+    # (31 repetidas en el export del 03/11/2026).
     # Por columnas y no con apply(axis=1), que iba fila por fila (~30 s).
     def _destino_txt(col):
         v = pd.to_numeric(df_const_predio[col], errors='coerce')
         ok = v.notna() & (v > 0)
-        return ok, np.trunc(v.where(ok, 0)).astype('int64').astype(str)
+        return ok, np.trunc(v.where(ok, 0)).astype('int64').astype(str).str.zfill(3)
     _ok_cons, _txt_cons = _destino_txt('DESTINOCONS')
     _ok_anex, _txt_anex = _destino_txt('DESTANEX')
+    _idx = df_const_predio.index
     df_const_predio['CONSTRUCCION_ID'] = (
-    df_const_predio['ID_PREDIO'].astype(str) +
-    df_const_predio['CONSECUTIVO'].astype(str) +
-    pd.Series(np.select([_ok_cons, _ok_anex], [_txt_cons, _txt_anex], ''),
-              index=df_const_predio.index)
+        df_const_predio['ID_PREDIO'].astype(str) + '-' +
+        pd.Series(np.where(_ok_cons, 'C', 'A'), index=_idx) +
+        df_const_predio['CONSECUTIVO'].astype(int).astype(str).str.zfill(2) + '-' +
+        pd.Series(np.select([_ok_cons, _ok_anex], [_txt_cons, _txt_anex], '000'),
+                  index=_idx)
     )
 
    

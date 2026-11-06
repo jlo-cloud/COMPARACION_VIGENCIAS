@@ -1721,23 +1721,17 @@ def tablas_liquidacion(df_const):
     
     print(f'DIFERENCIA ENTRE  DF_CONST_LIQ -DF_CONST DESPUES DE QUITAR DUPLICADOS {len(df_const_liq)-len(df_const)}')
 
-    antes = len(df_const_liq)
-    df_const_liq = df_const_liq.drop_duplicates(
-        subset=[
-            'ID_PREDIO',
-            'DESTINOCONS',
-            'DESTANEX',
-            'ACONCONS',
-            'ACONANEX',
-            'PUNTCONS',
-            'TIPOANEXO',
-            'VM2_ESP_2026'
-        ],
-        keep='first'
-    )
-    print(f'DUPLICADOS ELIMINADOS EN SALIDA: {antes - len(df_const_liq):,} filas')
-    control.marca("asignacion de valores", df_const_liq,
-                  baja_ok="construcciones iguales a otra del mismo predio")
+    # Las construcciones que entran son las que salen: no se quita ninguna por
+    # parecerse a otra. Antes se borraban las iguales en destino, area y
+    # puntaje (559 en noviembre), y casi todas eran construcciones distintas
+    # (ID_CONSTRUCCION distinto, p. ej. dos locales iguales). Solo se avisa.
+    iguales = df_const_liq.duplicated(
+        subset=['ID_PREDIO', 'DESTINOCONS', 'DESTANEX', 'ACONCONS', 'ACONANEX',
+                'PUNTCONS', 'TIPOANEXO'], keep=False)
+    print(f'CONSTRUCCIONES IGUALES A OTRA DEL MISMO PREDIO (se conservan): '
+          f'{int(iguales.sum()):,} filas en '
+          f'{df_const_liq.loc[iguales, "ID_PREDIO"].nunique():,} predios')
+    control.marca("asignacion de valores", df_const_liq)
     print(f'REGISTROS FINALES df_const_liq:  {len(df_const_liq):,}')
     # ⏸️ DESACTIVADO: escribir 725k filas a .xlsx tardaba ~555s (82% del proceso).
     # Reactivar solo cuando se necesite exportar a Excel. La data ya queda en LIQUIDACION_TABLAS.parquet.

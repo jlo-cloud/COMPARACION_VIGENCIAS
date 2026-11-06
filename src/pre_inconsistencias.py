@@ -45,20 +45,30 @@ RESPONSABLES = {
     'SIN_ZHF': 'CARTOGRAFIA',
     'SIN_LONGITUD': 'CARTOGRAFIA',
     'SIN_LATITUD': 'CARTOGRAFIA',
-    'SIN_PUNTAJE': 'RECONOCIMIENTO',
-    'SIN_AREA_CONSTRUIDA': 'RECONOCIMIENTO',
-    'SIN_USO_LADM': 'RECONOCIMIENTO',
-    'USO_INCONSISTENTE': 'RECONOCIMIENTO',
+    'PUNTAJE': 'RECONOCIMIENTO',
+    'AREA_CONSTRUIDA': 'RECONOCIMIENTO',
+    'HOMOLOGACION': 'RECONOCIMIENTO',
+    'CONSISTENCIA_USO': 'RECONOCIMIENTO',
 }
 
 # Las columnas que van primero en cada hoja; el resto sigue detras.
-COLUMNAS_PRIMERO = ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'COMUNA',
-                    'MOTIVO_INCONSISTENCIA', 'RESPONSABLE', 'DESCUENTA_PREDIO']
+COLUMNAS_PRIMERO = ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'COMUNA']
 
 
 # Usos de no PH cuyo par en PH se liquida por MODELO en condicion 9.
 USOS_PAR_DE_MODELO = {"Apartamentos_4_y_mas_pisos", "Comercio",
                       "Oficinas_Consultorios"}
+
+# Usos de no PH que tienen su version _PH en el catalogo LADM. Solo estos son
+# inconsistentes en condicion 9: los demas (deposito 006, comercio deposito 027,
+# pensiones 038, clinicas 054, puestos de salud 067...) no tienen otro codigo y
+# en un edificio en PH estan bien registrados. Eran ~15.900 avisos falsos.
+USOS_CON_PAR_PH = {
+    "Apartamentos_4_y_mas_pisos", "Vivienda_Colonial", "Garajes_Cubiertos",
+    "Vivienda_Hasta_3_Pisos", "Vivienda_Recreacional", "Bodegas_Comerciales",
+    "Centros_Comerciales_pequenios", "Centros_Comerciales_grandes", "Comercio",
+    "Hoteles", "Oficinas_Consultorios", "Parqueaderos", "Restaurantes",
+    "Teatro_Cinemas", "Bodega_Casa_Bomba", "Industrias", "Iglesia"}
 
 
 def generar_reporte_inconsistencias(
@@ -188,7 +198,7 @@ def generar_reporte_inconsistencias(
         for predio in sin_uso_ladm['ID_PREDIO'].unique():
             predios_con_inconsistencias.setdefault(predio, []).append('Sin USO_LADM')
 
-        inconsistencias['SIN_USO_LADM'] = {
+        inconsistencias['HOMOLOGACION'] = {
             'total': len(sin_uso_ladm),
             'predios_unicos': sin_uso_ladm['ID_PREDIO'].nunique(),
             'detalle': sin_uso_ladm.drop_duplicates('ID_PREDIO')
@@ -203,6 +213,8 @@ def generar_reporte_inconsistencias(
         es_anexo = pd.to_numeric(df['DESTANEX'], errors='coerce').fillna(0) > 0
         uso_txt = df['USO_LADM'].astype(str)
         tiene_ph = uso_txt.str.contains('_PH', case=False, na=False)
+        # Los usos sin version _PH no pueden estar mal en condicion 9.
+        sin_par_ph = ~tiene_ph & ~uso_txt.str.strip().isin(USOS_CON_PAR_PH)
         cond_num = pd.to_numeric(df['CONDICION'], errors='coerce').fillna(0)
 
         # En las 7 comunas el residencial NO se separa por condicion: el
@@ -233,7 +245,7 @@ def generar_reporte_inconsistencias(
         falla_c = ~tiene_ph & (cond_num == 9) & es_7c & ~par_modelo
 
         uso_ph = df[df['USO_LADM'].notna() & ~es_anexo &
-                    (falla_a | falla_b | falla_c | falla_d)].copy()
+                    (falla_a | ((falla_b | falla_c | falla_d) & ~sin_par_ph))].copy()
 
         uso_ph['MOTIVO_INCONSISTENCIA'] = np.select(
             [falla_a[uso_ph.index], falla_b[uso_ph.index],
@@ -251,7 +263,7 @@ def generar_reporte_inconsistencias(
             predios_con_inconsistencias.setdefault(predio, []).append(
                 'USO_LADM inconsistente sin efecto')
 
-        inconsistencias['USO_INCONSISTENTE'] = {
+        inconsistencias['CONSISTENCIA_USO'] = {
             'total': len(uso_ph),
             'predios_unicos': uso_ph['ID_PREDIO'].nunique(),
             'detalle': uso_ph
@@ -265,27 +277,37 @@ def generar_reporte_inconsistencias(
         codigos_ok = [6, 7, 8, 27, 36, 37]
 
         # SIN PUNTAJE CONDICIONADO
+        # El TIPOANEXO es cerrado (10, 20, ... 90): un 25 o un 88 no existe en
+        # la T10 y el anexo queda sin valor.
+        tipo_anexo = pd.to_numeric(df['TIPOANEXO'], errors='coerce').fillna(0)
+        es_anexo_p = df['DESTANEX'].fillna(0) > 0
+        anexo_sin_tipo = es_anexo_p & (tipo_anexo == 0)
+        anexo_tipo_abierto = es_anexo_p & (tipo_anexo != 0) & (tipo_anexo % 10 != 0)
+        # El puntaje de un convencional va de 1 a 100.
+        puntaje = pd.to_numeric(df['PUNTCONS'], errors='coerce').fillna(0)
+        puntaje_fuera = (df['DESTINOCONS'].fillna(0) > 0) & ((puntaje < 0) | (puntaje > 100))
         sin_puntaje_cond = df[
             (
                 (
                     (df['DESTINOCONS'].fillna(0) > 0) &
                     (~df['DESTINOCONS'].fillna(0).isin(codigos_ok)) &
-                    (df['PUNTCONS'].fillna(0) == 0)
+                    (puntaje == 0)
                 )
-                |
-                (
-                    (df['DESTANEX'].fillna(0) > 0) &
-                    (df['TIPOANEXO'].fillna(0) == 0)
-                )
+                | puntaje_fuera | anexo_sin_tipo | anexo_tipo_abierto
             )
         ].copy()
 
-        sin_puntaje_cond['MOTIVO_INCONSISTENCIA'] = 'Sin puntaje condicionado'
+        sin_puntaje_cond['MOTIVO_INCONSISTENCIA'] = np.select(
+            [anexo_tipo_abierto[sin_puntaje_cond.index],
+             puntaje_fuera[sin_puntaje_cond.index]],
+            ['TIPOANEXO no cerrado (no es 10, 20, ... 90)',
+             'Puntaje fuera de 1 a 100'],
+            default='Sin puntaje condicionado')
 
         for predio in sin_puntaje_cond['ID_PREDIO'].unique():
             predios_con_inconsistencias.setdefault(predio, []).append('Sin puntaje')
 
-        inconsistencias['SIN_PUNTAJE'] = {
+        inconsistencias['PUNTAJE'] = {
             'total': len(sin_puntaje_cond),
             'predios_unicos': sin_puntaje_cond['ID_PREDIO'].nunique(),
             'detalle': sin_puntaje_cond.drop_duplicates('ID_PREDIO')
@@ -301,7 +323,7 @@ def generar_reporte_inconsistencias(
         for predio in sin_area['ID_PREDIO'].unique():
             predios_con_inconsistencias.setdefault(predio, []).append('Sin área')
 
-        inconsistencias['SIN_AREA_CONSTRUIDA'] = {
+        inconsistencias['AREA_CONSTRUIDA'] = {
             'total': len(sin_area),
             'predios_unicos': sin_area['ID_PREDIO'].nunique(),
             'detalle': sin_area.drop_duplicates('ID_PREDIO')
@@ -340,29 +362,34 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
     os.makedirs(output_path, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d')
 
-    # Cada hoja con su responsable y con la marca de si el predio sale de la
-    # liquidacion: es lo primero que pregunta quien recibe el reporte.
+    # Las hojas de detalle salen con las columnas de los datos, sin agregarles
+    # motivo, responsable ni marca de descuento: eso queda en el RESUMEN.
     hojas = {}
     for nombre, data in inconsistencias.items():
-        d = data['detalle'].copy()
-        d['RESPONSABLE'] = RESPONSABLES.get(nombre, 'POR_DEFINIR')
-        d['DESCUENTA_PREDIO'] = np.where(d['ID_PREDIO'].isin(descontados),
-                                         'Sí', 'No')
+        d = data['detalle'].drop(columns=['MOTIVO_INCONSISTENCIA'],
+                                 errors='ignore')
         primero = [c for c in COLUMNAS_PRIMERO if c in d.columns]
         hojas[nombre] = d[primero + [c for c in d.columns if c not in primero]]
 
     def resumen_de(nombres):
-        return pd.DataFrame([{
+        # Solo los tipos que tienen casos, y al final la fila Total.
+        r = pd.DataFrame([{
             'Tipo': k,
             'Responsable': RESPONSABLES.get(k, 'POR_DEFINIR'),
             'Registros': inconsistencias[k]['total'],
             'Predios': inconsistencias[k]['predios_unicos'],
             'Predios que se descuentan': int(
-                hojas[k].loc[hojas[k]['DESCUENTA_PREDIO'] == 'Sí',
+                hojas[k].loc[hojas[k]['ID_PREDIO'].isin(descontados),
                              'ID_PREDIO'].nunique()),
             '% Predios': round(inconsistencias[k]['predios_unicos']
                                / total_predios * 100, 2),
-        } for k in nombres])
+        } for k in nombres if inconsistencias[k]['total'] > 0])
+        if r.empty:
+            return r
+        total = {'Tipo': 'Total'}
+        for c in ['Registros', 'Predios', 'Predios que se descuentan']:
+            total[c] = int(r[c].sum())
+        return pd.concat([r, pd.DataFrame([total])], ignore_index=True)
 
     def escribir(archivo, nombres):
         # xlsxwriter y no openpyxl: openpyxl escribe celda por celda y con

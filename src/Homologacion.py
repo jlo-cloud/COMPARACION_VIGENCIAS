@@ -339,6 +339,8 @@ def cruce_uso_ladm(df):
     # Separar construcciones convencionales y no convencionales
     df_conv = df[(df['DESTINOCONS_2025'] > 0) & (df['DESTINOCONS_2025'] <= 76)].copy()
     df_no_conv = df[df['DESTANEX_2025'] > 76].copy()
+    # Antes de los merge, que reinician el indice.
+    df_resto = df.drop(df_conv.index.union(df_no_conv.index)).copy()
     n_in = len(df)  # 🔎 para diagnóstico de descartadas [URBANO 2024]
 
     ########## Tabla de usos convencionales (1-76)
@@ -488,10 +490,17 @@ def cruce_uso_ladm(df):
     # Merge no convencionales (usando DESTANEX_2025)
     df_no_conv = pd.merge(df_no_conv, no_conv, on="DESTANEX_2025", how="left")
     
+    # Lo que no encaja (convencional con destino > 76, como el 114 viejo, o
+    # anexo con codigo de convencional, como 36 o 37) ya no se descarta: sigue
+    # sin USO_LADM y sale en el reporte de HOMOLOGACION. Lo que entra, sale.
+    df_resto['DESTINOCONS'] = pd.to_numeric(df_resto['DESTINOCONS_2025'], errors='coerce').fillna(0).round(0).astype(int)
+    df_resto['DESTANEX'] = pd.to_numeric(df_resto['DESTANEX_2025'], errors='coerce').fillna(0).round(0).astype(int)
+    df_resto['USO_LADM'] = np.nan
+
     # Concatenar resultados
-    df = pd.concat([df_conv, df_no_conv], ignore_index=True)
-    
-    
+    df = pd.concat([df_conv, df_no_conv, df_resto], ignore_index=True)
+
+
     print(f"Construcciones 2025 procesadas: {df.shape}")
     print(f"  - Convencionales (DESTINOCONS_2025 ≤ 76): {len(df_conv)}")
     print(f"  - No convencionales (DESTANEX_2025 > 76): {len(df_no_conv)}")

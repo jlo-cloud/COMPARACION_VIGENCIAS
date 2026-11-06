@@ -947,7 +947,7 @@ def hoja_condicion_modelo(wb) -> None:
     ], ["FCE4D6", "FCE4D6", "FCE4D6", None])
     ws.cell(f - 1, 1, "El detalle de cada caso está en "
                       "output/Pre_inconsistencias/reporte_pre_inconsistencias_"
-                      "<fecha>.xlsx, hoja USO_INCONSISTENTE.").font = Font(
+                      "<fecha>.xlsx, hoja CONSISTENCIA_USO.").font = Font(
         italic=True, color="4A5565")
     ws.merge_cells(start_row=f - 1, start_column=1, end_row=f - 1, end_column=4)
 
