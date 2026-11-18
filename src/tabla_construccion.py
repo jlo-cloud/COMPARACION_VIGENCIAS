@@ -40,7 +40,7 @@ from procesamiento_cambios import procesar_cambios
 # datos. Significa cobrarles con los valores que se calcularon para las otras
 # diez comunas. Si mas adelante les hacen tabla propia, se agrega una columna
 # *_5C_* al Excel de tablas y estas cinco pasan a un grupo nuevo.
-INCLUIR_COMUNAS_FALTANTES = True
+INCLUIR_COMUNAS_FALTANTES = False
 
 COMUNAS_FALTANTES = ["05", "06", "13", "16", "18"]
 
@@ -457,11 +457,15 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
     
     df_predio['CONDICION'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[21:22].astype(int)
     df_predio['COMUNA'] = df_predio['NUMERO_PREDIAL_NACIONAL'].str[9:11].astype(str)
+    # Predios que si estan en el export pero quedan fuera por comuna. Sus
+    # construcciones se quitan antes del cruce: no son "sin predio".
+    ids_todos = set(df_predio['ID_PREDIO'].astype(str))
     df_predio = df_predio[~df_predio['COMUNA'].isin(COMUNAS_EXCLUIDAS)]
     # Las comunas marcadas en la ventana; sin manifiesto entran todas.
     if insumos.comunas():
         df_predio = df_predio[df_predio['COMUNA'].isin(insumos.comunas())]
         print(f"Comunas elegidas ({len(insumos.comunas())}): {', '.join(insumos.comunas())}")
+    ids_fuera_alcance = ids_todos - set(df_predio['ID_PREDIO'].astype(str))
     print("Total de predios:", df_predio.shape)
 
            
@@ -556,7 +560,13 @@ def cruces_const_predio(df_predio, df_conv, df_noconv, df_cambios=None):
 
     ## Unifica las construcciones convencionaales y  no convencionales
     df_const = pd.concat([df_conv, df_noconv], ignore_index=True)
-    
+
+    if ids_fuera_alcance:
+        fuera = df_const['ID_PREDIO'].astype(str).isin(ids_fuera_alcance)
+        print(f"Construcciones de comunas fuera del alcance: {int(fuera.sum()):,}")
+        df_const = df_const[~fuera]
+        control.marca("comunas fuera del alcance", df_const,
+                      baja_ok="predios de comunas excluidas o no elegidas")
 
     
     # El NPN de la construccion se reemplaza por el del predio, pero se guarda

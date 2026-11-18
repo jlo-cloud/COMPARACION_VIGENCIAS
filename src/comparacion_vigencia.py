@@ -1383,9 +1383,8 @@ DICCIONARIO_DETALLE = [
      "propias filas (TABLA_ORIGEN = T10_ANEXOS)"),
     ("COMUNA", "Comuna del predio",
      "posiciones 10 y 11 del numero predial nacional. 01 a 22 son las "
-     "comunas urbanas; 51 a 64 son rurales (corregimientos) y solo aparecen "
-     "en filas de parqueadero (T12), la unica tabla que se aplica en lo "
-     "rural"),
+     "comunas urbanas; 51 a 64 son rurales (corregimientos) y no se "
+     "liquidan todavia"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
      "7C (02,03,04,08,17,19,22), 5C (01,09,10,11,12), 5C_N (07,14,15,20,21) "
      "o 5C_E (05,06,13,16,18). 5C y 5C_N juntas son la 10C de las tablas, y "

@@ -52,8 +52,35 @@ RESPONSABLES = {
     'PREDIO': 'RECONOCIMIENTO',
 }
 
-# Las columnas que van primero en cada hoja; el resto sigue detras.
-COLUMNAS_PRIMERO = ['ID_PREDIO', 'NUMERO_PREDIAL_NACIONAL', 'COMUNA']
+# Las columnas de cada hoja de detalle, en este orden, con su descripcion para
+# la hoja DICCIONARIO. Lo que una hoja no tenga sale vacio.
+DICCIONARIO = {
+    'ID_PREDIO': 'Identificador del predio en la base catastral',
+    'NUMERO_PREDIAL_NACIONAL': 'Numero predial nacional (30 digitos)',
+    'COMUNA': 'Comuna del predio (posiciones 10-11 del numero predial); 01-22 urbano, 51 en adelante rural',
+    'ID_CONSTRUCCION': 'Identificador de la construccion en la base catastral (solo convencionales; los anexos no lo traen)',
+    'DESTINOCONS_2025': 'Destino de la construccion convencional tal como viene en el export',
+    'CONCONS': 'Numero de la construccion convencional dentro del predio, segun el export',
+    'ACONCONS': 'Area construida de la construccion convencional (m2)',
+    'PUNTCONS': 'Puntaje de la construccion convencional (1 a 100)',
+    'TPISCONS': 'Numero de pisos de la construccion',
+    'ANOCONST': 'Ano de construccion',
+    'DESTANEX_2025': 'Destino del anexo tal como viene en el export',
+    'TIPOANEXO': 'Tipo (calificacion) del anexo: 10, 20, ... 90',
+    'ACONANEX': 'Area construida del anexo (m2)',
+    'CONDICION_x': 'Condicion de propiedad (posicion 22 del numero predial), p. ej. 0 no PH, 5 mejora en predio ajeno, 8 condominio, 9 propiedad horizontal',
+    'AREA_CONST': 'Area construida usada en la liquidacion: ACONCONS, o ACONANEX si es anexo (m2)',
+    'DESTINOCONS': 'Codigo LADM del uso despues de la homologacion (001-076 convencional; 0 si es anexo)',
+    'USO_LADM': 'Nombre del uso LADM despues de la homologacion; vacio si no homologa',
+    'CAMBIO_FISICO': '1 si la construccion viene del archivo de cambios fisicos (hoy apagado: siempre 0)',
+    'DIREPRED': 'Direccion del predio',
+    'ESTRPRED': 'Estrato del predio',
+    'TIPOUSO': 'Tipo de uso del predio segun el export de predios',
+    'LATITUDE': 'Latitud del predio',
+    'LONGITUDE': 'Longitud del predio',
+    'CONSTRUCCION_ID': 'Llave unica de la construccion en la liquidacion: ID_PREDIO-C/A consecutivo-destino (p. ej. 123456-C01-012)',
+}
+COLUMNAS_REPORTE = list(DICCIONARIO)
 
 
 # Usos de no PH cuyo par en PH se liquida por MODELO en condicion 9.
@@ -377,14 +404,22 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
     os.makedirs(output_path, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d')
 
-    # Las hojas de detalle salen con las columnas de los datos, sin agregarles
-    # motivo, responsable ni marca de descuento: eso queda en el RESUMEN.
+    # Las hojas de detalle salen solo con COLUMNAS_REPORTE. La hoja PREDIO
+    # viene cruda del export, con DESTINOCONS/DESTANEX sin homologar: se
+    # nombran como las _2025 de las demas hojas y la comuna sale del NPN.
     hojas = {}
     for nombre, data in inconsistencias.items():
-        d = data['detalle'].drop(columns=['MOTIVO_INCONSISTENCIA'],
-                                 errors='ignore')
-        primero = [c for c in COLUMNAS_PRIMERO if c in d.columns]
-        hojas[nombre] = d[primero + [c for c in d.columns if c not in primero]]
+        d = data['detalle']
+        if nombre == 'PREDIO':
+            d = d.rename(columns={'DESTINOCONS': 'DESTINOCONS_2025',
+                                  'DESTANEX': 'DESTANEX_2025'})
+            npn = d['NUMERO_PREDIAL_NACIONAL'].astype(str)
+            d['COMUNA'] = npn.str[9:11]
+            d['CONDICION_x'] = npn.str[21:22]
+            area = pd.to_numeric(d['ACONCONS'], errors='coerce').fillna(0)
+            d['AREA_CONST'] = area.where(
+                area > 0, pd.to_numeric(d['ACONANEX'], errors='coerce'))
+        hojas[nombre] = d.reindex(columns=COLUMNAS_REPORTE)
 
     def resumen_de(nombres):
         # Solo los tipos que tienen casos, y al final la fila Total.
@@ -393,16 +428,13 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
             'Responsable': RESPONSABLES.get(k, 'POR_DEFINIR'),
             'Registros': inconsistencias[k]['total'],
             'Predios': inconsistencias[k]['predios_unicos'],
-            'Predios que se descuentan': int(
-                hojas[k].loc[hojas[k]['ID_PREDIO'].isin(descontados),
-                             'ID_PREDIO'].nunique()),
             '% Predios': round(inconsistencias[k]['predios_unicos']
                                / total_predios * 100, 2),
         } for k in nombres if inconsistencias[k]['total'] > 0])
         if r.empty:
             return r
         total = {'Tipo': 'Total'}
-        for c in ['Registros', 'Predios', 'Predios que se descuentan']:
+        for c in ['Registros', 'Predios']:
             total[c] = int(r[c].sum())
         return pd.concat([r, pd.DataFrame([total])], ignore_index=True)
 
@@ -421,6 +453,9 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
                 if len(hojas[nombre]) > 0:
                     hojas[nombre].to_excel(writer, sheet_name=nombre[:31],
                                            index=False)
+            pd.DataFrame({'COLUMNA': list(DICCIONARIO),
+                          'DESCRIPCION': list(DICCIONARIO.values())}
+                         ).to_excel(writer, sheet_name='DICCIONARIO', index=False)
         print(f"   ✅ {archivo}")
 
     print("\n   Reportes de pre-inconsistencias:")

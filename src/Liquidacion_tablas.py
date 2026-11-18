@@ -1471,6 +1471,13 @@ def tablas_liquidacion(df_const):
         df_const.loc[mask_parq, 'VM2_FINAL_V3'] = 0
         print(f"   PARQUEADEROS SIN AVAL PARA ESTA VIGENCIA: "
               f"{int(mask_parq.sum()):,} construcciones quedan en 0")
+
+    # Lo rural todavia no se liquida: no hay directrices. La T12 es la unica
+    # tabla sin columna por comuna, asi que sin este corte les daria valor a
+    # los garajes de los corregimientos.
+    rural_parq = mask_parq & ~df_const['COMUNA'].isin(comunas_7 + comunas_10)
+    df_const.loc[rural_parq, 'VM2_FINAL_V3'] = 0
+    print(f"   PARQUEADEROS RURALES SIN LIQUIDAR: {int(rural_parq.sum()):,}")
     
     def actualizar_valores(df_const):
         """
