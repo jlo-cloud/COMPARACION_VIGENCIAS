@@ -1386,12 +1386,9 @@ DICCIONARIO_DETALLE = [
      "comunas urbanas; 51 a 64 son rurales (corregimientos) y no se "
      "liquidan todavia"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
-     "7C (02,03,04,08,17,19,22), 5C (01,09,10,11,12), 5C_N (07,14,15,20,21) "
-     "o 5C_E (05,06,13,16,18). 5C y 5C_N juntas son la 10C de las tablas, y "
-     "7C y 10C juntas, la 17C. Las 5C_E no tienen tabla propia: se liquidan "
-     "con las columnas *_10C_*, salvo EDIFICIOS e INDUSTRIAL, que van con "
-     "*_5C_N_*, y en las tablas 17C con la misma columna. 'sin grupo' son "
-     "las rurales"),
+     "7C (02,03,04,08,17,19,22), 5C (01,09,10,11,12) o 5C_N "
+     "(07,14,15,20,21). 5C y 5C_N juntas son la 10C de las tablas, y "
+     "7C y 10C juntas, la 17C. 'sin grupo' son las rurales"),
     ("ESTRPRED", "Estrato del predio", "de la base; 0 donde no viene"),
     ("ACTUALIZACION", "Si la comuna se actualizo en 2024-2025", ""),
     ("F_COMERCIAL", "Factor con que se pasa el catastral a comercial",

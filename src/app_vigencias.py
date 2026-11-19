@@ -178,14 +178,13 @@ SERIES = {
 # --- Reglas de asignacion de tabla (hoja informativa) -----------------------
 GRUPOS_COMUNAS = {
     "7C": ["02", "03", "04", "08", "17", "19", "22"],
-    "10C": ["01", "05", "06", "07", "09", "10", "11", "12", "13", "14", "15",
-            "16", "18", "20", "21"],
+    "10C": ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"],
     "17C": ["01", "02", "03", "04", "07", "08", "09", "10", "11", "12",
             "14", "15", "17", "19", "20", "21", "22"],
-    # Version 2: EDIFICIOS e INDUSTRIAL parten las 10 comunas en dos, y sus 5
-    # extra van con 5C_N.
+    # Version 2: EDIFICIOS e INDUSTRIAL parten las 10 comunas en dos. Las 5
+    # comunas extra (05, 06, 13, 16, 18) no son oficiales y no se muestran.
     "5C": ["01", "09", "10", "11", "12"],
-    "5C_N": ["05", "06", "07", "13", "14", "15", "16", "18", "20", "21"],
+    "5C_N": ["07", "14", "15", "20", "21"],
 }
 
 # Las agrupaciones de comunas de las tablas, como las define el equipo.
@@ -196,8 +195,6 @@ AGRUPACIONES_TABLAS = [
      ["01", "09", "10", "11", "12"]),
     ("5C_N", "Las 5 comunas que se actualizan por primera vez en 2026",
      ["07", "14", "15", "20", "21"]),
-    ("5C_E", "Las 5 comunas propuestas para actualizar en 2027",
-     ["05", "06", "13", "16", "18"]),
     ("10C", "Las de 5C y 5C_N juntas",
      ["01", "07", "09", "10", "11", "12", "14", "15", "20", "21"]),
     ("17C", "Las de 7C y 10C juntas",
@@ -205,12 +202,12 @@ AGRUPACIONES_TABLAS = [
       "17", "19", "20", "21", "22"]),
 ]
 
-# Los cuatro grupos en que se reparten las 22 comunas, sin repetir ninguna:
+# Los tres grupos en que se reparten las 17 comunas, sin repetir ninguna:
 # son los mismos de AGRUPACIONES_TABLAS.
 GRUPOS_BASE = {g: cs for g, _, cs in AGRUPACIONES_TABLAS
                if g not in ("10C", "17C")}
 
-# Lo que ofrece el filtro: los cuatro grupos y sus dos uniones. 10C y 17C se
+# Lo que ofrece el filtro: los tres grupos y sus dos uniones. 10C y 17C se
 # traslapan con los otros, asi que se filtra por las comunas del grupo y no
 # por la columna GRUPO_COMUNAS.
 GRUPOS_FILTRO = {g: cs for g, _, cs in AGRUPACIONES_TABLAS}
@@ -222,7 +219,7 @@ def comunas_de_grupos(grupos) -> set:
 
 
 # comuna -> grupo, para armar la columna con la que se abre: cada comuna en
-# uno solo de los cuatro grupos.
+# uno solo de los tres grupos.
 COMUNA_A_GRUPO = {c: g for g, cs in GRUPOS_BASE.items() for c in cs}
 
 # --- Factor de valor comercial ---------------------------------------------
@@ -1754,10 +1751,8 @@ with hoja_reglas:
             "GRUPO": st.column_config.TextColumn(width="small"),
             "DESCRIPCIÓN": st.column_config.TextColumn(width="large"),
             "COMUNAS": st.column_config.TextColumn(width="medium")})
-    st.caption("EDIFICIOS (T2) e INDUSTRIAL (T4) tienen tablas 7C, 5C y 5C_N, "
-               "y sus comunas extra (5C_E) se liquidan con la 5C_N. Las demás "
-               "tablas siguen con 7C y 10C, y sus comunas extra se liquidan con "
-               "la 10C.")
+    st.caption("EDIFICIOS (T2) e INDUSTRIAL (T4) tienen tablas 7C, 5C y 5C_N. "
+               "Las demás tablas siguen con 7C y 10C.")
 
     st.divider()
     st.markdown("**Factor de valor comercial por comuna**")
