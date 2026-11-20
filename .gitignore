@@ -51,6 +51,8 @@
 # rural (conteos) y las reglas de la entrega rural (usos y columnas, sin predios).
 !/output/versiones/*/RURAL_COBERTURA.parquet
 !/output/versiones/*/RURAL_REGLAS.parquet
+# Ejercicio comparativo institucional vs residencial 7C: sin identificadores.
+!/output/versiones/*/EJERCICIO_INSTITUCIONAL_RESIDENCIAL.parquet
 # Que tablas de valor se entregaron en cada version: solo nombres y X.
 !/output/versiones/TABLAS_POR_VERSION.parquet
 
