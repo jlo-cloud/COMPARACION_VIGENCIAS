@@ -1702,6 +1702,27 @@ with hoja_anexos:
             # mostrarla al lado confundia (362.076 contra 253.500 en catastral,
             # que es el mismo valor x 0,7). Se queda solo como llave.
             t = t.drop(columns="VALOR_TABLA")
+            n_claves = len(t)
+
+            # Fila TOTAL (una por version si hay varias): las medianas se
+            # recalculan sobre todas las construcciones, no se promedian.
+            totales = []
+            for v in (sel_versiones if varias_versiones else [None]):
+                sub = a if v is None else a[a["VERSION"] == v]
+                if sub.empty:
+                    continue
+                fila = {c: "" for c in t.columns}
+                fila[t.columns[0]] = "TOTAL" if v is None else f"TOTAL · {v}"
+                fila.update({
+                    "CONSTRUCCIONES": len(sub),
+                    n_base: sub[a_vig].median(), n_liq: sub[a_liq].median(),
+                    "VARIACIÓN_%": sub[a_var].median(),
+                    "BAJAN_%": (sub[a_var].dropna() < 0).mean() * 100,
+                    "SUBEN_%": (sub[a_var].dropna() > 0).mean() * 100})
+                fila["DIFERENCIA"] = fila[n_liq] - fila[n_base]
+                totales.append(fila)
+            if totales:
+                t = pd.concat([t, pd.DataFrame(totales)[t.columns]], ignore_index=True)
 
             formato = {"CONSTRUCCIONES": entero,
                        n_base: pesos, n_liq: pesos, "DIFERENCIA": pesos_signo,
@@ -1714,7 +1735,10 @@ with hoja_anexos:
                 lambda v: "" if pd.isna(v) or v == 0 else
                 f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
                 subset=["DIFERENCIA", "VARIACIÓN_%"])
-            st.markdown(f"**Por uso y clave** · {entero(len(t))} claves")
+            sty = sty.apply(lambda f: ["background-color: #F4F6F9; font-weight: 700"
+                                       if str(f.iloc[0]).startswith("TOTAL") else ""] * len(f),
+                            axis=1)
+            st.markdown(f"**Por uso y clave** · {entero(n_claves)} claves")
             st.dataframe(
                 sty, width="stretch", hide_index=True,
                 column_config={
