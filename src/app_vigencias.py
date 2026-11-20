@@ -1781,37 +1781,19 @@ with hoja_anexos:
 # ---------------------------------------------------------------------
 with hoja_reglas:
     if ZONA_SEL == "RURAL":
-        st.subheader("Cómo se asigna la tabla en lo rural")
-        st.markdown(
-            "La tabla de cada construcción rural sale de la **entrega de reglas rurales**: "
-            "para cada uso LADM y cada *uso de la ZHF rural* (los 2 últimos dígitos de la ZHF) "
-            "dice qué columna de las tablas urbanas se aplica. El VM² sale de esa columna en la "
-            "fila de su puntaje. **Lo que no calza en ninguna regla queda en $ 0**: no se busca otra "
-            "tabla ni se usa el estrato. Anexos (T10) y parqueaderos (T12) van con la misma "
-            "regla de lo urbano, como indica la entrega. Vigencia comercial = catastral / 0,6.")
-        ruta_cob = ruta_version(sel_versiones[-1], NOMBRE_RURAL_COBERTURA)
-        if ruta_cob.exists():
-            cob = pd.read_parquet(ruta_cob)
-            st.markdown("**Construcciones rurales con valor, por vía de liquidación**")
-            st.dataframe(
-                cob.style.format({c: entero for c in ("CONSTRUCCIONES", "CON_VALOR", "SIN_VALOR")
-                                  if c in cob.columns})
-                   .apply(lambda f: ["background-color: #F4F6F9; font-weight: 700"
-                                     if str(f.iloc[0]).startswith("TOTAL") else ""] * len(f), axis=1),
-                width="stretch", hide_index=True)
-            st.caption("Lo que queda en $ 0 (modelo, sin regla, clave sin valor) no se muestra "
-                       "aquí: está en los reportes de pre y post-inconsistencias.")
+        # Solo la tabla de asignacion: tal cual REGLAS_RURALES_<fecha>.xlsx.
         ruta_reg = ruta_version(sel_versiones[-1], NOMBRE_RURAL_REGLAS)
         if ruta_reg.exists():
-            st.markdown("**Reglas de la entrega rural**")
-            st.dataframe(pd.read_parquet(ruta_reg), width="stretch", hide_index=True,
-                         column_config={"OBSERVACION": st.column_config.TextColumn(width="large")})
-            st.caption("USO_ZHF = 2 últimos dígitos de la ZHF rural. ESTADO: TABLA (la columna "
-                       "indicada), T10 / T12 (como en lo urbano), MODELO (pendiente de modelo) o "
-                       "SIN TABLA (queda en $ 0).")
+            reg = pd.read_parquet(ruta_reg)
+            archivo = reg.attrs.get("archivo", "REGLAS_RURALES")
+            st.subheader(archivo.removesuffix(".xlsx"))
+            st.dataframe(reg, width="stretch", hide_index=True,
+                         column_config={
+                             "USO_LADM": st.column_config.TextColumn(width="medium"),
+                             "TIPOLOGIA_RURAL": st.column_config.TextColumn(width="medium"),
+                             "TABLA_RURAL_ENTREGA": st.column_config.TextColumn(width="medium")})
         else:
-            st.info("Esta versión no trae las reglas rurales: salen de correr "
-                    "`python src/comparacion_vigencia.py` con LIQUIDAR_RURAL prendido.")
+            st.info("Esta versión no trae las reglas rurales.")
     else:
         st.subheader("Cómo se asigna la tabla de valor")
 

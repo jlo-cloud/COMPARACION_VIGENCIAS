@@ -419,7 +419,7 @@ def filas_rurales() -> pd.DataFrame:
         filas.append({"USO_LADM": ALIAS_USOS.get(uso, uso),
                       "CONDICIÓN": condicion, "TABLA DE VALOR": tabla, "GRUPO": "",
                       "COMUNAS": "51 a 65 (corregimientos)",
-                      "CONSTRUCCIONES": int(r.CONSTRUCCIONES_ENTREGA), "OBSERVACIÓN": r.OBSERVACION,
+                      "CONSTRUCCIONES": 0, "OBSERVACIÓN": "",
                       "_ENLACES": enlaces, "_ORDEN": 9, "_COND9": False, "_MOD": False,
                       "_COD": r.DESTINOCONS, "ZONA": "RURAL",
                       "_USO_ZHF": r.USO_ZHF or "00"})

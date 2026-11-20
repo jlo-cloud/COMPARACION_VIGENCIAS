@@ -40,12 +40,13 @@ TABLA, T10, T12, MODELO, SIN_TABLA = "TABLA", "T10", "T12", "MODELO", "SIN TABLA
 
 
 # El insumo limpio que sale de la entrega: es lo que lee la liquidacion. La
-# entrega queda como llego, de respaldo.
+# entrega queda como llego, de respaldo. Una sola hoja (REGLAS) y solo estas
+# columnas: TABLA_RURAL_ENTREGA dice como se liquida -la columna exacta del
+# Excel de tablas, T10_ANEXOS, T12_PARQUEADEROS, MODELO o vacio (sin tabla)-.
 PATRON_LIMPIO = "REGLAS_RURALES_*.xlsx"
 COLUMNAS_LIMPIO = ["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM", "USO_ZHF",
-                   "TIPOLOGIA_RURAL", "ESTADO", "COLUMNA", "TABLA_ORIGEN",
-                   "TABLA_URBANO", "OBSERVACION", "TABLA_RURAL_ENTREGA",
-                   "CONSTRUCCIONES_ENTREGA"]
+                   "TIPOLOGIA_RURAL", "TABLA_RURAL_ENTREGA"]
+ANCHOS_LIMPIO = [26, 18, 39, 10, 31, 51]
 
 
 def _fecha(ruta) -> str:
@@ -66,6 +67,19 @@ def reglas_vigentes():
     return archivos[-1] if archivos else None
 
 
+def _derivar(r: pd.DataFrame) -> pd.DataFrame:
+    """De TABLA_RURAL_ENTREGA salen ESTADO, COLUMNA y TABLA_ORIGEN (no se
+    guardan en el archivo: se calculan al leerlo)."""
+    t = r["TABLA_RURAL_ENTREGA"].astype(str).str.strip()
+    es_columna = t.str.fullmatch(r"T\d+_[A-Z0-9_]+") & ~t.isin(["T10_ANEXOS", "T12_PARQUEADEROS"])
+    r["ESTADO"] = np.select(
+        [es_columna, t.str.contains("T10"), t.str.contains("T12"), t.str.upper() == "MODELO"],
+        [TABLA, T10, T12, MODELO], default=SIN_TABLA)
+    r["COLUMNA"] = np.where(es_columna, t, "")
+    r["TABLA_ORIGEN"] = [nombre_tabla(x) if x else "" for x in r["COLUMNA"]]
+    return r
+
+
 def cargar_reglas(ruta=None) -> pd.DataFrame:
     """Las reglas rurales desde el insumo limpio (REGLAS_RURALES_<fecha>.xlsx).
 
@@ -83,71 +97,48 @@ def cargar_reglas(ruta=None) -> pd.DataFrame:
                                     f"({PATRON_LIMPIO} ni {PATRON})")
         ruta = limpio
     r = pd.read_excel(ruta, sheet_name="REGLAS", dtype=str).fillna("")
-    r["CONSTRUCCIONES_ENTREGA"] = pd.to_numeric(r["CONSTRUCCIONES_ENTREGA"],
-                                                errors="coerce").fillna(0).astype(int)
+    for c in r.columns:
+        r[c] = r[c].astype(str).str.strip()
+    r["DESTINOCONS"] = r["DESTINOCONS"].str.zfill(3)
+    r = _derivar(r)
+    dup = r[r["TIPO_CONSTRUCCION"].str.startswith("Conv")].duplicated(["DESTINOCONS", "USO_ZHF"], keep=False)
+    if dup.any():
+        raise ValueError(f"{Path(ruta).name} repite DESTINOCONS + USO_ZHF:\n"
+                         + r[dup.reindex(r.index, fill_value=False)].to_string())
     r.attrs["archivo"] = Path(ruta).name
     return r
 
 
 def limpiar(ruta_entrega=None) -> Path:
-    """La entrega como insumo limpio: una fila por regla, codigos con ceros,
-    USO_ZHF en 2 digitos o 'SIN ZHF', la columna de tabla validada contra el
-    consolidado vigente y el estado (TABLA, T10, T12, MODELO, SIN TABLA)."""
+    """La entrega como insumo limpio: una hoja REGLAS con las 6 columnas, codigos
+    con ceros, USO_ZHF en 2 digitos o 'SIN ZHF' y en TABLA_RURAL_ENTREGA el
+    nombre de la tabla (columna exacta validada contra el consolidado,
+    T10_ANEXOS, T12_PARQUEADEROS, MODELO o vacio)."""
     ruta_entrega = Path(ruta_entrega or entrega_vigente())
     r = leer_entrega(ruta_entrega)
     from consolidar_tablas import tabla_valor_vigente
     ruta_tablas = tabla_valor_vigente()
-    faltan = []
     if ruta_tablas:
         cols = set(pd.read_excel(ruta_tablas, sheet_name="CONVENCIONALES", nrows=0).columns.astype(str))
         faltan = sorted(set(r.loc[r["COLUMNA"] != "", "COLUMNA"]) - cols)
         if faltan:
             raise ValueError(f"La entrega rural asigna columnas que no estan en "
                              f"{Path(ruta_tablas).name}: {faltan}")
+    r["TABLA_RURAL_ENTREGA"] = np.select(
+        [r["ESTADO"] == TABLA, r["ESTADO"] == T10, r["ESTADO"] == T12, r["ESTADO"] == MODELO],
+        [r["COLUMNA"], "T10_ANEXOS", "T12_PARQUEADEROS", "MODELO"], default="")
     orden = {"Convencional": 0, "No convencional": 1}
-    r = (r.rename(columns={"TABLA_RURAL": "TABLA_RURAL_ENTREGA",
-                           "CONSTRUCCIONES": "CONSTRUCCIONES_ENTREGA"})
-          .assign(_o=r["TIPO_CONSTRUCCION"].map(orden).fillna(2))
+    r = (r.assign(_o=r["TIPO_CONSTRUCCION"].map(orden).fillna(2))
           .sort_values(["_o", "DESTINOCONS", "USO_ZHF"])[COLUMNAS_LIMPIO])
     # Lleva la fecha de la entrega, para saber de cual salio.
     salida = CARPETA / f"REGLAS_RURALES_{_fecha(ruta_entrega) or f'{date.today():%Y%m%d}'}.xlsx"
-    resumen = r.groupby("ESTADO").size().rename("REGLAS").reset_index()
-    leeme = pd.DataFrame({"LEEME": [
-        "REGLAS RURALES - INSUMO LIMPIO (lo lee la liquidacion; no editar a mano)",
-        f"Sale de: {ruta_entrega.name} (hoja CONTEO), limpiado el {date.today():%Y-%m-%d} con reglas_rurales.py",
-        f"Columnas validadas contra: {Path(ruta_tablas).name if ruta_tablas else '(sin consolidado)'}",
-        "",
-        "Cada fila: un uso LADM (DESTINOCONS) y un uso de la ZHF rural (USO_ZHF = 2 ultimos digitos de",
-        "la ZHF de 12 digitos, o 'SIN ZHF') -> como se liquida.",
-        "ESTADO: TABLA = se liquida con COLUMNA (columna exacta del Excel de tablas de valor), por puntaje.",
-        "        T10 / T12 = anexos y parqueaderos, con la misma regla de lo urbano.",
-        "        MODELO = va por modelo (pendiente mientras los modelos esten apagados).",
-        "        SIN TABLA = la entrega no le asigna tabla: queda en $ 0.",
-        "Lo que no aparece aqui (uso o ZHF sin fila) tambien queda en $ 0.",
-        "TABLA_ORIGEN = el nombre corto con que sale en los reportes (p. ej. T1_RESIDENCIAL_013_9).",
-        "TABLA_URBANO, OBSERVACION, TABLA_RURAL_ENTREGA y CONSTRUCCIONES_ENTREGA vienen tal cual de la entrega,",
-        "como referencia; no se usan para liquidar.",
-        "",
-        "Para una entrega nueva: ponerla en esta carpeta con su fecha y correr",
-        "    python src/reglas_rurales.py --limpiar",
-        "(la liquidacion tambien la limpia sola si encuentra una entrega mas nueva que este archivo).",
-    ]})
     with pd.ExcelWriter(salida, engine="xlsxwriter") as w:
         r.to_excel(w, sheet_name="REGLAS", index=False)
-        resumen.to_excel(w, sheet_name="RESUMEN", index=False)
-        leeme.to_excel(w, sheet_name="LEEME", index=False)
-        libro = w.book
-        head = libro.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#1F3864",
-                                 "border": 1, "text_wrap": True, "valign": "vcenter"})
         h = w.sheets["REGLAS"]
-        for j, col in enumerate(r.columns):
-            h.write(0, j, col, head)
-        anchos = [16, 12, 38, 9, 30, 11, 32, 24, 30, 50, 50, 14]
-        for j, a in enumerate(anchos):
+        for j, a in enumerate(ANCHOS_LIMPIO):
             h.set_column(j, j, a)
         h.autofilter(0, 0, len(r), len(r.columns) - 1)
         h.freeze_panes(1, 3)
-        w.sheets["LEEME"].set_column(0, 0, 110)
     print(f"Reglas rurales limpias: {salida} ({len(r)} reglas)")
     return salida
 
@@ -170,7 +161,6 @@ def leer_entrega(ruta) -> pd.DataFrame:
     c["USO_ZHF"] = c["USO_ZHF"].str.upper().replace({"": ""})
     c.loc[c["USO_ZHF"].str.startswith("SIN"), "USO_ZHF"] = SIN_ZHF
     c.loc[c["USO_ZHF"].str.fullmatch(r"\d"), "USO_ZHF"] = c["USO_ZHF"].str.zfill(2)
-    c["CONSTRUCCIONES"] = pd.to_numeric(c["CONSTRUCCIONES"], errors="coerce").fillna(0).astype(int)
 
     t = c["TABLA_RURAL"]
     es_columna = t.str.fullmatch(r"T\d+_[A-Z0-9_]+")

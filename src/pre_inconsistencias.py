@@ -52,6 +52,18 @@ RESPONSABLES = {
     'PREDIO': 'RECONOCIMIENTO',
 }
 
+# Como se llama cada tipo en el RESUMEN.
+NOMBRE_MOTIVO = {
+    'PREDIO': 'CONSTRUCCIÓN SIN PREDIO',
+    'HOMOLOGACION': 'SIN HOMOLOGACIÓN',
+    'CONSISTENCIA_USO': 'USO INCONSISTENTE',
+    'PUNTAJE': 'SIN PUNTAJE',
+    'AREA_CONSTRUIDA': 'SIN ÁREA',
+    'SIN_ZHF': 'SIN ZHF',
+    'SIN_LONGITUD': 'SIN LONGITUD',
+    'SIN_LATITUD': 'SIN LATITUD',
+}
+
 # Las columnas de cada hoja de detalle, en este orden, con su descripcion para
 # la hoja DICCIONARIO. Lo que una hoja no tenga sale vacio.
 DICCIONARIO = {
@@ -100,6 +112,19 @@ USOS_CON_PAR_PH = {
     "Teatro_Cinemas", "Bodega_Casa_Bomba", "Industrias", "Iglesia"}
 
 
+def _por_zona(df) -> dict:
+    """Registros (construcciones) y predios de un tipo, por zona. La comuna
+    sale de COMUNA o, si no viene (hoja PREDIO), del numero predial."""
+    if "COMUNA" in df.columns:
+        com = pd.to_numeric(df["COMUNA"], errors="coerce")
+    else:
+        com = pd.to_numeric(df["NUMERO_PREDIAL_NACIONAL"].astype(str).str[9:11], errors="coerce")
+    rural = com > 22
+    return {"Registros urbano": int((~rural).sum()), "Registros rural": int(rural.sum()),
+            "Predios urbano": int(df.loc[~rural, "ID_PREDIO"].nunique()),
+            "Predios rural": int(df.loc[rural, "ID_PREDIO"].nunique())}
+
+
 def generar_reporte_inconsistencias(
     df,
     validar_coordenadas=True,
@@ -123,6 +148,7 @@ def generar_reporte_inconsistencias(
     if sin_predio is not None and len(sin_predio):
         inconsistencias['PREDIO'] = {
             'total': len(sin_predio),
+            'zona': _por_zona(sin_predio),
             'predios_unicos': sin_predio['ID_PREDIO'].nunique(),
             'detalle': sin_predio,
         }
@@ -186,6 +212,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['SIN_ZHF'] = {
             'total': len(sin_zhf),
+            'zona': _por_zona(sin_zhf),
             'predios_unicos': sin_zhf['ID_PREDIO'].nunique(),
             'detalle': sin_zhf.drop_duplicates('ID_PREDIO')
         }
@@ -206,6 +233,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['SIN_LONGITUD'] = {
             'total': len(sin_long),
+            'zona': _por_zona(sin_long),
             'predios_unicos': sin_long['ID_PREDIO'].nunique(),
             'detalle': sin_long.drop_duplicates('ID_PREDIO')
         }
@@ -218,6 +246,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['SIN_LATITUD'] = {
             'total': len(sin_lat),
+            'zona': _por_zona(sin_lat),
             'predios_unicos': sin_lat['ID_PREDIO'].nunique(),
             'detalle': sin_lat.drop_duplicates('ID_PREDIO')
         }
@@ -240,6 +269,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['HOMOLOGACION'] = {
             'total': len(sin_uso_ladm),
+            'zona': _por_zona(sin_uso_ladm),
             'predios_unicos': sin_uso_ladm['ID_PREDIO'].nunique(),
             'detalle': sin_uso_ladm.drop_duplicates('ID_PREDIO')
         }
@@ -305,6 +335,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['CONSISTENCIA_USO'] = {
             'total': len(uso_ph),
+            'zona': _por_zona(uso_ph),
             'predios_unicos': uso_ph['ID_PREDIO'].nunique(),
             'detalle': uso_ph
         }
@@ -349,6 +380,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['PUNTAJE'] = {
             'total': len(sin_puntaje_cond),
+            'zona': _por_zona(sin_puntaje_cond),
             'predios_unicos': sin_puntaje_cond['ID_PREDIO'].nunique(),
             'detalle': sin_puntaje_cond.drop_duplicates('ID_PREDIO')
         }
@@ -365,6 +397,7 @@ def generar_reporte_inconsistencias(
 
         inconsistencias['AREA_CONSTRUIDA'] = {
             'total': len(sin_area),
+            'zona': _por_zona(sin_area),
             'predios_unicos': sin_area['ID_PREDIO'].nunique(),
             'detalle': sin_area.drop_duplicates('ID_PREDIO')
         }
@@ -427,21 +460,22 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
 
     def resumen_de(nombres):
         # Solo los tipos que tienen casos, y al final la fila Total.
+        # Una fila por tipo: predios distintos y construcciones, estas partidas
+        # en urbano y rural (suman el total).
+        # Todos los motivos, aunque esten en 0: asi se ve que la validacion
+        # corrio (antes el que no tenia casos desaparecia del resumen).
         r = pd.DataFrame([{
-            'Tipo': k,
-            'Responsable': RESPONSABLES.get(k, 'POR_DEFINIR'),
-            'Registros': inconsistencias[k]['total'],
-            'Predios': inconsistencias[k]['predios_unicos'],
-            '% Predios': round(inconsistencias[k]['predios_unicos']
-                               / total_predios * 100, 2),
-            # La misma hoja partida por zona (filas de la hoja de detalle)
-            'Filas urbano': int((hojas[k]['ZONA'] == 'URBANO').sum()),
-            'Filas rural': int((hojas[k]['ZONA'] == 'RURAL').sum()),
-        } for k in nombres if inconsistencias[k]['total'] > 0])
+            'MOTIVO': NOMBRE_MOTIVO.get(k, k),
+            'PREDIOS': inconsistencias[k]['predios_unicos'],
+            'CONSTRUCCION URBANA': inconsistencias[k]['zona']['Registros urbano'],
+            'CONSTRUCCION RURAL': inconsistencias[k]['zona']['Registros rural'],
+            'TOTAL DE CONSTRUCCIONES': inconsistencias[k]['total'],
+        } for k in nombres])
         if r.empty:
             return r
-        total = {'Tipo': 'Total'}
-        for c in ['Registros', 'Predios', 'Filas urbano', 'Filas rural']:
+        total = {'MOTIVO': 'Total'}
+        for c in ['PREDIOS', 'CONSTRUCCION URBANA', 'CONSTRUCCION RURAL',
+                  'TOTAL DE CONSTRUCCIONES']:
             total[c] = int(r[c].sum())
         return pd.concat([r, pd.DataFrame([total])], ignore_index=True)
 
@@ -454,8 +488,14 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
         except ImportError:
             motor = 'openpyxl'
         with pd.ExcelWriter(archivo, engine=motor) as writer:
-            resumen_de(nombres).to_excel(writer, sheet_name='RESUMEN',
-                                         index=False)
+            res = resumen_de(nombres)
+            res.to_excel(writer, sheet_name='RESUMEN', index=False)
+            # Enteros con separador de miles (en Excel en espanol: 1.513)
+            if motor == 'xlsxwriter':
+                hoja = writer.sheets['RESUMEN']
+                hoja.set_column(0, 0, 22)
+                hoja.set_column(1, len(res.columns) - 1, 24,
+                                writer.book.add_format({'num_format': '#,##0'}))
             for nombre in nombres:
                 if len(hojas[nombre]) > 0:
                     hojas[nombre].to_excel(writer, sheet_name=nombre[:31],

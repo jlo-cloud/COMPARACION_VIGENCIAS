@@ -2299,8 +2299,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             reglas_rurales.cobertura_con_valor(liq_cob).to_parquet(
                 CONFIG["parquet_rural_cobertura"], index=False)
             reglas = reglas_rurales.cargar_reglas()
-            reglas[["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM", "USO_ZHF", "TIPOLOGIA_RURAL",
-                    "ESTADO", "COLUMNA", "OBSERVACION"]].to_parquet(CONFIG["parquet_rural_reglas"], index=False)
+            reglas[reglas_rurales.COLUMNAS_LIMPIO].to_parquet(
+                CONFIG["parquet_rural_reglas"], index=False)
             print(f"   Rural: cobertura y reglas ({reglas.attrs['archivo']})")
         except Exception as e:                           # pragma: no cover
             print(f"   (no se pudo escribir la cobertura rural: {e})")

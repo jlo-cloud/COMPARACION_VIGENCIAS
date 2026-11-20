@@ -68,22 +68,20 @@ def generar_reporte_post(df_liq: pd.DataFrame,
     total = df_liq.assign(ZONA=np.where(pd.to_numeric(df_liq["COMUNA"], errors="coerce") > 22,
                                         "RURAL", "URBANO")).groupby("ZONA").size()
 
-    resumen = (cero.groupby(["ZONA", "MOTIVO"])
-               .agg(CONSTRUCCIONES=("MOTIVO", "size"), PREDIOS=("ID_PREDIO", "nunique"))
-               .reset_index().sort_values(["ZONA", "CONSTRUCCIONES"], ascending=[False, False]))
-    resumen["% DE LA ZONA"] = (resumen["CONSTRUCCIONES"]
-                               / resumen["ZONA"].map(total) * 100).round(2)
-    filas = []
-    for z in ("URBANO", "RURAL"):
-        bloque = resumen[resumen["ZONA"] == z]
-        if len(bloque):
-            filas.append(bloque)
-            filas.append(pd.DataFrame([{
-                "ZONA": z, "MOTIVO": f"TOTAL {z} EN $ 0 (de {int(total.get(z, 0)):,} construcciones)",
-                "CONSTRUCCIONES": int(bloque["CONSTRUCCIONES"].sum()),
-                "PREDIOS": int(cero.loc[cero["ZONA"] == z, "ID_PREDIO"].nunique()),
-                "% DE LA ZONA": round(bloque["CONSTRUCCIONES"].sum() / total.get(z, 1) * 100, 2)}]))
-    resumen = pd.concat(filas, ignore_index=True)
+    # Igual que el resumen de pre-inconsistencias: un MOTIVO por
+    # fila, los predios y las construcciones partidas en urbano y rural.
+    g = cero.groupby("MOTIVO")
+    resumen = pd.DataFrame({
+        "PREDIOS": g["ID_PREDIO"].nunique(),
+        "CONSTRUCCION URBANA": g["ZONA"].apply(lambda z: int((z == "URBANO").sum())),
+        "CONSTRUCCION RURAL": g["ZONA"].apply(lambda z: int((z == "RURAL").sum())),
+        "TOTAL DE CONSTRUCCIONES": g.size()}).reset_index()
+    resumen = resumen.sort_values("TOTAL DE CONSTRUCCIONES", ascending=False)
+    resumen = pd.concat([resumen, pd.DataFrame([{
+        "MOTIVO": "Total", "PREDIOS": int(cero["ID_PREDIO"].nunique()),
+        "CONSTRUCCION URBANA": int((cero["ZONA"] == "URBANO").sum()),
+        "CONSTRUCCION RURAL": int((cero["ZONA"] == "RURAL").sum()),
+        "TOTAL DE CONSTRUCCIONES": len(cero)}])], ignore_index=True)
 
     # Por tabla: de lo que cada tabla tenia asignado, cuanto quedo en $ 0 y por
     # que. MODELO, ESPECIALES y SIN TABLA salen como una "tabla" mas.
@@ -128,9 +126,13 @@ def generar_reporte_post(df_liq: pd.DataFrame,
         detalle.to_excel(w, sheet_name="EN_CERO", index=False)
         pd.DataFrame({"COLUMNA": list(DICCIONARIO), "DESCRIPCION": list(DICCIONARIO.values())}
                      ).to_excel(w, sheet_name="DICCIONARIO", index=False)
-        w.sheets["RESUMEN"].set_column(0, 0, 10)
-        w.sheets["RESUMEN"].set_column(1, 1, 70)
-        w.sheets["RESUMEN"].set_column(2, 4, 16)
+        # Enteros con separador de miles (en Excel en espanol: 130.983)
+        miles = w.book.add_format({"num_format": "#,##0"})
+        w.sheets["RESUMEN"].set_column(0, 0, 62)
+        w.sheets["RESUMEN"].set_column(1, 4, 24, miles)
+        w.sheets["POR_TABLA"].set_column(2, 3, 14, miles)
+        w.sheets["POR_TABLA"].set_column(5, 5, 14, miles)
+        w.sheets["POR_TABLA_Y_USO"].set_column(4, 4, 16, miles)
         w.sheets["DICCIONARIO"].set_column(0, 1, 40)
     print("\n   Post-inconsistencias (construcciones en $ 0):")
     print(resumen.to_string(index=False))
