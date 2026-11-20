@@ -395,6 +395,38 @@ def filas_usos(liq: pd.DataFrame, mapa: dict) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+def filas_rurales() -> pd.DataFrame:
+    """Una fila por regla rural (uso LADM + uso de la ZHF rural), con la misma
+    forma que filas_usos(). Salen del insumo limpio de reglas_rurales.py."""
+    import reglas_rurales
+    reglas = reglas_rurales.cargar_reglas()
+    filas = []
+    for r in reglas.itertuples(index=False):
+        if r.ESTADO == "TABLA":
+            tabla, enlaces = r.COLUMNA, [(r.USO_ZHF, r.COLUMNA)]
+        else:
+            tabla = {"MODELO": "MODELO", "T10": "T10_ANEXOS", "T12": "T12_PARQUEADEROS"}.get(
+                r.ESTADO, "SIN TABLA (queda en $ 0)")
+            enlaces = []
+        if r.USO_ZHF == reglas_rurales.SIN_ZHF:
+            condicion = "Sin ZHF rural"
+        elif r.USO_ZHF:
+            condicion = f"Uso ZHF rural {r.USO_ZHF}" + (
+                f" ({r.TIPOLOGIA_RURAL})" if r.TIPOLOGIA_RURAL else "")
+        else:
+            condicion = "Todas (no depende de la ZHF)"
+        uso = str(r.USO_LADM).strip()
+        filas.append({"USO_LADM": ALIAS_USOS.get(uso, uso),
+                      "CONDICIÓN": condicion, "TABLA DE VALOR": tabla, "GRUPO": "",
+                      "COMUNAS": "51 a 65 (corregimientos)",
+                      "CONSTRUCCIONES": int(r.CONSTRUCCIONES_ENTREGA), "OBSERVACIÓN": r.OBSERVACION,
+                      "_ENLACES": enlaces, "_ORDEN": 9, "_COND9": False, "_MOD": False,
+                      "_COD": r.DESTINOCONS, "ZONA": "RURAL",
+                      "_USO_ZHF": r.USO_ZHF or "00"})
+    print(f"   Hoja {HOJA}: {len(filas)} filas rurales ({reglas.attrs.get('archivo', '')})")
+    return pd.DataFrame(filas)
+
+
 def agregar_hoja_usos(liq: pd.DataFrame | None = None,
                       ruta_consolidado: str | None = None,
                       ruta_salida: str | None = None) -> str | None:
@@ -426,6 +458,12 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
     t = filas_usos(liq, mapa)
     revisar_reglas(t, mapa)
     t = completar_usos(t, mapa)
+    t["ZONA"] = "URBANO"
+    try:
+        t_rural = filas_rurales()
+    except Exception as e:                               # pragma: no cover
+        print(f"   (sin reglas rurales en la hoja {HOJA}: {e})")
+        t_rural = pd.DataFrame()
     dif_enero = comparar_con_enero(liq, mapa)
     if not dif_enero.empty:
         print(f"\n   REVISAR LAS REGLAS: {len(dif_enero)} diferencia(s) con la hoja "
@@ -446,6 +484,17 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
             t.loc[falta, destino] = t.loc[falta, "USO_LADM"].map(por_uso[c])
         t["CÓDIGO HOMOLOGACIÓN"] = t.get("_COD_LIBRO", pd.Series(index=t.index)
                                          ).fillna(t["_COD"].where(~falta))
+    if not t_rural.empty:
+        if not desc.empty:
+            d1 = desc.drop_duplicates(["USO_LADM", "CÓDIGO HOMOLOGACIÓN"])
+            t_rural = t_rural.merge(
+                d1[["USO_LADM", "CÓDIGO HOMOLOGACIÓN", "CATEGORÍA", "DESCRIPCIÓN"]]
+                .rename(columns={"CÓDIGO HOMOLOGACIÓN": "_COD"}),
+                on=["USO_LADM", "_COD"], how="left")
+        t_rural["CÓDIGO HOMOLOGACIÓN"] = t_rural["_COD"]
+        t_rural["CÓDIGO ANTERIOR"] = t_rural["_COD"]
+        t_rural["NOMBRE DESTINO"] = "La base rural ya trae el código LADM"
+        t = pd.concat([t, t_rural], ignore_index=True)
     for c in ["CATEGORÍA", "CÓDIGO ANTERIOR", "NOMBRE DESTINO",
               "CÓDIGO HOMOLOGACIÓN", "TIPO", "DESCRIPCIÓN"]:
         if c not in t.columns:
@@ -460,11 +509,16 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
                  ("NO CONVENCIONAL" if cat == "Anexos" else "")
                  for n, cat in zip(codigo, t["CATEGORÍA"])]
     t["_CODIGO"] = t["CÓDIGO HOMOLOGACIÓN"].fillna("999")
-    t = t.sort_values(["_CODIGO", "USO_LADM", "TABLA DE VALOR", "_ORDEN",
-                       "_COND9"], ascending=[True, True, True, True, False])
+    t["_ZONA"] = (t["ZONA"] == "RURAL").astype(int)
+    if "_USO_ZHF" not in t.columns:
+        t["_USO_ZHF"] = ""
+    t["_USO_ZHF"] = t["_USO_ZHF"].fillna("")
+    t = t.sort_values(["_ZONA", "_CODIGO", "USO_LADM", "_USO_ZHF", "TABLA DE VALOR",
+                       "_ORDEN", "_COND9"],
+                      ascending=[True, True, True, True, True, True, False])
 
     t["CONDICIÓN GENERAL"] = t["USO_LADM"].map(condicion_general)
-    columnas = ["CATEGORÍA", "CÓDIGO ANTERIOR", "NOMBRE DESTINO",
+    columnas = ["ZONA", "CATEGORÍA", "CÓDIGO ANTERIOR", "NOMBRE DESTINO",
                 "CÓDIGO HOMOLOGACIÓN", "USO_LADM", "TIPO", "DESCRIPCIÓN",
                 "CONDICIÓN GENERAL", "CONDICIÓN", "TABLA DE VALOR", "GRUPO",
                 "COMUNAS", "HIPERVÍNCULO"]
@@ -533,7 +587,7 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
             n_links += 1
 
     # Celdas combinadas por uso (codigo + nombre), como en el libro de enero.
-    llave = list(zip(t["CÓDIGO HOMOLOGACIÓN"].astype(str), t["USO_LADM"]))
+    llave = list(zip(t["ZONA"], t["CÓDIGO HOMOLOGACIÓN"].astype(str), t["USO_LADM"]))
     fila0 = 3
     for k in range(1, len(llave) + 1):
         if k == len(llave) or llave[k] != llave[fila0 - 3]:
@@ -544,11 +598,11 @@ def agregar_hoja_usos(liq: pd.DataFrame | None = None,
                                    end_row=fin, end_column=j)
             fila0 = fin + 1
 
-    anchos = [14, 13, 30, 13, 34, 18, 46, 30, 30, 22, 8, 34, 30]
+    anchos = [10, 14, 13, 30, 13, 34, 18, 46, 30, 30, 22, 8, 34, 30]
     for j, a in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(j)].width = a
     ws.row_dimensions[2].height = 32
-    ws.freeze_panes = "F3"
+    ws.freeze_panes = "G3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(columnas))}{len(t) + 2}"
     n_filas = len(t)
 
