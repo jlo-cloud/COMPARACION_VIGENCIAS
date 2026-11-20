@@ -1735,9 +1735,16 @@ with hoja_anexos:
                 lambda v: "" if pd.isna(v) or v == 0 else
                 f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
                 subset=["DIFERENCIA", "VARIACIÓN_%"])
-            sty = sty.apply(lambda f: ["background-color: #F4F6F9; font-weight: 700"
-                                       if str(f.iloc[0]).startswith("TOTAL") else ""] * len(f),
-                            axis=1)
+            # La fila TOTAL igual que en la tabla principal (con_formato): fondo
+            # gris claro, negrilla y letra gris; diferencia y variacion
+            # conservan su color de signo.
+            def _total_anx(fila):
+                if not str(fila.iloc[0]).startswith("TOTAL"):
+                    return [""] * len(fila)
+                base = "background-color: #F4F6F9; font-weight: 700"
+                return [base if c in ("DIFERENCIA", "VARIACIÓN_%")
+                        else f"{base}; color: #6B7085" for c in fila.index]
+            sty = sty.apply(_total_anx, axis=1)
             st.markdown(f"**Por uso y clave** · {entero(n_claves)} claves")
             st.dataframe(
                 sty, width="stretch", hide_index=True,
