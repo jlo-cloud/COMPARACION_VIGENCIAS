@@ -47,6 +47,10 @@
 # Anexos y parqueaderos, una fila por construccion: comuna, uso, clave y
 # valores redondeados. Sin ID_PREDIO ni numero predial.
 !/output/versiones/*/COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet
+# Lo rural va en los mismos recortes (columna ZONA). Aparte solo la cobertura
+# rural (conteos) y las reglas de la entrega rural (usos y columnas, sin predios).
+!/output/versiones/*/RURAL_COBERTURA.parquet
+!/output/versiones/*/RURAL_REGLAS.parquet
 # Que tablas de valor se entregaron en cada version: solo nombres y X.
 !/output/versiones/TABLAS_POR_VERSION.parquet
 

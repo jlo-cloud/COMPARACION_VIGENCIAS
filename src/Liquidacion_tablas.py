@@ -15,6 +15,7 @@ from model_liq import ejecutar_modelos
 import insumos
 from perf import crono  # ⏱️ medición de tiempos
 from consolidar_tablas import tabla_valor_vigente
+import reglas_rurales
 from control_filas import control
 from tabla_construccion import (convertir_a_cero, convertir_a_float,
                                 convertir_a_string, COMUNAS_7, COMUNAS_10,
@@ -53,6 +54,16 @@ def tablas_liquidacion(df_const):
     # parqueaderos con ellos; si llegan valores nuevos, se cambian abajo.
     # Con False vuelven a cero, como las T7, T8 y T10.
     LIQUIDAR_PARQUEADEROS = True
+
+    # Lo rural (comunas 51 a 65) se liquida con la entrega de
+    # input/tablas/input/rural/: para cada uso LADM y uso de la ZHF rural dice
+    # que columna de las tablas urbanas aplica (ver reglas_rurales.py). Anexos
+    # y parqueaderos van con la misma regla de lo urbano. Con False lo rural
+    # queda en 0, como estaba antes de la entrega.
+    LIQUIDAR_RURAL = True
+    if LIQUIDAR_RURAL:
+        REGLAS_RURALES = reglas_rurales.cargar_reglas()
+        print(f"Reglas rurales: {REGLAS_RURALES.attrs['archivo']}")
 
 
     # Llega como texto y model_liq le escribe numeros a las filas que van por
@@ -573,6 +584,13 @@ def tablas_liquidacion(df_const):
 
     df_const['TABLA_ORIGEN'] = df_const['TABLA_ORIGEN'].astype('string')
 
+    # Lo rural no sigue las condiciones de arriba (son de lo urbano): su tabla
+    # sale de la entrega rural. Va antes del metodo de liquidacion, que se
+    # decide por TABLA_ORIGEN.
+    if LIQUIDAR_RURAL:
+        df_const = reglas_rurales.asignar(df_const, REGLAS_RURALES)
+        df_const['TABLA_ORIGEN'] = df_const['TABLA_ORIGEN'].astype('string')
+
     print(df_const.shape)
     print(df_const['TABLA_ORIGEN'].value_counts().sort_values())
 
@@ -1008,6 +1026,10 @@ def tablas_liquidacion(df_const):
 
         num_comunas = match_comunas.group(1)
         comunas = grupos_comunas.get(num_comunas)
+        # La T10 tiene una sola columna (17C) y la entrega rural la aplica
+        # tambien a los anexos de los corregimientos.
+        if LIQUIDAR_RURAL and num_comunas == '17':
+            comunas = list(comunas) + list(reglas_rurales.COMUNAS_RURALES)
 
         if comunas is None:
             print(f"⚠️ Columna '{col_str}' sin grupo de comunas definido, se omite")
@@ -1475,9 +1497,22 @@ def tablas_liquidacion(df_const):
     # Lo rural todavia no se liquida: no hay directrices. La T12 es la unica
     # tabla sin columna por comuna, asi que sin este corte les daria valor a
     # los garajes de los corregimientos.
-    rural_parq = mask_parq & ~df_const['COMUNA'].isin(comunas_7 + comunas_10)
-    df_const.loc[rural_parq, 'VM2_FINAL_V3'] = 0
-    print(f"   PARQUEADEROS RURALES SIN LIQUIDAR: {int(rural_parq.sum()):,}")
+    # Con LIQUIDAR_RURAL la entrega rural los manda a la T12, igual que en lo
+    # urbano, y conservan su valor.
+    if not LIQUIDAR_RURAL:
+        rural_parq = mask_parq & ~df_const['COMUNA'].isin(comunas_7 + comunas_10)
+        df_const.loc[rural_parq, 'VM2_FINAL_V3'] = 0
+        print(f"   PARQUEADEROS RURALES SIN LIQUIDAR: {int(rural_parq.sum()):,}")
+
+    # Construcciones rurales con tabla: la columna exacta que asigna la entrega
+    # (TABLA_RURAL), en la fila de su puntaje. El merge de las T1-T9 no les da
+    # valor porque las comunas rurales no estan en ningun grupo de comunas.
+    if LIQUIDAR_RURAL:
+        m_rural = df_const['TABLA_RURAL'].fillna('').astype(str).ne('')
+        df_const.loc[m_rural, 'VM2_FINAL_V3'] = reglas_rurales.valorar(
+            df_const.loc[m_rural], reglas_rurales.leer_convencionales(ruta)).to_numpy()
+        print(f"   RURALES CON TABLA: {int((df_const.loc[m_rural, 'VM2_FINAL_V3'] > 0).sum()):,} "
+              f"de {int(m_rural.sum()):,} con valor")
     
     def actualizar_valores(df_const):
         """

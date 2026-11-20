@@ -21,6 +21,11 @@ NOMBRE_DETALLE = "COMPARACION_VIGENCIA_DETALLE.parquet"
 # Anexos (T10) y parqueaderos (T12): su propia hoja, porque no tienen puntaje y
 # se comparan con su llave y en su unidad (m2 o cupo).
 NOMBRE_ANEXOS = "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"
+# Lo rural (corregimientos 51 a 65) viene en los mismos recortes, con la
+# columna ZONA. Las hojas de siempre se quedan con ZONA = URBANO y la hoja
+# Rural con ZONA = RURAL. Aparte solo la cobertura y las reglas rurales.
+NOMBRE_RURAL_COBERTURA = "RURAL_COBERTURA.parquet"
+NOMBRE_RURAL_REGLAS = "RURAL_REGLAS.parquet"
 # Que tablas se entregaron en cada version: una X por tabla y version. Lo
 # escribe consolidar_tablas.py con el registro de versiones.
 RUTA_TABLAS_POR_VERSION = CARPETA_VERSIONES / "TABLAS_POR_VERSION.parquet"
@@ -529,17 +534,31 @@ def _a_categoria(d: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
+def solo_zona(d: pd.DataFrame, zona: str = "URBANO") -> pd.DataFrame:
+    """Las filas de una zona. ZONA viene en los recortes; si un recorte viejo
+    no la trae, sale de la comuna (01-22 urbano, 51 en adelante rural)."""
+    if "ZONA" in d.columns:
+        z = d["ZONA"].astype(str)
+    else:
+        z = pd.Series(pd.to_numeric(d["COMUNA"], errors="coerce").gt(22)
+                      .map({True: "RURAL", False: "URBANO"}), index=d.index)
+    # Ya filtrada, la columna sobra; y quitarla deja iguales las versiones que
+    # la traen y las viejas que no, para juntarlas sin errores.
+    return d[z == zona].drop(columns="ZONA", errors="ignore").reset_index(drop=True)
+
+
 def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion"):
     """Uno de los dos recortes anonimos, con solo las columnas que usa la app."""
     columnas = COLUMNAS_PREDIO if grano == "predio" else COLUMNAS
     try:
         import pyarrow.parquet as pq
         hay = set(pq.ParquetFile(ruta).schema_arrow.names)
-        d = pd.read_parquet(ruta, columns=[c for c in columnas if c in hay])
+        d = pd.read_parquet(ruta, columns=[c for c in columnas + ["ZONA"] if c in hay])
     except ImportError:                                      # pragma: no cover
         d = pd.read_parquet(ruta)
-        d = d[[c for c in columnas if c in d.columns]]
+        d = d[[c for c in columnas + ["ZONA"] if c in d.columns]]
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+    d = solo_zona(d, "URBANO")
     for c in ("TABLA_ORIGEN", "TABLA_VALOR", "USO_LADM",
               "ACTIVIDAD_ECONOMICA", "CLAVE"):
         if c in d.columns:
@@ -554,6 +573,7 @@ def cargar_detalle(ruta: str, marca_tiempo: float) -> pd.DataFrame:
     """El detalle fila a fila, CON identificadores. Solo lo lee la hoja Detalle."""
     d = pd.read_parquet(ruta)
     d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+    d = solo_zona(d, "URBANO")
     for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
               "TABLA_ORIGEN", "TABLA_VALOR", "USO_LADM", "ZHF",
               "ACTIVIDAD_ECONOMICA", "CLAVE", "SENTIDO", "RANGO_VARIACION"):
@@ -656,6 +676,7 @@ def cargar_anexos(marcas: tuple):
     for v, _ in marcas:
         d = pd.read_parquet(ruta_version(v, NOMBRE_ANEXOS))
         d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+        d = solo_zona(d, "URBANO")
         d["GRUPO_COMUNAS"] = d["COMUNA"].map(COMUNA_A_GRUPO).fillna("sin grupo")
         partes.append(_a_categoria(d).assign(VERSION=v))
     return _unir(partes) if partes else None
@@ -1064,9 +1085,9 @@ def resumen(d: pd.DataFrame, col: str,
     return pd.concat([t, pd.DataFrame(filas)[t.columns]], ignore_index=True)
 
 
-hoja_tablas, hoja_graf, hoja_detalle, hoja_anexos, hoja_reglas = st.tabs(
+hoja_tablas, hoja_graf, hoja_detalle, hoja_anexos, hoja_reglas, hoja_rural = st.tabs(
     ["📊 Tablas", "📈 Gráficos", "🔎 Detalle",
-     "🧱 Anexos y parqueaderos", "📋 Reglas"])
+     "🧱 Anexos y parqueaderos", "📋 Reglas", "🌾 Rural"])
 
 # Todo se arma una sola vez aca arriba: las tres hojas y el Excel leen de estos
 # mismos objetos, asi no hay dos sitios calculando lo mismo y desviandose.
@@ -1841,6 +1862,142 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
     else:
         st.info(f"La versión {sel_versiones[-1]} no trae {NOMBRE_SIN_TABLA}: "
                 f"sale de correr el main.")
+
+
+
+# ---------------------------------------------------------------------
+# HOJA - RURAL
+# ---------------------------------------------------------------------
+# Los corregimientos (51 a 65), aparte de lo urbano. La tabla de cada
+# construccion sale de la entrega rural: por uso LADM y uso de la ZHF rural (2
+# ultimos digitos) dice que columna de las tablas urbanas aplica. Lo que no
+# calza en ninguna regla queda en $ 0. Vigencia comercial = catastral / 0,6.
+# Los filtros de la barra lateral son de lo urbano; aqui solo cuenta la version.
+@st.cache_resource(show_spinner="Leyendo lo rural…", max_entries=4)
+def cargar_rural(nombre: str, marcas: tuple):
+    """El recorte de cada version, solo ZONA = RURAL."""
+    partes = []
+    for v, _ in marcas:
+        d = pd.read_parquet(ruta_version(v, nombre))
+        d["COMUNA"] = d["COMUNA"].astype(str).str.strip().str.zfill(2)
+        partes.append(solo_zona(d, "RURAL").assign(VERSION=v))
+    return pd.concat(partes, ignore_index=True) if partes else None
+
+
+def tabla_rural(d: pd.DataFrame, col: str, etiqueta: str, vig: str, liq: str,
+                var: str) -> pd.DataFrame:
+    """Por grupo: cuantas, medianas de las dos vigencias y como se mueven, con TOTAL."""
+    def fila(s):
+        return {"CONSTRUCCIONES": len(s), f"MEDIANA {V_BASE}": s[vig].median(),
+                f"MEDIANA {V_LIQ}": s[liq].median(), "VAR_MEDIANA_%": s[var].median(),
+                "BAJAN_%": (s[var] < 0).mean() * 100, "SUBEN_%": (s[var] > 0).mean() * 100}
+    t = pd.DataFrame([{etiqueta: str(k), **fila(s)}
+                      for k, s in d.groupby(col, observed=True, sort=True)])
+    if t.empty:
+        return t
+    t = t.sort_values("CONSTRUCCIONES", ascending=False)
+    return pd.concat([t, pd.DataFrame([{etiqueta: "TOTAL", **fila(d)}])], ignore_index=True)
+
+
+def estilo_rural(t: pd.DataFrame):
+    formato = {"CONSTRUCCIONES": entero, f"MEDIANA {V_BASE}": pesos,
+               f"MEDIANA {V_LIQ}": pesos, "VAR_MEDIANA_%": lambda v: pct(v, 2, signo=True),
+               "BAJAN_%": lambda v: pct(v, 1), "SUBEN_%": lambda v: pct(v, 1),
+               "CON_VALOR": entero, "SIN_VALOR": entero}
+    sty = t.style.format({c: f for c, f in formato.items() if c in t.columns})
+    if "VAR_MEDIANA_%" in t.columns:
+        sty = sty.map(lambda v: "" if pd.isna(v) or v == 0 else
+                      f"color: {AZUL_SUBE}" if v > 0 else f"color: {NARANJA_BAJA}",
+                      subset=["VAR_MEDIANA_%"])
+    return sty.apply(lambda f: ["background-color: #F4F6F9; font-weight: 700"
+                                if str(f.iloc[0]).startswith("TOTAL") else ""] * len(f), axis=1)
+
+
+with hoja_rural:
+    v_r = sel_versiones[-1]
+    if not ruta_version(v_r, NOMBRE_RURAL_COBERTURA).exists():
+        st.info(f"La versión {v_r} no trae lo rural. Sale de liquidar con "
+                f"LIQUIDAR_RURAL = True (Liquidacion_tablas.py) y correr "
+                f"`python src/comparacion_vigencia.py`.")
+    else:
+        st.subheader("Rural · corregimientos 51 a 65")
+        st.caption("La tabla de cada construcción sale de la entrega rural: por uso LADM y uso de la "
+                   "ZHF rural (2 últimos dígitos de la ZHF) indica qué columna de las tablas urbanas "
+                   "aplica. Lo que no calza en ninguna regla queda en $ 0. Anexos (T10) y "
+                   "parqueaderos (T12) van con la misma regla de lo urbano. Valores comerciales: "
+                   f"actual {V_BASE} = catastral / 0,6; tabla {V_LIQ} = valor de la tabla.")
+
+        cob = pd.read_parquet(ruta_version(v_r, NOMBRE_RURAL_COBERTURA))
+        tot = cob[cob["COMO_SE_LIQUIDA"] == "TOTAL"].iloc[0]
+        marcas_r = marcas_de(NOMBRE_DATOS)
+        rur = cargar_rural(NOMBRE_DATOS, marcas_r) if marcas_r else None
+        rur = rur[rur["VERSION"] == v_r] if rur is not None else pd.DataFrame()
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Construcciones rurales", entero(tot["CONSTRUCCIONES"]))
+        k2.metric("Con valor", entero(tot["CON_VALOR"]),
+                  help="Tabla de la entrega rural, anexo T10 o parqueadero T12.")
+        k3.metric("Comparadas con la vigencia", entero(len(rur)),
+                  help="Construcciones de predios liquidados completos, como en lo urbano.")
+        k4.metric("Variación mediana del VM²",
+                  pct(rur["VARIACION_COM_PCT"].median(), 2, signo=True) if len(rur) else "—")
+
+        st.markdown("**Cómo quedó liquidado lo rural**")
+        st.dataframe(estilo_rural(cob), width="stretch", hide_index=True,
+                     column_config={"MOTIVO": st.column_config.TextColumn(width="large")})
+
+        if len(rur):
+            c1, c2 = st.columns(2)
+            medida_r = c1.segmented_control(
+                "Medida", ["Valor por m²", "Avalúo del predio"], default="Valor por m²",
+                selection_mode="single", key="medida_rural") or "Valor por m²"
+            apertura_r = c2.segmented_control(
+                "Abrir por", ["Tabla asignada", "Corregimiento", "Uso"], default="Tabla asignada",
+                selection_mode="single", key="apertura_rural") or "Tabla asignada"
+            sel_corr = st.multiselect("Corregimiento", sorted(rur["COMUNA"].unique()),
+                                      key="corr_rural")
+            if medida_r == "Valor por m²":
+                d_r = rur
+                vig, liq, var = "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"
+                col_tabla = "TABLA_VALOR"
+            else:
+                marcas_p = marcas_de(NOMBRE_PREDIO)
+                d_r = cargar_rural(NOMBRE_PREDIO, marcas_p) if marcas_p else None
+                d_r = d_r[d_r["VERSION"] == v_r] if d_r is not None else pd.DataFrame()
+                vig, liq, var = "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ", "VARIACION_AVALUO_COM_PCT"
+                col_tabla = "TABLA_ORIGEN"
+            if sel_corr and len(d_r):
+                d_r = d_r[d_r["COMUNA"].isin(sel_corr)]
+            col = {"Tabla asignada": col_tabla, "Corregimiento": "COMUNA",
+                   "Uso": "USO_LADM"}[apertura_r]
+            if len(d_r):
+                st.markdown(f"**{medida_r} por {apertura_r.lower()}** · comercial")
+                st.dataframe(estilo_rural(tabla_rural(d_r, col, apertura_r.upper(), vig, liq, var)),
+                             width="stretch", hide_index=True)
+            if medida_r == "Avalúo del predio":
+                st.caption("En lo rural no hay terreno proyectado: el avalúo cambia solo por la "
+                           "construcción.")
+
+        marcas_ra = marcas_de(NOMBRE_ANEXOS)
+        if marcas_ra:
+            ra = cargar_rural(NOMBRE_ANEXOS, marcas_ra)
+            ra = ra[(ra["VERSION"] == v_r) & (ra["CON_VALOR"] == 1)]
+            if len(ra):
+                st.markdown("**Anexos y parqueaderos rurales** · valor total, comercial")
+                ra = ra.assign(GRUPO=ra["FAMILIA"].astype(str).str.capitalize() + " · "
+                               + ra["USO_LADM"].astype(str))
+                st.dataframe(estilo_rural(tabla_rural(
+                    ra, "GRUPO", "FAMILIA Y USO", "VALOR_COM_VIGENCIA", "VALOR_COM_LIQ",
+                    "VARIACION_VALOR_COM_PCT")), width="stretch", hide_index=True)
+
+        if ruta_version(v_r, NOMBRE_RURAL_REGLAS).exists():
+            with st.expander("Reglas de la entrega rural"):
+                reg = pd.read_parquet(ruta_version(v_r, NOMBRE_RURAL_REGLAS))
+                st.dataframe(reg, width="stretch", hide_index=True,
+                             column_config={"OBSERVACION": st.column_config.TextColumn(width="large")})
+                st.caption("USO_ZHF = 2 últimos dígitos de la ZHF rural. ESTADO: TABLA (columna "
+                           "indicada), T10 / T12 (como en lo urbano), MODELO (pendiente) o SIN TABLA "
+                           "(queda en $ 0).")
 
 
 

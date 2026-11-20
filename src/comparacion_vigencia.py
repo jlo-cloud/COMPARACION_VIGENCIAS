@@ -98,6 +98,10 @@ CONFIG = {
     # de la misma forma que las demas tablas.
     "parquet_publico_anexos": str(CARPETA_VERSION /
                                   "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"),
+    # Lo rural va en los mismos recortes, con la columna ZONA (URBANO/RURAL).
+    # Como quedo liquidado lo rural (conteos) y las reglas de la entrega.
+    "parquet_rural_cobertura": str(CARPETA_VERSION / "RURAL_COBERTURA.parquet"),
+    "parquet_rural_reglas": str(CARPETA_VERSION / "RURAL_REGLAS.parquet"),
 
     # Comercial -> catastral.
     # (variable 'confis'). Si alla cambia, cambiar aqui tambien.
@@ -125,6 +129,7 @@ CONFIG = {
     "comunas_act_2024_2025": [1, 2, 3, 4, 8, 9, 10, 11, 12, 17, 19, 22],
     "factor_comercial_act": 0.7,      # comunas actualizadas 2024-2025
     "factor_comercial_resto": 0.6,    # las demas
+    "factor_comercial_rural": 0.6,    # corregimientos (51 a 65): no se actualizaron
     "factor_comercial_terreno": 0.7,  # el terreno no distingue comuna
 
     # En que base sale el reporte de Excel: "CATASTRAL" o "COMERCIAL".
@@ -307,8 +312,14 @@ def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
         if c in CONFIG["comunas_5c"]:
             return ("10C", "5C", "17C")
         return ("10C", "5C_N", "17C")
+    # Lo rural trae la columna exacta que le asigno la entrega rural.
+    rural = (d["TABLA_RURAL"].fillna("").astype(str) if "TABLA_RURAL" in d.columns
+             else pd.Series("", index=d.index))
     valores = []
-    for tabla, c in zip(d["TABLA_ORIGEN"], comuna):
+    for tabla, c, col_rural in zip(d["TABLA_ORIGEN"], comuna, rural):
+        if col_rural:
+            valores.append(col_rural)
+            continue
         valor = ""
         for g in candidatos(c):
             valor = mapa.get((tabla, g), "")
@@ -324,9 +335,9 @@ def factor_comercial(d: pd.DataFrame) -> pd.Series:
     if "COMUNA" not in d.columns:
         return pd.Series(CONFIG["factor_comercial_act"], index=d.index)
     numero = pd.to_numeric(d["COMUNA"], errors="coerce")
-    return pd.Series(np.where(numero.isin(act),
-                              CONFIG["factor_comercial_act"],
-                              CONFIG["factor_comercial_resto"]), index=d.index)
+    return pd.Series(np.select([numero.isin(act), numero > 22],
+                               [CONFIG["factor_comercial_act"], CONFIG["factor_comercial_rural"]],
+                               CONFIG["factor_comercial_resto"]), index=d.index)
 
 
 def nombres_series(prefijo: str) -> tuple[str, str, str]:
@@ -349,7 +360,9 @@ COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM
             "AVALPRED",
             # Marcas de como se valoro la construccion a cada lado.
             # dejan fuera lo que no sale de la tabla (ver preparar()).
-            "ESPECIAL", "INTEGRAL", "METODO_LIQUIDACION", "CONDICION"]
+            "ESPECIAL", "INTEGRAL", "METODO_LIQUIDACION", "CONDICION",
+            # Lo rural: la columna exacta que le asigno la entrega rural.
+            "TABLA_RURAL"]
 
 # Actividad economica de la ZHF, por los ultimos tres digitos del codigo.
 ACTIVIDAD_ZHF = {
@@ -432,12 +445,14 @@ def cargar(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
 def usos_sin_tabla(df_liq: pd.DataFrame | None = None) -> pd.DataFrame:
     """Los usos que todavia no tienen tabla asignada (TABLA_ORIGEN SIN TABLA).
     Solo los nombres: va a la app como recordatorio."""
-    cols = ["DESTINOCONS", "DESTANEX", "USO_LADM", "TABLA_ORIGEN"]
+    cols = ["DESTINOCONS", "DESTANEX", "USO_LADM", "TABLA_ORIGEN", "COMUNA"]
     if df_liq is not None:
         t = df_liq[cols]
     else:
         t = pd.read_parquet(CONFIG["parquet_liquidacion"], columns=cols)
-    t = t[t["TABLA_ORIGEN"].eq("SIN TABLA")]
+    # Solo lo urbano: lo rural sin regla sale en la cobertura rural, con motivo.
+    t = t[t["TABLA_ORIGEN"].eq("SIN TABLA")
+          & (pd.to_numeric(t["COMUNA"], errors="coerce") <= 22)]
     # Los anexos traen DESTINOCONS 000: su codigo es el DESTANEX.
     anexo = t["DESTINOCONS"].astype(str).eq("000")
     return (pd.DataFrame({"TIPO": np.where(anexo, "DESTANEX", "DESTINOCONS"),
@@ -513,6 +528,7 @@ def anexos_y_parqueaderos(df_liq: pd.DataFrame | None = None,
         "COMUNA": d["COMUNA"].astype(str).str.strip().str.zfill(2).to_numpy(),
         "ACTUALIZACION": np.where(f_com == CONFIG["factor_comercial_act"],
                                   "ACT 2024-2025", "SIN ACTUALIZAR"),
+        "ZONA": np.where(pd.to_numeric(d["COMUNA"], errors="coerce") > 22, "RURAL", "URBANO"),
         "USO_LADM": d["USO_LADM"].astype(str).to_numpy(),
         # La llave con que la tabla da el valor: DESTANEX_TIPO en el anexo, y
         # destino + tipo de parqueadero en la T12.
@@ -708,6 +724,7 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     d["ACTUALIZACION"] = np.where(
         d["F_COMERCIAL"] == CONFIG["factor_comercial_act"],
         "ACT 2024-2025", "SIN ACTUALIZAR")
+    d["ZONA"] = np.where(pd.to_numeric(d["COMUNA"], errors="coerce") > 22, "RURAL", "URBANO")
 
     d["VM2_COM_LIQ"] = d["VM2"]                                  # comercial, 2027
     d["VM2_CAT_LIQ"] = d["VM2_COM_LIQ"] * factor                 # catastral, 2027
@@ -889,8 +906,13 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     # --- La tabla dominante del predio: la de la construccion mas grande -----
     area = (pd.to_numeric(d["AREA_CONST"], errors="coerce").fillna(0)
             if "AREA_CONST" in d.columns else pd.Series(0, index=d.index))
+    # Con empate de area gana la primera por CONSTRUCCION_ID: sin desempate,
+    # sort_values (no estable) elegia segun el orden de las filas y la tabla
+    # del predio cambiaba de una corrida a otra sin que cambiara nada.
+    desempate = ["CONSTRUCCION_ID"] if "CONSTRUCCION_ID" in d.columns else []
     principal = (d.assign(_A=area)
-                  .sort_values("_A", ascending=False)
+                  .sort_values(["_A"] + desempate, ascending=[False] + [True] * len(desempate),
+                               kind="stable")
                   .drop_duplicates("ID_PREDIO")
                   .set_index("ID_PREDIO"))
 
@@ -899,7 +921,7 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
     if "AREA_CONST" in d.columns:
         suma.append("AREA_CONST")
     una_vez = [c for c in ("VTER", col_anexo, "AVALPRED", "F_COMERCIAL",
-                           "COMUNA", "GRUPO_COMUNAS", "ACTUALIZACION",
+                           "COMUNA", "ZONA", "GRUPO_COMUNAS", "ACTUALIZACION",
                            "ESTRPRED", "NUMERO_PREDIAL_NACIONAL",
                            "N_CONST_PREDIO", "PREDIO_ESPECIAL",
                            "METODO_LIQUIDACION")
@@ -1383,8 +1405,12 @@ DICCIONARIO_DETALLE = [
      "propias filas (TABLA_ORIGEN = T10_ANEXOS)"),
     ("COMUNA", "Comuna del predio",
      "posiciones 10 y 11 del numero predial nacional. 01 a 22 son las "
-     "comunas urbanas; 51 a 64 son rurales (corregimientos) y no se "
-     "liquidan todavia"),
+     "comunas urbanas; 51 a 65 son rurales (corregimientos): se liquidan "
+     "con la entrega rural (reglas_rurales.py) cuando LIQUIDAR_RURAL esta "
+     "prendido en Liquidacion_tablas.py; su vigencia comercial es catastral / 0,6"),
+    ("ZONA", "URBANO (comunas 01 a 22) o RURAL (corregimientos 51 a 65)",
+     "de la comuna. Lo rural se liquida con la entrega rural y su vigencia "
+     "comercial es catastral / 0,6"),
     ("GRUPO_COMUNAS", "Grupo de comunas con que se lee la tabla de valor",
      "7C (02,03,04,08,17,19,22), 5C (01,09,10,11,12) o 5C_N "
      "(07,14,15,20,21). 5C y 5C_N juntas son la 10C de las tablas, y "
@@ -1548,7 +1574,7 @@ DICCIONARIO_DETALLE = [
 
 COLUMNAS_EXCEL_DETALLE = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
-    "COMUNA", "ESTRPRED", "USO_LADM", "CONDICION",
+    "COMUNA", "ZONA", "ESTRPRED", "USO_LADM", "CONDICION",
     "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
     "ZHF", "TIPOLOGIA_ZHF",
     # ZHF_ANTERIOR va tambien al Excel, no solo al parquet: sin el codigo
@@ -2076,7 +2102,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
 
         cols = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID",
                 "N_CONST_PREDIO", "CON_ANEXO",
-                "COMUNA", "GRUPO_COMUNAS", "ESTRPRED",
+                "COMUNA", "ZONA", "GRUPO_COMUNAS", "ESTRPRED",
                 "ACTUALIZACION",
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
                 "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF",
@@ -2137,7 +2163,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             print(f"   Detalle en Excel: {ruta_det}")
 
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
-        publicas = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
+        publicas = ["COMUNA", "ZONA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLAVE",
                     # Cuantas construcciones tiene el predio de esta fila. Va
@@ -2170,7 +2196,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "VARIACION_COM_PCT"]
 
         # A nivel predio, la tabla y la actividad son las de la construccion mayor.
-        publicas_predio = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN",
+        publicas_predio = ["COMUNA", "ZONA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "ORIGEN_TERRENO_LIQ",
                            "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
                            "N_CONST_PREDIO", "N_TABLAS_PREDIO", "CON_ANEXO",
@@ -2246,6 +2272,21 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
 
         pub_anexos = anexos_y_parqueaderos(df_liq)
         pub_anexos.to_parquet(CONFIG["parquet_publico_anexos"], index=False)
+
+        # Cobertura rural (conteos por via y motivo) y las reglas de la
+        # entrega: la app no tiene la carpeta input/, asi que van aqui.
+        try:
+            import reglas_rurales
+            cols_cob = reglas_rurales.COLUMNAS_COBERTURA
+            liq_cob = (df_liq[[c for c in cols_cob if c in df_liq.columns]] if df_liq is not None
+                       else pd.read_parquet(CONFIG["parquet_liquidacion"], columns=cols_cob))
+            reglas_rurales.cobertura(liq_cob).to_parquet(CONFIG["parquet_rural_cobertura"], index=False)
+            reglas = reglas_rurales.cargar_reglas()
+            reglas[["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM", "USO_ZHF", "TIPOLOGIA_RURAL",
+                    "ESTADO", "COLUMNA", "OBSERVACION"]].to_parquet(CONFIG["parquet_rural_reglas"], index=False)
+            print(f"   Rural: cobertura y reglas ({reglas.attrs['archivo']})")
+        except Exception as e:                           # pragma: no cover
+            print(f"   (no se pudo escribir la cobertura rural: {e})")
         print(f"   Anexos y parqueaderos:            "
               f"{CONFIG['parquet_publico_anexos']} ({len(pub_anexos):,} filas, "
               f"{int(pub_anexos['CON_VALOR'].sum()):,} con valor de tabla)")

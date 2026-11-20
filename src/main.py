@@ -150,6 +150,13 @@ def main(liquidar_otras=None):
             except Exception as e:
                 print(f"⚠️ No se pudo agregar la hoja USOS al consolidado: {e}")
 
+            # Post-inconsistencias: lo que quedo en $ 0 y por que, urbano y rural.
+            try:
+                from post_inconsistencias import generar_reporte_post
+                generar_reporte_post(df_liquidacion)
+            except Exception as e:
+                print(f"⚠️ No se pudo generar el reporte de post-inconsistencias: {e}")
+
             pbar.update(1)
             crono.marca("PASO 4: guardar parquet")  # ⏱️
         except Exception as e:

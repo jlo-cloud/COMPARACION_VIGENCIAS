@@ -16,6 +16,8 @@ from datetime import datetime
 
 import pandas as pd
 
+import reglas_rurales
+
 from comparacion_vigencia import (CONFIG, COLUMNAS_EXCEL_DETALLE,
                                   anexos_y_parqueaderos, crear_rango_variacion,
                                   exportar_detalle_excel, grupo_comunas)
@@ -65,6 +67,7 @@ def main():
         {"T10_ANEXOS": "T10_NO_CONVENCIONAL_17C",
          "T12_PARQUEADEROS": "T12_PARQUEADEROS"})
     filas["GRUPO_COMUNAS"] = grupo_comunas(filas)
+    filas["ZONA"] = anx["ZONA"].astype(str)
     filas["AREA_CONST"] = anx["AREA"]
     for b in ("CAT", "COM"):
         vig, liq = anx[f"VALOR_{b}_VIGENCIA"], anx[f"VALOR_{b}_LIQ"]
@@ -95,10 +98,20 @@ def main():
                      filas[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]]],
                     ignore_index=True)
 
-    print(f"Escribiendo {len(det):,} filas a Excel: construcciones, "
-          f"{n_anx:,} anexos y {n_parq:,} parqueaderos (tarda unos minutos)...")
+    # Urbano y rural en la MISMA hoja Detalle: la columna ZONA los separa
+    # (el R de resumenes filtra ZONA = URBANO). Aparte solo va la cobertura
+    # rural, que es un conteo y no filas de construccion.
+    rural = det["ZONA"].astype(str).eq("RURAL")
+    extras = {}
+    if rural.any():
+        liq = pd.read_parquet(CONFIG["parquet_liquidacion"],
+                              columns=reglas_rurales.COLUMNAS_COBERTURA)
+        extras["Cobertura_Rural"] = reglas_rurales.cobertura(liq)
+
+    print(f"Escribiendo {len(det):,} filas a Excel ({int((~rural).sum()):,} urbanas y "
+          f"{int(rural.sum()):,} rurales, columna ZONA; tarda unos minutos)...")
     inicio = time.time()
-    exportar_detalle_excel(det, ruta, a.muestra)
+    exportar_detalle_excel(det, ruta, a.muestra, extras=extras)
     print(f"Listo: {ruta}")
     print(f"   {time.time() - inicio:.0f} s")
 

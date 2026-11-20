@@ -58,6 +58,7 @@ DICCIONARIO = {
     'ID_PREDIO': 'Identificador del predio en la base catastral',
     'NUMERO_PREDIAL_NACIONAL': 'Numero predial nacional (30 digitos)',
     'COMUNA': 'Comuna del predio (posiciones 10-11 del numero predial); 01-22 urbano, 51 en adelante rural',
+    'ZONA': 'URBANO (comunas 01-22) o RURAL (corregimientos 51 en adelante)',
     'ID_CONSTRUCCION': 'Identificador de la construccion en la base catastral (solo convencionales; los anexos no lo traen)',
     'DESTINOCONS_2025': 'Destino de la construccion convencional tal como viene en el export',
     'CONCONS': 'Numero de la construccion convencional dentro del predio, segun el export',
@@ -419,7 +420,10 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
             area = pd.to_numeric(d['ACONCONS'], errors='coerce').fillna(0)
             d['AREA_CONST'] = area.where(
                 area > 0, pd.to_numeric(d['ACONANEX'], errors='coerce'))
-        hojas[nombre] = d.reindex(columns=COLUMNAS_REPORTE)
+        d = d.reindex(columns=COLUMNAS_REPORTE)
+        d['ZONA'] = np.where(pd.to_numeric(d['COMUNA'], errors='coerce') > 22,
+                             'RURAL', 'URBANO')
+        hojas[nombre] = d
 
     def resumen_de(nombres):
         # Solo los tipos que tienen casos, y al final la fila Total.
@@ -430,11 +434,14 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
             'Predios': inconsistencias[k]['predios_unicos'],
             '% Predios': round(inconsistencias[k]['predios_unicos']
                                / total_predios * 100, 2),
+            # La misma hoja partida por zona (filas de la hoja de detalle)
+            'Filas urbano': int((hojas[k]['ZONA'] == 'URBANO').sum()),
+            'Filas rural': int((hojas[k]['ZONA'] == 'RURAL').sum()),
         } for k in nombres if inconsistencias[k]['total'] > 0])
         if r.empty:
             return r
         total = {'Tipo': 'Total'}
-        for c in ['Registros', 'Predios']:
+        for c in ['Registros', 'Predios', 'Filas urbano', 'Filas rural']:
             total[c] = int(r[c].sum())
         return pd.concat([r, pd.DataFrame([total])], ignore_index=True)
 
