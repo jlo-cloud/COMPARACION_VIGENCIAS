@@ -1756,13 +1756,15 @@ with hoja_reglas:
         ruta_cob = ruta_version(sel_versiones[-1], NOMBRE_RURAL_COBERTURA)
         if ruta_cob.exists():
             cob = pd.read_parquet(ruta_cob)
-            st.markdown("**Cómo quedó liquidado lo rural**")
+            st.markdown("**Construcciones rurales con valor, por vía de liquidación**")
             st.dataframe(
-                cob.style.format({c: entero for c in ("CONSTRUCCIONES", "CON_VALOR", "SIN_VALOR")})
+                cob.style.format({c: entero for c in ("CONSTRUCCIONES", "CON_VALOR", "SIN_VALOR")
+                                  if c in cob.columns})
                    .apply(lambda f: ["background-color: #F4F6F9; font-weight: 700"
-                                     if str(f.iloc[0]) == "TOTAL" else ""] * len(f), axis=1),
-                width="stretch", hide_index=True,
-                column_config={"MOTIVO": st.column_config.TextColumn(width="large")})
+                                     if str(f.iloc[0]).startswith("TOTAL") else ""] * len(f), axis=1),
+                width="stretch", hide_index=True)
+            st.caption("Lo que queda en $ 0 (modelo, sin regla, clave sin valor) no se muestra "
+                       "aquí: está en los reportes de pre y post-inconsistencias.")
         ruta_reg = ruta_version(sel_versiones[-1], NOMBRE_RURAL_REGLAS)
         if ruta_reg.exists():
             st.markdown("**Reglas de la entrega rural**")
@@ -1895,17 +1897,6 @@ Comercio, Oficinas_Consultorios), va a preinconsistencias y no se liquida.
 Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
             """)
 
-        st.divider()
-        st.markdown("**Usos que todavía no tienen tabla**")
-        ruta_sin_tabla = ruta_version(sel_versiones[-1], NOMBRE_SIN_TABLA)
-        if ruta_sin_tabla.exists():
-            sin_tabla = pd.read_parquet(ruta_sin_tabla)
-            st.markdown("\n".join(f"- `{f.USO_LADM}` ({f.TIPO} {f.CODIGO})"
-                                  for f in sin_tabla.itertuples())
-                        or "Todos los usos tienen tabla.")
-        else:
-            st.info(f"La versión {sel_versiones[-1]} no trae {NOMBRE_SIN_TABLA}: "
-                    f"sale de correr el main.")
 
 
 

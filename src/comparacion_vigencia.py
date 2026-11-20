@@ -2265,12 +2265,18 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                   f"{CONFIG['parquet_publico_predio']} ({len(pub_p):,} filas, "
                   f"{len(pub_p.columns)} columnas)")
 
+        # Los usos sin tabla quedan en $ 0: no van a la app (estan en el
+        # reporte de post-inconsistencias). El archivo viejo se borra.
         sin_tabla = usos_sin_tabla(df_liq)
-        sin_tabla.to_parquet(CONFIG["parquet_sin_tabla"], index=False)
+        if os.path.exists(CONFIG["parquet_sin_tabla"]):
+            os.remove(CONFIG["parquet_sin_tabla"])
         print(f"   Usos sin tabla:                   "
-              f"{CONFIG['parquet_sin_tabla']} ({len(sin_tabla)} usos)")
+              f"no se publica ({len(sin_tabla)} usos; ver post-inconsistencias)")
 
+        # Solo los que tienen valor de tabla: lo que queda en $ 0 no va a la
+        # app (esta en el reporte de post-inconsistencias).
         pub_anexos = anexos_y_parqueaderos(df_liq)
+        pub_anexos = pub_anexos[pub_anexos["CON_VALOR"] == 1].reset_index(drop=True)
         pub_anexos.to_parquet(CONFIG["parquet_publico_anexos"], index=False)
 
         # Cobertura rural (conteos por via y motivo) y las reglas de la
@@ -2280,7 +2286,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
             cols_cob = reglas_rurales.COLUMNAS_COBERTURA
             liq_cob = (df_liq[[c for c in cols_cob if c in df_liq.columns]] if df_liq is not None
                        else pd.read_parquet(CONFIG["parquet_liquidacion"], columns=cols_cob))
-            reglas_rurales.cobertura(liq_cob).to_parquet(CONFIG["parquet_rural_cobertura"], index=False)
+            reglas_rurales.cobertura_con_valor(liq_cob).to_parquet(
+                CONFIG["parquet_rural_cobertura"], index=False)
             reglas = reglas_rurales.cargar_reglas()
             reglas[["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM", "USO_ZHF", "TIPOLOGIA_RURAL",
                     "ESTADO", "COLUMNA", "OBSERVACION"]].to_parquet(CONFIG["parquet_rural_reglas"], index=False)

@@ -324,6 +324,19 @@ def cobertura(liq: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([r, tot], ignore_index=True)
 
 
+def cobertura_con_valor(liq: pd.DataFrame) -> pd.DataFrame:
+    """La cobertura que va a la app: solo lo que tomo valor, por via. Lo que
+    queda en $ 0 (modelo, sin regla, clave sin valor) no sube: esta en el
+    reporte de post-inconsistencias."""
+    c = cobertura(liq)
+    c = c[(c["COMO_SE_LIQUIDA"] != "TOTAL") & (c["CON_VALOR"] > 0)]
+    c = (c.groupby("COMO_SE_LIQUIDA", sort=False)["CON_VALOR"].sum()
+          .rename("CONSTRUCCIONES").reset_index())
+    tot = pd.DataFrame([{"COMO_SE_LIQUIDA": "TOTAL CON VALOR",
+                         "CONSTRUCCIONES": int(c["CONSTRUCCIONES"].sum())}])
+    return pd.concat([c, tot], ignore_index=True)
+
+
 # ---------------------------------------------------------------------------
 # Validacion: corrida sola, sin tocar la liquidacion
 # ---------------------------------------------------------------------------
