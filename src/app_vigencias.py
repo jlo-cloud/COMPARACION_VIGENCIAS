@@ -1785,8 +1785,7 @@ with hoja_reglas:
         ruta_reg = ruta_version(sel_versiones[-1], NOMBRE_RURAL_REGLAS)
         if ruta_reg.exists():
             reg = pd.read_parquet(ruta_reg)
-            archivo = reg.attrs.get("archivo", "REGLAS_RURALES")
-            st.subheader(archivo.removesuffix(".xlsx"))
+            st.subheader("Asignación de tablas de valor")
             st.dataframe(reg, width="stretch", hide_index=True,
                          column_config={
                              "USO_LADM": st.column_config.TextColumn(width="medium"),
@@ -1795,7 +1794,7 @@ with hoja_reglas:
         else:
             st.info("Esta versión no trae las reglas rurales.")
     else:
-        st.subheader("Cómo se asigna la tabla de valor")
+        st.subheader("Asignación de tablas de valor")
 
 
         st.dataframe(reglas, width="stretch", hide_index=True,
