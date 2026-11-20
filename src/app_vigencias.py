@@ -1774,8 +1774,9 @@ with hoja_anexos:
 
             # --- Graficas: 2026 frente a 2027 (mismos colores de Graficos) ---
             g1, g2 = st.columns(2)
-            # 1. Mediana de cada vigencia por uso (los usos con mas construcciones)
-            top = a["USO_LADM"].value_counts().head(12).index
+            # 1. Mediana de cada vigencia por uso: todos los usos, en un recuadro
+            #    con barra de desplazamiento para bajar con el cursor.
+            top = a["USO_LADM"].value_counts().index
             por_uso = (a[a["USO_LADM"].isin(top)].groupby("USO_LADM", observed=True)
                        .agg(N=(a_vig, "size"), VIG=(a_vig, "median"), LIQ=(a_liq, "median"),
                             VAR=(a_var, "median")).reset_index())
@@ -1790,10 +1791,11 @@ with hoja_anexos:
             largo["VALOR_TXT"] = largo["VALOR"].map(pesos)
             largo["VAR_TXT"] = largo["VAR"].map(lambda v: pct(v, 2, signo=True))
             orden_usos = list(por_uso.sort_values("N", ascending=False)["USO_LADM"].astype(str))
-            g1.altair_chart(
+            caja = g1.container(height=520)
+            caja.altair_chart(
                 alt.Chart(largo, title=alt.TitleParams(
                     text=f"{medida_anx} · mediana {V_BASE} y {V_LIQ}",
-                    subtitle=f"Los {len(por_uso)} usos con más construcciones · {unidad}",
+                    subtitle=f"Los {len(por_uso)} usos, de más a menos construcciones · {unidad}",
                     subtitleColor="#667085", anchor="start"))
                 .mark_bar(cornerRadiusEnd=3, height={"band": 0.8})
                 .encode(
