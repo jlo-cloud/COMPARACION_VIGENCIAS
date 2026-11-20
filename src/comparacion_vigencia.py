@@ -1442,8 +1442,8 @@ DICCIONARIO_DETALLE = [
      "valor vigente, y no entran a la app ni a los resumenes. Las mismas del "
      "reporte de post-inconsistencias"),
     ("MOTIVO_CERO", "Por que quedo en $ 0",
-     "modelo (modelos apagados), especial (destino 020/023), sin tabla, rural "
-     "sin regla o sin ZHF, anexo o parqueadero sin valor en su tabla"),
+     "MODELO, ESPECIAL, SIN ZHF o SIN REGLA DE LIQUIDACIÓN, como en el reporte "
+     "de post-inconsistencias"),
     ("TABLA_VALOR", "Columna EXACTA del Excel de tablas de la que salio el VM2",
      "por (TABLA_ORIGEN, PUNTCONS, COMUNA); el grupo 7C o 10C lo decide la "
      "comuna. Abriendo esa columna en la fila del PUNTCONS sale el VM2. En "

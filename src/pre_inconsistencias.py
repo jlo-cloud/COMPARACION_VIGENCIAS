@@ -36,21 +36,6 @@ EXCEL_REPORTE = True
 # T3_COMERCIAL_022 o T4_INDUSTRIAL_032).
 VALIDAR_ZHF = False
 
-# Que dependencia revisa y corrige cada tipo de inconsistencia. La llave es el
-# nombre de la hoja del reporte. Sin ZHF y las coordenadas son datos
-# espaciales: Cartografia. Sin puntaje, sin area, sin uso y el uso que no
-# cuadra con la condicion son informacion fisica de la construccion:
-# Reconocimiento. Un tipo nuevo que no este aqui sale como POR_DEFINIR.
-RESPONSABLES = {
-    'SIN_ZHF': 'CARTOGRAFIA',
-    'SIN_LONGITUD': 'CARTOGRAFIA',
-    'SIN_LATITUD': 'CARTOGRAFIA',
-    'PUNTAJE': 'RECONOCIMIENTO',
-    'AREA_CONSTRUIDA': 'RECONOCIMIENTO',
-    'HOMOLOGACION': 'RECONOCIMIENTO',
-    'CONSISTENCIA_USO': 'RECONOCIMIENTO',
-    'PREDIO': 'RECONOCIMIENTO',
-}
 
 # Como se llama cada tipo en el RESUMEN.
 NOMBRE_MOTIVO = {
@@ -505,14 +490,8 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
                          ).to_excel(writer, sheet_name='DICCIONARIO', index=False)
         print(f"   ✅ {archivo}")
 
-    print("\n   Reportes de pre-inconsistencias:")
+    # Un solo reporte, con todos los motivos: ya no sale una copia por
+    # responsable (reporte_pre_inconsistencias_RECONOCIMIENTO_<fecha>.xlsx).
+    print("\n   Reporte de pre-inconsistencias:")
     escribir(f"{output_path}reporte_pre_inconsistencias_{timestamp}.xlsx",
              list(hojas))
-    por_responsable = {}
-    for nombre in hojas:
-        por_responsable.setdefault(RESPONSABLES.get(nombre, 'POR_DEFINIR'),
-                                   []).append(nombre)
-    for responsable, nombres in por_responsable.items():
-        if any(len(hojas[n]) for n in nombres):
-            escribir(f"{output_path}reporte_pre_inconsistencias_"
-                     f"{responsable}_{timestamp}.xlsx", nombres)

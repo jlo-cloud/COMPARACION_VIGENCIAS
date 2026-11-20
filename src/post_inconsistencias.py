@@ -14,28 +14,17 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA",
-            "ZONA", "DESTINOCONS", "DESTANEX", "TIPOANEXO", "USO_LADM", "CONDICION",
-            "ZHF", "PUNTCONS", "AREA_CONST", "TABLA_ORIGEN", "TABLA_RURAL", "MOTIVO"]
+# Las mismas columnas y el mismo diccionario de las hojas de pre-inconsistencias.
+# La hoja SIN_REGLA_LIQUIDACION lleva ademas DETALLE, porque junta varios casos.
+from pre_inconsistencias import COLUMNAS_REPORTE as COLUMNAS, DICCIONARIO as _DICC_PRE  # noqa: E402
 
-DICCIONARIO = {
-    "ID_PREDIO": "Identificador del predio en la base catastral",
-    "NUMERO_PREDIAL_NACIONAL": "Numero predial nacional (30 digitos)",
-    "CONSTRUCCION_ID": "Llave de la construccion en la liquidacion: ID_PREDIO-C/A consecutivo-destino",
-    "COMUNA": "Comuna (01-22) o corregimiento (51 en adelante)",
-    "ZONA": "URBANO o RURAL",
-    "DESTINOCONS": "Codigo LADM del uso (000 si es anexo)",
-    "DESTANEX": "Codigo LADM del anexo",
-    "TIPOANEXO": "Tipo (calificacion) del anexo",
-    "USO_LADM": "Nombre del uso LADM",
-    "CONDICION": "Condicion de propiedad (9 = propiedad horizontal)",
-    "ZHF": "Zona homogenea fisica del predio",
-    "PUNTCONS": "Puntaje de la construccion",
-    "AREA_CONST": "Area construida (m2)",
-    "TABLA_ORIGEN": "Tabla que le asigno la liquidacion",
-    "TABLA_RURAL": "Columna que asigna la entrega rural (solo rural)",
-    "MOTIVO": "Por que quedo en $ 0",
-}
+DICCIONARIO = {**_DICC_PRE,
+               "DETALLE": "Solo en SIN_REGLA_LIQUIDACION: el caso puntual (anexo o parqueadero "
+                          "sin valor en su tabla, rural sin tabla en la entrega, uso sin tabla)"}
+
+# Los motivos, en este orden, y la hoja de cada uno.
+MOTIVOS = {"MODELO": "MODELO", "ESPECIAL": "ESPECIAL", "SIN ZHF": "SIN_ZHF",
+           "SIN REGLA DE LIQUIDACIÓN": "SIN_REGLA_LIQUIDACION"}
 
 
 def motivo_cero(d: pd.DataFrame) -> pd.Series:
@@ -54,6 +43,18 @@ def motivo_cero(d: pd.DataFrame) -> pd.Series:
         default="Tabla asignada sin valor para su comuna o puntaje"), index=d.index)
 
 
+def motivo(d: pd.DataFrame) -> pd.Series:
+    """El motivo agrupado: MODELO, ESPECIAL, SIN ZHF o SIN REGLA DE LIQUIDACIÓN
+    (anexo o parqueadero sin valor en su tabla, uso sin tabla, rural sin
+    tabla en la entrega)."""
+    t = d["TABLA_ORIGEN"].astype(str)
+    rural = (d["MOTIVO_RURAL"].fillna("").astype(str) if "MOTIVO_RURAL" in d.columns
+             else pd.Series("", index=d.index))
+    return pd.Series(np.select(
+        [t == "MODELO", t == "ESPECIALES", rural.str.contains("sin ZHF")],
+        ["MODELO", "ESPECIAL", "SIN ZHF"], default="SIN REGLA DE LIQUIDACIÓN"), index=d.index)
+
+
 def generar_reporte_post(df_liq: pd.DataFrame,
                          output_path: str = "./output/post_inconsistencias/") -> str:
     """Construcciones en $ 0 despues de liquidar, con motivo, urbano y rural."""
@@ -64,79 +65,48 @@ def generar_reporte_post(df_liq: pd.DataFrame,
     cero = df_liq[valor <= 0].copy()
     cero["ZONA"] = np.where(pd.to_numeric(cero["COMUNA"], errors="coerce") > 22,
                             "RURAL", "URBANO")
-    cero["MOTIVO"] = motivo_cero(cero)
-    total = df_liq.assign(ZONA=np.where(pd.to_numeric(df_liq["COMUNA"], errors="coerce") > 22,
-                                        "RURAL", "URBANO")).groupby("ZONA").size()
+    cero["MOTIVO"] = motivo(cero)
+    cero["DETALLE"] = motivo_cero(cero)
 
     # Igual que el resumen de pre-inconsistencias: un MOTIVO por
     # fila, los predios y las construcciones partidas en urbano y rural.
-    g = cero.groupby("MOTIVO")
-    resumen = pd.DataFrame({
-        "PREDIOS": g["ID_PREDIO"].nunique(),
-        "CONSTRUCCION URBANA": g["ZONA"].apply(lambda z: int((z == "URBANO").sum())),
-        "CONSTRUCCION RURAL": g["ZONA"].apply(lambda z: int((z == "RURAL").sum())),
-        "TOTAL DE CONSTRUCCIONES": g.size()}).reset_index()
-    resumen = resumen.sort_values("TOTAL DE CONSTRUCCIONES", ascending=False)
+    # Los cuatro motivos siempre, aunque alguno este en 0.
+    resumen = pd.DataFrame([{
+        "MOTIVO": m, "PREDIOS": int(cero.loc[cero["MOTIVO"] == m, "ID_PREDIO"].nunique()),
+        "CONSTRUCCION URBANA": int(((cero["MOTIVO"] == m) & (cero["ZONA"] == "URBANO")).sum()),
+        "CONSTRUCCION RURAL": int(((cero["MOTIVO"] == m) & (cero["ZONA"] == "RURAL")).sum()),
+        "TOTAL DE CONSTRUCCIONES": int((cero["MOTIVO"] == m).sum())} for m in MOTIVOS])
     resumen = pd.concat([resumen, pd.DataFrame([{
         "MOTIVO": "Total", "PREDIOS": int(cero["ID_PREDIO"].nunique()),
         "CONSTRUCCION URBANA": int((cero["ZONA"] == "URBANO").sum()),
         "CONSTRUCCION RURAL": int((cero["ZONA"] == "RURAL").sum()),
         "TOTAL DE CONSTRUCCIONES": len(cero)}])], ignore_index=True)
 
-    # Por tabla: de lo que cada tabla tenia asignado, cuanto quedo en $ 0 y por
-    # que. MODELO, ESPECIALES y SIN TABLA salen como una "tabla" mas.
-    todo = df_liq.assign(ZONA=np.where(pd.to_numeric(df_liq["COMUNA"], errors="coerce") > 22,
-                                       "RURAL", "URBANO"),
-                         TABLA_ORIGEN=df_liq["TABLA_ORIGEN"].astype(str))
-    asignadas = todo.groupby(["ZONA", "TABLA_ORIGEN"]).size().rename("ASIGNADAS")
-    por_tabla = (cero.assign(TABLA_ORIGEN=cero["TABLA_ORIGEN"].astype(str))
-                 .groupby(["ZONA", "TABLA_ORIGEN"])
-                 .agg(EN_CERO=("MOTIVO", "size"), PREDIOS_EN_CERO=("ID_PREDIO", "nunique"),
-                      MOTIVO=("MOTIVO", lambda s: " | ".join(
-                          f"{m} ({n:,})" for m, n in s.value_counts().items())))
-                 .join(asignadas, how="left").reset_index())
-    por_tabla["% EN CERO"] = (por_tabla["EN_CERO"] / por_tabla["ASIGNADAS"] * 100).round(2)
-    por_tabla = por_tabla[["ZONA", "TABLA_ORIGEN", "ASIGNADAS", "EN_CERO", "% EN CERO",
-                           "PREDIOS_EN_CERO", "MOTIVO"]].sort_values(
-        ["ZONA", "EN_CERO"], ascending=[False, False])
-    # Y el uso, para ver que cae en cada tabla (sobre todo en SIN TABLA y MODELO)
-    por_uso = (cero.assign(TABLA_ORIGEN=cero["TABLA_ORIGEN"].astype(str),
-                           USO_LADM=cero["USO_LADM"].astype(str))
-               .groupby(["ZONA", "TABLA_ORIGEN", "USO_LADM", "MOTIVO"])
-               .size().rename("CONSTRUCCIONES").reset_index()
-               .sort_values(["ZONA", "TABLA_ORIGEN", "CONSTRUCCIONES"],
-                            ascending=[False, True, False]))
-
-    detalle = cero.reindex(columns=COLUMNAS)
+    detalle = cero.reindex(columns=COLUMNAS + ["MOTIVO", "DETALLE"])
     os.makedirs(output_path, exist_ok=True)
     archivo = os.path.join(output_path,
                            f"reporte_post_inconsistencias_{datetime.now():%Y%m%d}.xlsx")
     with pd.ExcelWriter(archivo, engine="xlsxwriter") as w:
         resumen.to_excel(w, sheet_name="RESUMEN", index=False)
-        por_tabla.to_excel(w, sheet_name="POR_TABLA", index=False)
-        por_uso.to_excel(w, sheet_name="POR_TABLA_Y_USO", index=False)
-        w.sheets["POR_TABLA"].set_column(0, 0, 10)
-        w.sheets["POR_TABLA"].set_column(1, 1, 26)
-        w.sheets["POR_TABLA"].set_column(2, 5, 14)
-        w.sheets["POR_TABLA"].set_column(6, 6, 110)
-        w.sheets["POR_TABLA_Y_USO"].set_column(0, 0, 10)
-        w.sheets["POR_TABLA_Y_USO"].set_column(1, 2, 34)
-        w.sheets["POR_TABLA_Y_USO"].set_column(3, 3, 70)
-        # Una sola hoja: la columna ZONA dice si es urbano o rural.
-        detalle.to_excel(w, sheet_name="EN_CERO", index=False)
+        # Una hoja por motivo, con urbano y rural juntos (columna ZONA).
+        for m, hoja in MOTIVOS.items():
+            cols = COLUMNAS + (["DETALLE"] if m == "SIN REGLA DE LIQUIDACIÓN" else [])
+            parte = detalle.loc[detalle["MOTIVO"] == m, cols]
+            if len(parte):
+                parte.to_excel(w, sheet_name=hoja, index=False)
+                if "DETALLE" in cols:
+                    w.sheets[hoja].set_column(len(cols) - 1, len(cols) - 1, 60)
+
         pd.DataFrame({"COLUMNA": list(DICCIONARIO), "DESCRIPCION": list(DICCIONARIO.values())}
                      ).to_excel(w, sheet_name="DICCIONARIO", index=False)
         # Enteros con separador de miles (en Excel en espanol: 130.983)
         miles = w.book.add_format({"num_format": "#,##0"})
-        w.sheets["RESUMEN"].set_column(0, 0, 62)
+        w.sheets["RESUMEN"].set_column(0, 0, 30)
         w.sheets["RESUMEN"].set_column(1, 4, 24, miles)
-        w.sheets["POR_TABLA"].set_column(2, 3, 14, miles)
-        w.sheets["POR_TABLA"].set_column(5, 5, 14, miles)
-        w.sheets["POR_TABLA_Y_USO"].set_column(4, 4, 16, miles)
-        w.sheets["DICCIONARIO"].set_column(0, 1, 40)
+        w.sheets["DICCIONARIO"].set_column(0, 0, 28)
+        w.sheets["DICCIONARIO"].set_column(1, 1, 110)
     print("\n   Post-inconsistencias (construcciones en $ 0):")
     print(resumen.to_string(index=False))
-    print(por_tabla.drop(columns="MOTIVO").to_string(index=False))
     print(f"   ✅ {archivo}")
     return archivo
 
@@ -148,5 +118,6 @@ if __name__ == "__main__":
     ruta = CONFIG["parquet_liquidacion"]
     import pyarrow.parquet as pq
     hay = set(pq.ParquetFile(ruta).schema_arrow.names)
-    usar = [c for c in COLUMNAS + ["VM2", "LIQ_PARQUEADERO", "MOTIVO_RURAL"] if c in hay]
+    usar = [c for c in COLUMNAS + ["TABLA_ORIGEN", "VM2", "LIQ_PARQUEADERO", "MOTIVO_RURAL"]
+            if c in hay]
     generar_reporte_post(pd.read_parquet(ruta, columns=usar))

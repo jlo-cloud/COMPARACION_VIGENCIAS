@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -1770,6 +1771,77 @@ with hoja_anexos:
                         help="Mediana de la variación de cada construcción "
                              "contra sí misma."),
                 })
+
+            # --- Graficas: 2026 frente a 2027 (mismos colores de Graficos) ---
+            g1, g2 = st.columns(2)
+            # 1. Mediana de cada vigencia por uso (los usos con mas construcciones)
+            top = a["USO_LADM"].value_counts().head(12).index
+            por_uso = (a[a["USO_LADM"].isin(top)].groupby("USO_LADM", observed=True)
+                       .agg(N=(a_vig, "size"), VIG=(a_vig, "median"), LIQ=(a_liq, "median"),
+                            VAR=(a_var, "median")).reset_index())
+            # Millones cuando los valores son de decenas de millones (parqueaderos);
+            # si no, miles (el valor por m2 de un anexo no pasa de unos 2 millones).
+            escala, unidad = ((1e6, "millones de $") if por_uso[["VIG", "LIQ"]].max().max() >= 1e7
+                              else (1e3, "miles de $"))
+            largo = por_uso.melt(id_vars=["USO_LADM", "N", "VAR"], value_vars=["VIG", "LIQ"],
+                                 var_name="SERIE", value_name="VALOR")
+            largo["SERIE"] = largo["SERIE"].map({"VIG": n_base, "LIQ": n_liq})
+            largo["VALOR_ESC"] = largo["VALOR"] / escala
+            largo["VALOR_TXT"] = largo["VALOR"].map(pesos)
+            largo["VAR_TXT"] = largo["VAR"].map(lambda v: pct(v, 2, signo=True))
+            orden_usos = list(por_uso.sort_values("N", ascending=False)["USO_LADM"].astype(str))
+            g1.altair_chart(
+                alt.Chart(largo, title=alt.TitleParams(
+                    text=f"{medida_anx} · mediana {V_BASE} y {V_LIQ}",
+                    subtitle=f"Los {len(por_uso)} usos con más construcciones · {unidad}",
+                    subtitleColor="#667085", anchor="start"))
+                .mark_bar(cornerRadiusEnd=3, height={"band": 0.8})
+                .encode(
+                    y=alt.Y("USO_LADM:N", title=None, sort=orden_usos,
+                            axis=alt.Axis(labelLimit=220)),
+                    yOffset=alt.YOffset("SERIE:N", sort=[n_base, n_liq]),
+                    x=alt.X("VALOR_ESC:Q", title=unidad.capitalize(),
+                            axis=alt.Axis(grid=True, gridColor="#EEF0F4")),
+                    color=alt.Color("SERIE:N", title=None,
+                                    scale=alt.Scale(domain=[n_base, n_liq], range=[NARANJA, AZUL]),
+                                    legend=alt.Legend(orient="top")),
+                    tooltip=[alt.Tooltip("USO_LADM:N", title="Uso"),
+                             alt.Tooltip("SERIE:N", title="Serie"),
+                             alt.Tooltip("VALOR_TXT:N", title="Mediana"),
+                             alt.Tooltip("N:Q", title="Construcciones", format=",d"),
+                             alt.Tooltip("VAR_TXT:N", title="Variación mediana")])
+                .properties(height=max(260, 34 * len(por_uso))),
+                width="stretch")
+
+            # 2. Cuantas construcciones bajan, quedan igual o suben, por rango
+            v = a[a_var].dropna()
+            rangos = ["Baja más de 10%", "Baja hasta 10%", "Sin cambio",
+                      "Sube hasta 10%", "Sube 10% a 50%", "Sube más de 50%"]
+            rango = pd.cut(v, [-np.inf, -10, -1e-9, 1e-9, 10, 50, np.inf], labels=rangos)
+            reparto_anx = (rango.value_counts().reindex(rangos, fill_value=0)
+                           .rename_axis("RANGO").reset_index(name="N"))
+            reparto_anx["%"] = reparto_anx["N"] / max(1, reparto_anx["N"].sum()) * 100
+            reparto_anx["SENTIDO"] = ["Baja", "Baja", "Sin cambio", "Sube", "Sube", "Sube"]
+            g2.altair_chart(
+                alt.Chart(reparto_anx, title=alt.TitleParams(
+                    text=f"{familia_anx}: cuántas bajan y cuántas suben",
+                    subtitle=f"Variación {V_LIQ} frente a {V_BASE} de cada construcción",
+                    subtitleColor="#667085", anchor="start"))
+                .mark_bar(cornerRadiusEnd=3, height={"band": 0.7})
+                .encode(
+                    y=alt.Y("RANGO:N", title=None, sort=rangos,
+                            axis=alt.Axis(labelLimit=160)),
+                    x=alt.X("N:Q", title="Construcciones",
+                            axis=alt.Axis(grid=True, gridColor="#EEF0F4")),
+                    color=alt.Color("SENTIDO:N", title=None,
+                                    scale=alt.Scale(domain=["Baja", "Sin cambio", "Sube"],
+                                                    range=[NARANJA_BAJA, "#98A2B3", AZUL_SUBE]),
+                                    legend=alt.Legend(orient="top")),
+                    tooltip=[alt.Tooltip("RANGO:N", title="Rango"),
+                             alt.Tooltip("N:Q", title="Construcciones", format=",d"),
+                             alt.Tooltip("%:Q", title="% del total", format=",.1f")])
+                .properties(height=260),
+                width="stretch")
     st.caption(f"Solo entran las construcciones cuya clave tiene valor en la "
                f"tabla {V_LIQ}; las demás se excluyen. Fuente: "
                f"output/versiones/<versión>/{NOMBRE_ANEXOS}. Los valores vienen "

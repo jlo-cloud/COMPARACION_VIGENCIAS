@@ -26,7 +26,7 @@ from comparacion_vigencia import (CONFIG, COLUMNAS_EXCEL_DETALLE,
 def filas_en_cero(columnas) -> pd.DataFrame:
     """Lo que quedo en $ 0 en la liquidacion, con la forma del detalle: sus
     datos, el valor vigente y el motivo. Lo numerico que no aplica, en 0."""
-    from post_inconsistencias import motivo_cero
+    from post_inconsistencias import motivo
     from comparacion_vigencia import factor_comercial
     import pyarrow.parquet as pq
     ruta = CONFIG["parquet_liquidacion"]
@@ -75,7 +75,7 @@ def filas_en_cero(columnas) -> pd.DataFrame:
               "ACTIVIDAD_ECONOMICA", "CLAVE", "ORIGEN_TERRENO_LIQ"):
         out[c] = ""
     out["EN_CERO"] = 1
-    out["MOTIVO_CERO"] = motivo_cero(z).to_numpy()
+    out["MOTIVO_CERO"] = motivo(z).to_numpy()
     return out.reset_index(drop=True)
 
 
