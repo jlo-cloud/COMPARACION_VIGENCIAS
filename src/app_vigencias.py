@@ -1850,7 +1850,7 @@ with hoja_anexos:
     st.caption(f"Solo entran las construcciones cuya clave tiene valor en la "
                f"tabla {V_LIQ}; las demás se excluyen. Fuente: "
                f"output/versiones/<versión>/{NOMBRE_ANEXOS}. Los valores vienen "
-               f"redondeados a $10.000 y el valor por m² a $100.")
+               f"redondeados a \\$10.000 y el valor por m² a \\$100.")
 
 
 # ---------------------------------------------------------------------
@@ -2097,29 +2097,37 @@ with hoja_ejercicio:
             largo_ej["SERIE"] = largo_ej["SERIE"].map({"VIG": c_vig, "INS": c_ins, "RES": c_res})
             largo_ej["VM2_MILES"] = largo_ej["VM2"] / 1e3
             largo_ej["VM2_TXT"] = largo_ej["VM2"].map(pesos)
+            # Rotulo corto al final de cada barra, en miles con punto: 2.593
+            largo_ej["ROTULO"] = largo_ej["VM2_MILES"].map(lambda v: f"{v:,.0f}".replace(",", "."))
+            tope = float(largo_ej["VM2_MILES"].max()) * 1.12      # aire para el rotulo
+            base_ej = alt.Chart(largo_ej).encode(
+                y=alt.Y("TABLA:N", title=None, sort=list(NOMBRES_INST.values()),
+                        scale=alt.Scale(paddingInner=0.3),
+                        axis=alt.Axis(labelLimit=200, minExtent=110, labelFontSize=12)),
+                yOffset=alt.YOffset("SERIE:N", sort=[c_vig, c_ins, c_res]),
+                x=alt.X("VM2_MILES:Q", title="Miles de $", scale=alt.Scale(domain=[0, tope]),
+                        axis=alt.Axis(grid=True, gridColor="#EEF0F4", tickCount=8)))
+            barras = base_ej.mark_bar(cornerRadiusEnd=3, height={"band": 0.85}).encode(
+                color=alt.Color("SERIE:N", title=None,
+                                scale=alt.Scale(domain=[c_vig, c_ins, c_res],
+                                                range=[NARANJA, AZUL, "#7A5195"]),
+                                legend=alt.Legend(orient="top")),
+                tooltip=[alt.Tooltip("TABLA:N", title="Tabla"), alt.Tooltip("SERIE:N", title="Serie"),
+                         alt.Tooltip("VM2_TXT:N", title="Mediana"),
+                         alt.Tooltip("N:Q", title="Construcciones", format=",d")])
+            rotulos = base_ej.mark_text(align="left", baseline="middle", dx=4, fontSize=11,
+                                        color="#475467").encode(text="ROTULO:N")
             st.altair_chart(
-                alt.Chart(largo_ej, title=alt.TitleParams(
-                    text="VM2 por tabla institucional · mediana",
-                    subtitle=f"Vigente {V_BASE}, institucional {V_LIQ} y residencial 7C {V_LIQ} · miles de $",
-                    subtitleColor="#667085", anchor="start"))
-                .mark_bar(cornerRadiusEnd=3, height={"band": 0.8})
-                .encode(
-                    y=alt.Y("TABLA:N", title=None, sort=list(NOMBRES_INST.values())),
-                    yOffset=alt.YOffset("SERIE:N", sort=[c_vig, c_ins, c_res]),
-                    x=alt.X("VM2_MILES:Q", title="Miles de $",
-                            axis=alt.Axis(grid=True, gridColor="#EEF0F4")),
-                    color=alt.Color("SERIE:N", title=None,
-                                    scale=alt.Scale(domain=[c_vig, c_ins, c_res],
-                                                    range=[NARANJA, AZUL, "#7A5195"]),
-                                    legend=alt.Legend(orient="top")),
-                    tooltip=[alt.Tooltip("TABLA:N", title="Tabla"), alt.Tooltip("SERIE:N", title="Serie"),
-                             alt.Tooltip("VM2_TXT:N", title="Mediana"),
-                             alt.Tooltip("N:Q", title="Construcciones", format=",d")])
-                .properties(height=max(240, 70 * len(g))),
+                (barras + rotulos).properties(
+                    height=120 * len(g),
+                    title=alt.TitleParams(
+                        text="VM2 por tabla institucional · mediana",
+                        subtitle=f"Vigente {V_BASE}, institucional {V_LIQ} y residencial 7C {V_LIQ} · miles de $",
+                        subtitleColor="#667085", anchor="start")),
                 width="stretch")
             st.caption("El detalle construcción por construcción está en "
                        "results/EJERCICIOS/EJERCICIO_INSTITUCIONAL_RESIDENCIAL_7C_<fecha>.xlsx "
-                       "(con identificadores, solo en el equipo local). Valores redondeados a $100.")
+                       "(con identificadores, solo en el equipo local). Valores redondeados a \\$100.")
 
 
 
@@ -2127,7 +2135,7 @@ st.caption(
     f"Fuente: output/versiones/<versión>/{NOMBRE_DATOS} · versión "
     f"{sel_versiones[-1]} generada por comparacion_vigencia.py el "
     f"{pd.Timestamp(os.path.getmtime(ruta_version(sel_versiones[-1], NOMBRE_DATOS)), unit='s'):%Y-%m-%d %H:%M}. "
-    f"predial: el VM2 viene redondeado a $100 y el avalúo a $100.000, así que "
+    f"predial: el VM2 viene redondeado a \\$100 y el avalúo a \\$100.000, así que "
     f"puede haber diferencias de centésimas contra el reporte en Excel, que "
     f"trabaja con el valor exacto y es el documento de referencia."
 )
