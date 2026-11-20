@@ -1437,6 +1437,13 @@ DICCIONARIO_DETALLE = [
      "pasan por la comparacion de construcciones, solo entran las que tienen "
      "valor en la tabla, y lo que no les aplica (puntaje, ZHF, terreno, "
      "avaluo, rangos) va en 0 o vacio"),
+    ("EN_CERO", "1 si la construccion quedo en $ 0 en la liquidacion 2027, 0 si tomo valor",
+     "las de $ 0 no se comparan: van solo con sus datos de identificacion y el "
+     "valor vigente, y no entran a la app ni a los resumenes. Las mismas del "
+     "reporte de post-inconsistencias"),
+    ("MOTIVO_CERO", "Por que quedo en $ 0",
+     "modelo (modelos apagados), especial (destino 020/023), sin tabla, rural "
+     "sin regla o sin ZHF, anexo o parqueadero sin valor en su tabla"),
     ("TABLA_VALOR", "Columna EXACTA del Excel de tablas de la que salio el VM2",
      "por (TABLA_ORIGEN, PUNTCONS, COMUNA); el grupo 7C o 10C lo decide la "
      "comuna. Abriendo esa columna en la fila del PUNTCONS sale el VM2. En "
@@ -1576,6 +1583,9 @@ COLUMNAS_EXCEL_DETALLE = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
     "COMUNA", "ZONA", "ESTRPRED", "USO_LADM", "CONDICION",
     "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
+    # Lo que quedo en $ 0 tambien va al Excel, marcado: no entra a la app ni a
+    # los resumenes (el R lo excluye), pero el detalle queda completo.
+    "EN_CERO", "MOTIVO_CERO",
     "ZHF", "TIPOLOGIA_ZHF",
     # ZHF_ANTERIOR va tambien al Excel, no solo al parquet: sin el codigo
     # completo no se puede verificar de donde salio TIPOLOGIA_ZHF_ANTERIOR.

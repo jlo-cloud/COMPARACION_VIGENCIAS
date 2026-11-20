@@ -23,6 +23,62 @@ from comparacion_vigencia import (CONFIG, COLUMNAS_EXCEL_DETALLE,
                                   exportar_detalle_excel, grupo_comunas)
 
 
+def filas_en_cero(columnas) -> pd.DataFrame:
+    """Lo que quedo en $ 0 en la liquidacion, con la forma del detalle: sus
+    datos, el valor vigente y el motivo. Lo numerico que no aplica, en 0."""
+    from post_inconsistencias import motivo_cero
+    from comparacion_vigencia import factor_comercial
+    import pyarrow.parquet as pq
+    ruta = CONFIG["parquet_liquidacion"]
+    hay = set(pq.ParquetFile(ruta).schema_arrow.names)
+    usar = [c for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "COMUNA", "ESTRPRED",
+                        "USO_LADM", "CONDICION", "TABLA_ORIGEN", "TABLA_RURAL", "MOTIVO_RURAL",
+                        "ZHF", "TIPOLOGIA_ZHF", "ESPECIAL", "PUNTCONS", "ACONCONS",
+                        "AREA_CONST", "VALORCONS", "VALOANEX", "VM2", "LIQ_PARQUEADERO")
+            if c in hay]
+    liq = pd.read_parquet(ruta, columns=usar)
+    valor = pd.to_numeric(liq["VM2"], errors="coerce").fillna(0)
+    if "LIQ_PARQUEADERO" in liq.columns:
+        valor = valor.where(valor > 0, pd.to_numeric(liq["LIQ_PARQUEADERO"],
+                                                     errors="coerce").fillna(0))
+    z = liq[valor <= 0].copy()
+    z["COMUNA"] = z["COMUNA"].astype(str).str.strip().str.zfill(2)
+    out = pd.DataFrame(index=z.index)
+    for c in columnas:
+        out[c] = 0
+    for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "COMUNA", "USO_LADM",
+              "TABLA_ORIGEN", "ZHF", "TIPOLOGIA_ZHF"):
+        if c in z.columns:
+            out[c] = z[c].astype(str).replace({"nan": "", "None": "", "<NA>": ""})
+    for c in ("ESTRPRED", "CONDICION", "ESPECIAL", "PUNTCONS", "ACONCONS", "AREA_CONST"):
+        if c in z.columns:
+            out[c] = pd.to_numeric(z[c], errors="coerce").fillna(0)
+    out["ZONA"] = (pd.to_numeric(z["COMUNA"], errors="coerce") > 22).map(
+        {True: "RURAL", False: "URBANO"})
+    out["GRUPO_COMUNAS"] = grupo_comunas(out)
+    out["TABLA_VALOR"] = (z["TABLA_RURAL"].fillna("").astype(str)
+                          if "TABLA_RURAL" in z.columns else "")
+    # El valor vigente: el de la construccion, o el del anexo si es anexo.
+    vig = pd.to_numeric(z.get("VALORCONS"), errors="coerce").fillna(0)
+    if "VALOANEX" in z.columns:
+        vig = vig.where(vig > 0, pd.to_numeric(z["VALOANEX"], errors="coerce").fillna(0))
+    out["VALORCONS_CAT_VIGENCIA"] = vig
+    out["VALORCONS_COM_VIGENCIA"] = vig / factor_comercial(z).to_numpy()
+    for c in ("VARIACION_VALORCONS_CAT_PCT", "VARIACION_VALORCONS_COM_PCT",
+              "VARIACION_CAT_PCT", "VARIACION_COM_PCT",
+              "VARIACION_AVALUO_CAT_PCT", "VARIACION_AVALUO_COM_PCT"):
+        out[c] = float("nan")              # sin valor 2027 no hay variacion
+    sin_comp = crear_rango_variacion(None, CONFIG["vigencia_base"])
+    for c in ("RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_TERR", "RANGO_AVALUO"):
+        out[c] = sin_comp
+    for c in ("ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
+              "ACTIVIDAD_ECONOMICA", "CLAVE", "ORIGEN_TERRENO_LIQ"):
+        out[c] = ""
+    out["EN_CERO"] = 1
+    out["MOTIVO_CERO"] = motivo_cero(z).to_numpy()
+    return out.reset_index(drop=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     p.add_argument("--muestra", type=int, default=None,
@@ -92,11 +148,17 @@ def main():
     for c in ("RANGO_TERR", "RANGO_AVALUO"):
         filas[c] = sin_comparacion
     filas = filas.fillna(0)
+    filas["EN_CERO"], filas["MOTIVO_CERO"] = 0, ""
     n_anx = int((filas["TABLA_ORIGEN"] == "T10_ANEXOS").sum())
     n_parq = len(filas) - n_anx
+    det["EN_CERO"], det["MOTIVO_CERO"] = 0, ""
+    cero = filas_en_cero(det.columns)
     det = pd.concat([det[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]],
-                     filas[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]]],
+                     filas[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]],
+                     cero[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]]],
                     ignore_index=True)
+    print(f"   + {len(cero):,} construcciones en $ 0 (EN_CERO = 1), como en "
+          f"post-inconsistencias")
 
     # Urbano y rural en la MISMA hoja Detalle: la columna ZONA los separa
     # (el R de resumenes filtra ZONA = URBANO). Aparte solo va la cobertura

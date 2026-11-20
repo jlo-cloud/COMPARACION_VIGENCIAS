@@ -542,9 +542,14 @@ def solo_zona(d: pd.DataFrame, zona: str = "URBANO") -> pd.DataFrame:
     else:
         z = pd.Series(pd.to_numeric(d["COMUNA"], errors="coerce").gt(22)
                       .map({True: "RURAL", False: "URBANO"}), index=d.index)
+    filtro = z == zona
+    # Lo urbano son las 17 comunas oficiales: las 05, 06, 13, 16 y 18 que
+    # traen las versiones viejas no se muestran.
+    if zona == "URBANO":
+        filtro &= d["COMUNA"].astype(str).str.strip().str.zfill(2).isin(GRUPOS_COMUNAS["17C"])
     # Ya filtrada, la columna sobra; y quitarla deja iguales las versiones que
     # la traen y las viejas que no, para juntarlas sin errores.
-    return d[z == zona].drop(columns="ZONA", errors="ignore").reset_index(drop=True)
+    return d[filtro].drop(columns="ZONA", errors="ignore").reset_index(drop=True)
 
 
 def cargar(ruta: str, marca_tiempo: float, grano: str = "construccion",
@@ -1680,7 +1685,7 @@ with hoja_anexos:
             # valor por estrato o actividad, y mezclarlos daria una mediana
             # de tablas distintas.
             llave = (["VERSION"] if varias_versiones else []) + [
-                "USO_LADM", "CLAVE", "TIPO", "UNIDAD", "VALOR_TABLA"]
+                "USO_LADM", "CLAVE", "UNIDAD", "VALOR_TABLA"]
             g = a.groupby(llave, observed=True, sort=True)
             t = pd.DataFrame({
                 "CONSTRUCCIONES": g.size(),
