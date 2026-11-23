@@ -459,7 +459,7 @@ APERTURAS = {
 
 # Lo que se lee de cada parquet.
 COMUNES = ["COMUNA", "ACTUALIZACION", "TABLA_ORIGEN", "USO_LADM",
-           "ACTIVIDAD_ECONOMICA", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
+           "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE", "N_CONST_PREDIO", "CON_ANEXO",
            "CONDICION", "ESPECIAL", "PREDIO_ESPECIAL", "CAMBIO_TIPOLOGIA",
            "PUNTCONS",
            "VALORCONS_CAT_VIGENCIA", "VALORCONS_CAT_LIQ",
@@ -649,8 +649,11 @@ def _unir(partes: list) -> pd.DataFrame:
     from pandas.api.types import union_categoricals
     d = pd.concat(partes, ignore_index=True)
     for c in d.columns:
+        # Una columna que una version vieja no trae (p. ej. AREA_MANEJO en V1)
+        # no se une como categoria: queda como la dejo el concat.
         if c != "VERSION" and all(
-                isinstance(x[c].dtype, pd.CategoricalDtype) for x in partes):
+                c in x.columns and isinstance(x[c].dtype, pd.CategoricalDtype)
+                for x in partes):
             d[c] = union_categoricals([x[c] for x in partes])
     d["VERSION"] = pd.Categorical(d["VERSION"], categories=VERSIONES)
     return _a_categoria(d)
@@ -826,6 +829,17 @@ with st.sidebar:
         sorted(df["ACTIVIDAD_ECONOMICA"].unique()),
         help=("Los 2 últimos dígitos de la ZHF rural, con su descripción "
               "(01 Agrícola … 30 Espacio otros)." if ZONA_SEL == "RURAL" else None))
+    # Solo rural: clasificacion del suelo (1er digito de la ZHF) y area de
+    # manejo (digitos 2 y 3).
+    sel_suelo, sel_manejo = [], []
+    if ZONA_SEL == "RURAL" and "AREA_MANEJO" in df.columns:
+        sel_suelo = st.multiselect(
+            "Clasificación del suelo", sorted(df["CLASIFICACION_SUELO"].dropna().unique()),
+            help="Primer dígito de la ZHF rural: 1 Rural, 2 Expansión urbana.")
+        sel_manejo = st.multiselect(
+            "Área de manejo", sorted(df["AREA_MANEJO"].dropna().unique()),
+            help="Dígitos 2 y 3 de la ZHF rural (01 PNN Los Farallones … "
+                 "07 Centros poblados … 12 Otras zonas con plan parcial).")
     sel_grupo = st.multiselect(
         "Grupo de comunas", list(GRUPOS_FILTRO),
         help="Qué comunas trae cada grupo está en la hoja Reglas.")
@@ -871,6 +885,9 @@ with st.sidebar:
     # En rural la actividad de la ZHF es el uso de la ZHF rural.
     aperturas = ({("Uso de la ZHF rural" if k == "Actividad económica de la ZHF" else k): v
                   for k, v in APERTURAS.items()} if ZONA_SEL == "RURAL" else APERTURAS)
+    if ZONA_SEL == "RURAL" and "AREA_MANEJO" in df.columns:
+        aperturas = {**aperturas, "Clasificación del suelo": "CLASIFICACION_SUELO",
+                     "Área de manejo": "AREA_MANEJO"}
     etiqueta_apertura = st.selectbox(
         "Separar los resultados por", list(aperturas), index=0,
         help="Con lo que se elija aquí se parten las tablas y los gráficos: "
@@ -898,6 +915,10 @@ def filtrar(d: pd.DataFrame) -> pd.DataFrame:
         d = d[d["COMUNA"].isin(sel_comuna)]
     if sel_actividad:
         d = d[d["ACTIVIDAD_ECONOMICA"].isin(sel_actividad)]
+    if sel_suelo and "CLASIFICACION_SUELO" in d.columns:
+        d = d[d["CLASIFICACION_SUELO"].isin(sel_suelo)]
+    if sel_manejo and "AREA_MANEJO" in d.columns:
+        d = d[d["AREA_MANEJO"].isin(sel_manejo)]
     if sel_grupo:
         d = d[d["COMUNA"].isin(comunas_de_grupos(sel_grupo))]
     if sel_n_const and "N_CONST_PREDIO" in d.columns:
@@ -1585,6 +1606,7 @@ with hoja_detalle:
 
             firma = (medida["prefijo"], tuple(sel_familia), tuple(sel_tabla),
                      tuple(sel_comuna), tuple(sel_actividad), tuple(sel_grupo),
+                     tuple(sel_suelo), tuple(sel_manejo),
                      busca.strip(), tuple(sel_rango), bool(solo_fuera),
                      formato, int(tope), len(detf))
 

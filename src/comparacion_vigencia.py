@@ -787,6 +787,13 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     # Llave de los bloques del reporte: tabla + actividad economica de la ZHF.
     d["GRUPO_COMUNAS"] = grupo_comunas(d)
     d["ACTIVIDAD_ECONOMICA"] = actividad_economica(d)
+    # Solo rural: clasificacion del suelo y area de manejo de la ZHF rural.
+    import reglas_rurales
+    rural = d["ZONA"].eq("RURAL") if "ZONA" in d.columns else \
+        pd.to_numeric(d["COMUNA"], errors="coerce").gt(22)
+    zhf = d["ZHF"] if "ZHF" in d.columns else pd.Series("", index=d.index)
+    d["CLASIFICACION_SUELO"] = reglas_rurales.clasificacion_suelo(zhf).where(rural, "")
+    d["AREA_MANEJO"] = reglas_rurales.area_manejo(zhf).where(rural, "")
     d["CLAVE"] = d["TABLA_ORIGEN"] + "_" + d["ACTIVIDAD_ECONOMICA"]
     d["TABLA_VALOR"] = tabla_valor_usada(d)
     print(f"   Bloques (tabla x actividad): {d['CLAVE'].nunique()}")
@@ -958,7 +965,7 @@ def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
 
     # Mismos nombres que a nivel construccion, pero de la construccion dominante.
     for c in ("TABLA_ORIGEN", "ACTIVIDAD_ECONOMICA", "CLAVE", "USO_LADM",
-              "CONDICION"):
+              "CONDICION", "CLASIFICACION_SUELO", "AREA_MANEJO"):
         if c in principal.columns:
             uni[c] = principal[c]
     uni = uni.reset_index()
@@ -1500,6 +1507,12 @@ DICCIONARIO_DETALLE = [
     ("ACTIVIDAD_ECONOMICA", "Actividad de la ZHF donde esta la construccion",
      "residencial 011-016, comercial 021-023, industrial 031-033, el resto "
      "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF"),
+    ("CLASIFICACION_SUELO", "Solo rural: clasificacion del suelo de la ZHF rural",
+     "1er digito de la ZHF de 12 digitos: 1 Rural, 2 Expansion urbana "
+     "(ESTRUCTURA_ZHF_RURAL_2026_Ajust_V5). Vacia en lo urbano"),
+    ("AREA_MANEJO", "Solo rural: area de manejo / plan parcial de la ZHF rural",
+     "digitos 2 y 3 de la ZHF de 12 digitos: 01 PNN Los Farallones ... 07 Centros "
+     "poblados ... 12 Otras zonas con plan parcial. Vacia en lo urbano"),
     ("CLAVE", "TABLA_ORIGEN + ACTIVIDAD_ECONOMICA",
      "bloque del reporte. En los anexos es la llave de la T10, DESTANEX_TIPO "
      "(101_40 = Ramadas tipo 40); en los parqueaderos, destino_tipo "
@@ -1617,7 +1630,7 @@ COLUMNAS_EXCEL_DETALLE = [
     # completo no se puede verificar de donde salio TIPOLOGIA_ZHF_ANTERIOR.
     "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
     "ESPECIAL", "PREDIO_ESPECIAL",
-    "ACTIVIDAD_ECONOMICA", "CLAVE",
+    "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
     "PUNTCONS", "ACONCONS", "AREA_CONST",
     "VTER_CAT_BASE", "VTER_CAT_PROYECTADO", "VTER_COM_BASE", "VTER_COM_PROYECTADO",
     "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT",
@@ -2149,7 +2162,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF",
                 "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
                 "ESPECIAL", "PREDIO_ESPECIAL",
-                "ACTIVIDAD_ECONOMICA", "CLAVE",
+                "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
                 "PUNTCONS", "ACONCONS", "AREA_CONST",
                 "VTER_CAT_BASE", "VTER_CAT_PROYECTADO",
                 "VTER_COM_BASE", "VTER_COM_PROYECTADO",
@@ -2206,7 +2219,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
         publicas = ["COMUNA", "ZONA", "ACTUALIZACION", "TABLA_ORIGEN",
                     "TABLA_VALOR", "USO_LADM",
-                    "ACTIVIDAD_ECONOMICA", "CLAVE",
+                    "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
                     # Cuantas construcciones tiene el predio de esta fila. Va
                     # en el recorte publico porque la app filtra por el; no
                     # abre ninguna puerta que el recorte por predio no tuviera
@@ -2239,7 +2252,8 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
         # A nivel predio, la tabla y la actividad son las de la construccion mayor.
         publicas_predio = ["COMUNA", "ZONA", "ACTUALIZACION", "TABLA_ORIGEN",
                            "ORIGEN_TERRENO_LIQ",
-                           "USO_LADM", "ACTIVIDAD_ECONOMICA", "CLAVE",
+                           "USO_LADM", "ACTIVIDAD_ECONOMICA",
+                           "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
                            "N_CONST_PREDIO", "N_TABLAS_PREDIO", "CON_ANEXO",
                            "PREDIO_ESPECIAL",
                            # Como la tabla y la actividad: la de la

@@ -58,6 +58,43 @@ USO_ZHF_RURAL = {
 }
 
 
+# ESTRUCTURA_ZHF_RURAL_2026_Ajust_V5: 1er digito = clasificacion del suelo;
+# digitos 2 y 3 = area de manejo / plan parcial.
+CLASIFICACION_SUELO_RURAL = {"1": "Rural", "2": "Expansion urbana"}
+AREA_MANEJO_RURAL = {
+    "01": "PNN Los Farallones de Cali",
+    "02": "Reserva Forestal Protectora Nacional de Cali",
+    "03": "Ecoparques",
+    "04": "Zona rural de regulacion hidrica",
+    "05": "Zona rural de produccion sostenible",
+    "06": "Areas sustraidas de la Reserva Forestal Protectora Nacional de Cali",
+    "07": "Centros poblados",
+    "08": "Suelo rural suburbano",
+    "09": "Corredor suburbano interregional Cali - Jamundi",
+    "10": "Suelo de expansion sin plan parcial adoptado",
+    "11": "Suelo de expansion con plan parcial",
+    "12": "Otras zonas con plan parcial",
+}
+
+
+def _parte_zhf(zhf: pd.Series, ini: int, fin: int, dominio: dict) -> pd.Series:
+    """Un tramo de la ZHF rural de 12 digitos con su descripcion; sin ZHF de
+    12 digitos, 'SIN ZHF'; un codigo fuera del dominio sale solo."""
+    z = zhf.astype(str).str.strip()
+    c = z.str[ini:fin].where(z.str.fullmatch(r"\d{12}"), SIN_ZHF)
+    return c.map(lambda x: x if x == SIN_ZHF else f"{x} {dominio.get(x, '')}".strip())
+
+
+def clasificacion_suelo(zhf: pd.Series) -> pd.Series:
+    """1er digito de la ZHF rural, p. ej. '1 Rural'."""
+    return _parte_zhf(zhf, 0, 1, CLASIFICACION_SUELO_RURAL)
+
+
+def area_manejo(zhf: pd.Series) -> pd.Series:
+    """Digitos 2 y 3 de la ZHF rural, p. ej. '07 Centros poblados'."""
+    return _parte_zhf(zhf, 1, 3, AREA_MANEJO_RURAL)
+
+
 def actividad_rural(zhf: pd.Series) -> pd.Series:
     """La 'actividad economica' de lo rural: el uso de la ZHF rural con su
     descripcion, p. ej. '12 Residencial_tipo2'. Sin ZHF de 12 digitos: 'SIN ZHF'.
