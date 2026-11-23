@@ -94,6 +94,15 @@ def main():
     print(f"Leyendo {origen}")
     print(f"   (lo dejo la corrida del {hecho:%Y-%m-%d %H:%M})")
     det = pd.read_parquet(origen)
+    # Ejercicio institucional con la tabla residencial que le toca (columnas *_INST_RES)
+    from ejercicio_institucional import (COLUMNAS_INST_RES, columnas_inst_res,
+                                         filas_no_comparadas)
+    det = det.join(columnas_inst_res(det))
+    # 1 en las del ejercicio que se comparan; vacia en las demas
+    det["COMPARADA_INST_RES"] = det["VM2_COM_INST_RES"].notna().map({True: 1, False: None})
+    inst_no_comp = filas_no_comparadas(det)
+    print(f"   Ejercicio institucional con tabla residencial: "
+          f"{int(det['VM2_COM_INST_RES'].notna().sum()):,} construcciones")
 
     # El mismo nombre que le ponia el main.
     sufijo = "" if CONFIG["base_valor"] == "CATASTRAL" else "_COMERCIAL"
@@ -148,15 +157,20 @@ def main():
     for c in ("RANGO_TERR", "RANGO_AVALUO"):
         filas[c] = sin_comparacion
     filas = filas.fillna(0)
+    for c in COLUMNAS_INST_RES + ["COMPARADA_INST_RES"]:   # no aplican a anexos ni parqueaderos
+        filas[c] = "" if c == "COLUMNA_INST_RES" else float("nan")
     filas["EN_CERO"], filas["MOTIVO_CERO"] = 0, ""
     n_anx = int((filas["TABLA_ORIGEN"] == "T10_ANEXOS").sum())
     n_parq = len(filas) - n_anx
     det["EN_CERO"], det["MOTIVO_CERO"] = 0, ""
     cero = filas_en_cero(det.columns)
-    det = pd.concat([det[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]],
-                     filas[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]],
-                     cero[[c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]]],
-                    ignore_index=True)
+    for c in COLUMNAS_INST_RES + ["COMPARADA_INST_RES"]:
+        cero[c] = "" if c == "COLUMNA_INST_RES" else float("nan")
+    cols_det = [c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]
+    det = pd.concat([det[cols_det], inst_no_comp.reindex(columns=cols_det),
+                     filas[cols_det], cero[cols_det]], ignore_index=True)
+    print(f"   + {len(inst_no_comp):,} institucionales del ejercicio que no se comparan "
+          f"(COMPARADA_INST_RES = 0)")
     print(f"   + {len(cero):,} construcciones en $ 0 (EN_CERO = 1), como en "
           f"post-inconsistencias")
 

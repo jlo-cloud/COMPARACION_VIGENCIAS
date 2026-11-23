@@ -35,6 +35,35 @@ COMUNAS_RURALES = insumos.COMUNAS_RURALES
 FACTOR_COMERCIAL_RURAL = 0.6
 
 SIN_ZHF = "SIN ZHF"
+
+# En lo rural, comercio y oficinas en PH van por TABLA, no por modelo: toman
+# la regla de su uso sin PH (con el mismo uso de la ZHF rural). Solo los
+# apartamentos en PH (001) siguen por modelo. En lo urbano no cambia nada.
+RURAL_PH_COMO_NO_PH = {"028": "025",   # Comercio_en_PH -> Comercio
+                       "034": "032"}   # Oficinas_Consultorios_en_PH -> Oficinas_Consultorios
+
+# Dominio del uso de la ZHF rural (2 ultimos digitos de la ZHF de 12 digitos).
+USO_ZHF_RURAL = {
+    "01": "Agricola", "02": "Pecuario", "03": "Forestal", "04": "Tierras Improductivas",
+    "05": "Cuerpos de Agua", "06": "Condiciones Especiales", "07": "Edificaciones",
+    "08": "Agropecuario", "09": "Agroindustrial", "10": "Minero",
+    "11": "Residencial_tipo1", "12": "Residencial_tipo2", "13": "Residencial_tipo3",
+    "14": "Residencial_tipo4", "15": "Residencial_tipo5", "16": "Residencial_tipo6",
+    "17": "Comercial_Local", "18": "Comercial_Zonal", "19": "Comercial_Metropolitano",
+    "20": "Industrial_Pequeña", "21": "Industrial_Mediana", "22": "Industrial_Grande",
+    "23": "Institucional_o_dotacional", "24": "Lote_Urbanizable_No_Urbanizado",
+    "25": "Lote_Urbanizado_No_Construido", "26": "Lote_No_Urbanizable",
+    "27": "Espacio_Publico_De_Zonas_Verdes", "28": "Espacio_Publico_De_Parques",
+    "29": "Espacio_Publico_Vial", "30": "Espacio_Otros",
+}
+
+
+def actividad_rural(zhf: pd.Series) -> pd.Series:
+    """La 'actividad economica' de lo rural: el uso de la ZHF rural con su
+    descripcion, p. ej. '12 Residencial_tipo2'. Sin ZHF de 12 digitos: 'SIN ZHF'.
+    Un codigo fuera del dominio sale con el codigo solo."""
+    u = uso_zhf(zhf)
+    return u.map(lambda c: c if c == SIN_ZHF else f"{c} {USO_ZHF_RURAL.get(c, '')}".strip())
 # Lo que dice la entrega para cada fila, ya resuelto en un estado.
 TABLA, T10, T12, MODELO, SIN_TABLA = "TABLA", "T10", "T12", "MODELO", "SIN TABLA"
 
@@ -232,14 +261,15 @@ def asignar(df: pd.DataFrame, reglas: pd.DataFrame) -> pd.DataFrame:
                .drop_duplicates("DESTINOCONS").set_index("DESTINOCONS"))
 
     d = df.loc[rur]
-    clave = pd.MultiIndex.from_arrays([d["DESTINOCONS"].astype(str).str.zfill(3), uso_zhf(d["ZHF"])])
+    destino = d["DESTINOCONS"].astype(str).str.zfill(3).replace(RURAL_PH_COMO_NO_PH)
+    clave = pd.MultiIndex.from_arrays([destino, uso_zhf(d["ZHF"])])
     hit = por_clave.reindex(clave)
     estado = hit["ESTADO"].to_numpy(dtype=object)
     columna = hit["COLUMNA"].fillna("").to_numpy(dtype=object)
     origen = hit["TABLA_ORIGEN"].fillna("").to_numpy(dtype=object)
 
     falta = pd.isna(estado)
-    uso_entero = por_uso.reindex(d["DESTINOCONS"].astype(str).str.zfill(3))["ESTADO"].to_numpy(dtype=object)
+    uso_entero = por_uso.reindex(destino)["ESTADO"].to_numpy(dtype=object)
     estado = np.where(falta & pd.notna(uso_entero), uso_entero, estado)
     sin_zhf = clave.get_level_values(1) == SIN_ZHF
 

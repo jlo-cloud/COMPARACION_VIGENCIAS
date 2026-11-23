@@ -23,6 +23,7 @@ MOTIVOS_QUE_DESCUENTAN = {
     'USO_LADM inconsistente',
     'Sin puntaje',
     'Sin área',
+    'Sin estrato',
 }
 
 
@@ -44,6 +45,7 @@ NOMBRE_MOTIVO = {
     'CONSISTENCIA_USO': 'USO INCONSISTENTE',
     'PUNTAJE': 'SIN PUNTAJE',
     'AREA_CONSTRUIDA': 'SIN ÁREA',
+    'SIN_ESTRATO': 'SIN ESTRATO',
     'SIN_ZHF': 'SIN ZHF',
     'SIN_LONGITUD': 'SIN LONGITUD',
     'SIN_LATITUD': 'SIN LATITUD',
@@ -73,6 +75,9 @@ DICCIONARIO = {
     'CAMBIO_FISICO': '1 si la construccion viene del archivo de cambios fisicos (hoy apagado: siempre 0)',
     'DIREPRED': 'Direccion del predio',
     'ESTRPRED': 'Estrato del predio',
+    'ZHF': 'Zona homogenea fisica del predio (codigo completo)',
+    'TIPOLOGIA_ZHF': 'Ultimos 3 digitos de la ZHF (011-016 residencial, 021-023 comercial, 031-033 industrial; '
+                     'en lo rural, el uso de la ZHF son los 2 ultimos)',
     'TIPOUSO': 'Tipo de uso del predio segun el export de predios',
     'LATITUDE': 'Latitud del predio',
     'LONGITUDE': 'Longitud del predio',
@@ -387,6 +392,29 @@ def generar_reporte_inconsistencias(
             'detalle': sin_area.drop_duplicates('ID_PREDIO')
         }
 
+        # SIN ESTRATO: garaje de cupo sencillo (007/008, hasta 50 m2) sin
+        # estrato y en una zona que la regla de la T12 no cubre. Sin estrato la
+        # T12 decide por la actividad de la ZHF (11-16 residencial, 21-22
+        # comercial); fuera de esas, el sencillo no tiene valor y quedaba en $ 0.
+        destino = df['DESTINOCONS'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).str.zfill(3)
+        estrato = pd.to_numeric(df['ESTRPRED'], errors='coerce').fillna(0)
+        zhf = df['ZHF'].astype(str).str.strip() if 'ZHF' in df.columns else pd.Series('', index=df.index)
+        actividad = zhf.str[-3:].where(zhf.str.len() >= 11, '').str[1:]
+        area_c = pd.to_numeric(df['ACONCONS'], errors='coerce').fillna(0)
+        sin_estrato = df[destino.isin(['007', '008']) & (estrato == 0) & (area_c <= 50)
+                         & ~actividad.isin(['11', '12', '13', '14', '15', '16', '21', '22'])].copy()
+        sin_estrato['MOTIVO_INCONSISTENCIA'] = 'Garaje sencillo sin estrato en zona sin regla de la T12'
+
+        for predio in sin_estrato['ID_PREDIO'].unique():
+            predios_con_inconsistencias.setdefault(predio, []).append('Sin estrato')
+
+        inconsistencias['SIN_ESTRATO'] = {
+            'total': len(sin_estrato),
+            'zona': _por_zona(sin_estrato),
+            'predios_unicos': sin_estrato['ID_PREDIO'].nunique(),
+            'detalle': sin_estrato
+        }
+
     # ------------------------------------------------------------------
     # 5️⃣ DATAFRAME LIMPIO
     # ------------------------------------------------------------------
@@ -438,6 +466,11 @@ def exportar_reportes(inconsistencias, descontados, total_predios, output_path):
             area = pd.to_numeric(d['ACONCONS'], errors='coerce').fillna(0)
             d['AREA_CONST'] = area.where(
                 area > 0, pd.to_numeric(d['ACONANEX'], errors='coerce'))
+        # La tipologia, con la misma regla de la liquidacion: los 3 ultimos
+        # digitos de la ZHF cuando el codigo es completo (11 o mas caracteres).
+        if 'ZHF' in d.columns and 'TIPOLOGIA_ZHF' not in d.columns:
+            z = d['ZHF'].astype(str).str.strip().replace({'nan': '', 'None': ''})
+            d['TIPOLOGIA_ZHF'] = z.str[-3:].where(z.str.len() >= 11, '')
         d = d.reindex(columns=COLUMNAS_REPORTE)
         d['ZONA'] = np.where(pd.to_numeric(d['COMUNA'], errors='coerce') > 22,
                              'RURAL', 'URBANO')

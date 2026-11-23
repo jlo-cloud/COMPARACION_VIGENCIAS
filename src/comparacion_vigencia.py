@@ -886,8 +886,16 @@ def actividad_economica(d: pd.DataFrame) -> pd.Series:
         codigo = codigo.where(codigo != "", respaldo)
 
     condiciones = [codigo.isin(v) for v in ACTIVIDAD_ZHF.values()]
-    return pd.Series(np.select(condiciones, list(ACTIVIDAD_ZHF), default="OTRAS"),
-                     index=indice)
+    act = pd.Series(np.select(condiciones, list(ACTIVIDAD_ZHF), default="OTRAS"),
+                    index=indice)
+    # Lo rural no tiene tipologia urbana: su actividad es el uso de la ZHF
+    # rural (2 ultimos digitos), con la descripcion del dominio rural.
+    if "COMUNA" in d.columns and "ZHF" in d.columns:
+        rural = pd.to_numeric(d["COMUNA"], errors="coerce") > 22
+        if rural.any():
+            import reglas_rurales
+            act = act.where(~rural, reglas_rurales.actividad_rural(d["ZHF"]))
+    return act
 
 
 def preparar_avaluo(d: pd.DataFrame) -> pd.DataFrame:
@@ -1437,6 +1445,24 @@ DICCIONARIO_DETALLE = [
      "pasan por la comparacion de construcciones, solo entran las que tienen "
      "valor en la tabla, y lo que no les aplica (puntaje, ZHF, terreno, "
      "avaluo, rangos) va en 0 o vacio"),
+    ("COMPARADA_INST_RES", "Ejercicio institucional: 1 si la construccion se compara con la vigencia, "
+     "0 si no", "0 = su predio tiene anexo o quedo incompleto: va con su valor 2026 y 2027 y el "
+     "ejercicio, sin avaluo del predio, y no entra a los resumenes ni a la app. Vacia fuera del ejercicio"),
+    ("COLUMNA_INST_RES", "Ejercicio institucional con tabla residencial: la columna usada",
+     "la de las residenciales urbanas: T1_RESIDENCIAL_7C_<tipologia> en las 7 comunas; "
+     "en las 10, T1_RESIDENCIAL_10C_COND_9_<tipologia> si la condicion es 9 y COND_0 si no. "
+     "Solo en construcciones urbanas con tabla T5 a T8 y ZHF 011 a 016; vacia en las demas"),
+    ("VM2_COM_INST_RES", "VM2 comercial 2027 si el institucional se liquidara con la residencial",
+     "la columna de COLUMNA_INST_RES en la fila de su puntaje (PUNTCONS)"),
+    ("VM2_CAT_INST_RES", "VM2 catastral 2027 con la residencial", "VM2_COM_INST_RES x 0,7"),
+    ("VALORCONS_COM_INST_RES", "Valor total comercial 2027 con la residencial",
+     "VM2_COM_INST_RES x AREA_CONST"),
+    ("VALORCONS_CAT_INST_RES", "Valor total catastral 2027 con la residencial",
+     "VALORCONS_COM_INST_RES x 0,7"),
+    ("DIF_VM2_COM_INST_RES", "VM2 residencial menos VM2 institucional (comercial)",
+     "VM2_COM_INST_RES - VM2_COM_LIQ: negativo = la residencial da menos"),
+    ("VARIACION_COM_INST_RES_PCT", "Variacion del VM2 residencial frente al vigente 2026 (comercial)",
+     "VM2_COM_INST_RES / VM2_COM_VIGENCIA - 1, en %"),
     ("EN_CERO", "1 si la construccion quedo en $ 0 en la liquidacion 2027, 0 si tomo valor",
      "las de $ 0 no se comparan: van solo con sus datos de identificacion y el "
      "valor vigente, y no entran a la app ni a los resumenes. Las mismas del "
@@ -1603,6 +1629,11 @@ COLUMNAS_EXCEL_DETALLE = [
     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "DIF_CAT_ABS", "VARIACION_CAT_PCT",
     "RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_TERR", "RANGO_AVALUO",
     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS", "VARIACION_COM_PCT",
+    # Ejercicio: institucionales (T5-T8) en ZHF residencial 011-016 liquidados
+    # con la residencial que les toca (7C, o 10C COND_9/COND_0). Vacias en las demas.
+    "COMPARADA_INST_RES", "COLUMNA_INST_RES", "VM2_COM_INST_RES", "VM2_CAT_INST_RES",
+    "VALORCONS_COM_INST_RES", "VALORCONS_CAT_INST_RES",
+    "DIF_VM2_COM_INST_RES", "VARIACION_COM_INST_RES_PCT",
     "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
     "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
     "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",

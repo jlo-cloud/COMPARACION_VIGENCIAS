@@ -26,7 +26,7 @@ NOMBRE_ANEXOS = "COMPARACION_VIGENCIA_PUBLICO_ANEXOS.parquet"
 # columna ZONA. Las hojas de siempre se quedan con ZONA = URBANO y la hoja
 # Rural con ZONA = RURAL. Aparte solo la cobertura y las reglas rurales.
 # Ejercicio comparativo: institucionales en zona residencial con la tabla
-# residencial 7C (lo escribe src/ejercicio_institucional.py).
+# residencial que les tocaria (lo escribe src/ejercicio_institucional.py).
 NOMBRE_EJERCICIO = "EJERCICIO_INSTITUCIONAL_RESIDENCIAL.parquet"
 NOMBRE_RURAL_COBERTURA = "RURAL_COBERTURA.parquet"
 NOMBRE_RURAL_REGLAS = "RURAL_REGLAS.parquet"
@@ -821,8 +821,11 @@ with st.sidebar:
     sel_tabla = st.multiselect("Tabla de valor", tablas)
 
     sel_comuna = st.multiselect("Comuna", sorted(df["COMUNA"].unique()))
-    sel_actividad = st.multiselect("Actividad económica de la ZHF",
-                                   sorted(df["ACTIVIDAD_ECONOMICA"].unique()))
+    sel_actividad = st.multiselect(
+        "Uso de la ZHF rural" if ZONA_SEL == "RURAL" else "Actividad económica de la ZHF",
+        sorted(df["ACTIVIDAD_ECONOMICA"].unique()),
+        help=("Los 2 últimos dígitos de la ZHF rural, con su descripción "
+              "(01 Agrícola … 30 Espacio otros)." if ZONA_SEL == "RURAL" else None))
     sel_grupo = st.multiselect(
         "Grupo de comunas", list(GRUPOS_FILTRO),
         help="Qué comunas trae cada grupo está en la hoja Reglas.")
@@ -865,13 +868,16 @@ with st.sidebar:
              "o menos. El valor inicial es el máximo real observado."
     )
 
+    # En rural la actividad de la ZHF es el uso de la ZHF rural.
+    aperturas = ({("Uso de la ZHF rural" if k == "Actividad económica de la ZHF" else k): v
+                  for k, v in APERTURAS.items()} if ZONA_SEL == "RURAL" else APERTURAS)
     etiqueta_apertura = st.selectbox(
-        "Separar los resultados por", list(APERTURAS), index=0,
+        "Separar los resultados por", list(aperturas), index=0,
         help="Con lo que se elija aquí se parten las tablas y los gráficos: "
              "una fila del resumen y un gráfico por cada valor de esa "
              "columna. Con «Comuna», por ejemplo, sale una fila y un gráfico "
              "por cada comuna.")
-    col_apertura = APERTURAS[etiqueta_apertura]
+    col_apertura = aperturas[etiqueta_apertura]
     min_predios = st.number_input(
         f"Mínimo de {unidades} por grupo", 1, 5000, 5,
         help=f"Los grupos con menos {unidades} de los que se pidan aquí no se "
@@ -1999,11 +2005,12 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
 # ---------------------------------------------------------------------
 # Las construcciones urbanas que se liquidan con T5 a T8 (institucionales) y
 # tienen ZHF residencial (011 a 016): su VM2 con la tabla institucional frente
-# al que les daria T1_RESIDENCIAL_7C_<tipologia>, y frente al vigente 2026.
+# al que les daria la residencial que les toca (7C en las 7 comunas; en las 10,
+# COND_9 o COND_0 segun la condicion), y frente al vigente 2026.
 NOMBRES_INST = {"T5_INSTITUCIONAL_ED": "T5 Educativo", "T6_INSTITUCIONAL_SA": "T6 Salud",
                 "T7_INSTITUCIONAL_SER": "T7 Servicios", "T8_INSTITUCIONAL_IG": "T8 Culto"}
 with hoja_ejercicio:
-    st.subheader("Institucionales en zona residencial con la tabla residencial 7C")
+    st.subheader("Institucionales en zona residencial con la tabla residencial")
     ruta_ej = ruta_version(sel_versiones[-1], NOMBRE_EJERCICIO)
     if ZONA_SEL == "RURAL":
         st.info("El ejercicio es solo urbano: la tipología 011 a 016 es de la ZHF urbana.")
@@ -2014,8 +2021,9 @@ with hoja_ejercicio:
         st.caption("Construcciones urbanas que se liquidan con una tabla institucional (T5, T6, T7, T8) "
                    "y cuya ZHF es de tipología residencial (011 a 016). Se comparan tres VM2 comerciales: "
                    f"el vigente {V_BASE}, el de su tabla institucional {V_LIQ} y el que les daría la "
-                   "columna T1_RESIDENCIAL_7C de su tipología, con su mismo puntaje. Es un ejercicio: "
-                   "no cambia la liquidación.")
+                   "tabla residencial que les toca, con la misma regla de las residenciales y su mismo "
+                   "puntaje: T1_RESIDENCIAL_7C en las 7 comunas; en las 10, T1_RESIDENCIAL_10C_COND_9 "
+                   "si la condición es 9 y COND_0 si no. Es un ejercicio: no cambia la liquidación.")
         ej = pd.read_parquet(ruta_ej)
         ej["COMUNA"] = ej["COMUNA"].astype(str).str.zfill(2)
         ej["TABLA"] = ej["TABLA_INSTITUCIONAL"].map(NOMBRES_INST)
@@ -2023,9 +2031,16 @@ with hoja_ejercicio:
             ej = ej[ej["COMUNA"].isin(sel_comuna)]
         if sel_grupo:
             ej = ej[ej["COMUNA"].isin(comunas_de_grupos(sel_grupo))]
-        e1, e2 = st.columns(2)
+        e1, e2, e3 = st.columns(3)
         sel_tabla_ej = e1.multiselect("Tabla institucional", list(NOMBRES_INST.values()), key="ej_tabla")
         sel_tip_ej = e2.multiselect("Tipología ZHF", ["011", "012", "013", "014", "015", "016"], key="ej_tip")
+        sel_grp_ej = (e3.multiselect("Tabla residencial", sorted(ej["GRUPO_RESIDENCIAL"].dropna().unique()),
+                                     key="ej_grupo",
+                                     help="7C: las 7 comunas. 10C COND 9 / COND 0: las 10 comunas, "
+                                          "según la condición (9 = PH).")
+                      if "GRUPO_RESIDENCIAL" in ej.columns else [])
+        if sel_grp_ej:
+            ej = ej[ej["GRUPO_RESIDENCIAL"].isin(sel_grp_ej)]
         if sel_tabla_ej:
             ej = ej[ej["TABLA"].isin(sel_tabla_ej)]
         if sel_tip_ej:
@@ -2036,27 +2051,27 @@ with hoja_ejercicio:
         else:
             def _var(a, b):
                 return (a / b.where(b > 0) - 1) * 100
-            ej["VAR_RES_INST"] = _var(ej["VM2_COM_RESIDENCIAL_7C"], ej["VM2_COM_INSTITUCIONAL"])
+            ej["VAR_RES_INST"] = _var(ej["VM2_COM_RESIDENCIAL"], ej["VM2_COM_INSTITUCIONAL"])
             ej["VAR_INST_VIG"] = _var(ej["VM2_COM_INSTITUCIONAL"], ej["VM2_COM_VIGENCIA"])
-            ej["VAR_RES_VIG"] = _var(ej["VM2_COM_RESIDENCIAL_7C"], ej["VM2_COM_VIGENCIA"])
+            ej["VAR_RES_VIG"] = _var(ej["VM2_COM_RESIDENCIAL"], ej["VM2_COM_VIGENCIA"])
 
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Construcciones", entero(len(ej)))
             k2.metric(f"VM2 institucional {V_LIQ} (mediana)", pesos(ej["VM2_COM_INSTITUCIONAL"].median()))
-            k3.metric(f"VM2 residencial 7C {V_LIQ} (mediana)", pesos(ej["VM2_COM_RESIDENCIAL_7C"].median()))
+            k3.metric(f"VM2 residencial {V_LIQ} (mediana)", pesos(ej["VM2_COM_RESIDENCIAL"].median()))
             k4.metric("Residencial frente a institucional", pct(ej["VAR_RES_INST"].median(), 2, signo=True),
-                      help="Mediana de la variación de cada construcción: VM2 residencial 7C frente al "
+                      help="Mediana de la variación de cada construcción: VM2 residencial frente al "
                            "VM2 de su tabla institucional.")
 
             c_vig, c_ins, c_res = (f"VM2 VIGENTE {V_BASE}", f"VM2 INSTITUCIONAL {V_LIQ}",
-                                   f"VM2 RESIDENCIAL 7C {V_LIQ}")
+                                   f"VM2 RESIDENCIAL {V_LIQ}")
 
             def _fila(etq, tip, x):
                 return {"TABLA": etq, "TIPOLOGÍA": tip, "CONSTRUCCIONES": len(x),
                         "ÁREA MEDIANA (m²)": (pd.to_numeric(x["AREA_CONST"], errors="coerce").median()
                                               if "AREA_CONST" in x else np.nan),
                         c_vig: x["VM2_COM_VIGENCIA"].median(), c_ins: x["VM2_COM_INSTITUCIONAL"].median(),
-                        c_res: x["VM2_COM_RESIDENCIAL_7C"].median(),
+                        c_res: x["VM2_COM_RESIDENCIAL"].median(),
                         "RESIDENCIAL VS INSTITUCIONAL_%": x["VAR_RES_INST"].median(),
                         f"INSTITUCIONAL VS {V_BASE}_%": x["VAR_INST_VIG"].median(),
                         f"RESIDENCIAL VS {V_BASE}_%": x["VAR_RES_VIG"].median()}
@@ -2090,7 +2105,7 @@ with hoja_ejercicio:
             # Grafica: las tres medianas por tabla
             g = (ej.groupby("TABLA").agg(VIG=("VM2_COM_VIGENCIA", "median"),
                                          INS=("VM2_COM_INSTITUCIONAL", "median"),
-                                         RES=("VM2_COM_RESIDENCIAL_7C", "median"), N=("TABLA", "size"))
+                                         RES=("VM2_COM_RESIDENCIAL", "median"), N=("TABLA", "size"))
                  .reset_index())
             largo_ej = g.melt(id_vars=["TABLA", "N"], value_vars=["VIG", "INS", "RES"],
                               var_name="SERIE", value_name="VM2")
@@ -2122,11 +2137,11 @@ with hoja_ejercicio:
                     height=120 * len(g),
                     title=alt.TitleParams(
                         text="VM2 por tabla institucional · mediana",
-                        subtitle=f"Vigente {V_BASE}, institucional {V_LIQ} y residencial 7C {V_LIQ} · miles de $",
+                        subtitle=f"Vigente {V_BASE}, institucional {V_LIQ} y residencial {V_LIQ} · miles de $",
                         subtitleColor="#667085", anchor="start")),
                 width="stretch")
             st.caption("El detalle construcción por construcción está en "
-                       "results/EJERCICIOS/EJERCICIO_INSTITUCIONAL_RESIDENCIAL_7C_<fecha>.xlsx "
+                       "results/EJERCICIOS/EJERCICIO_INSTITUCIONAL_RESIDENCIAL_<fecha>.xlsx "
                        "(con identificadores, solo en el equipo local). Valores redondeados a \\$100.")
 
 
