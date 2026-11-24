@@ -1891,6 +1891,11 @@ with hoja_reglas:
         if ruta_reg.exists():
             reg = pd.read_parquet(ruta_reg)
             st.subheader("Asignación de tablas de valor")
+            st.info("**Modelo solo para apartamentos.** En lo rural, únicamente los "
+                    "Apartamentos_4_y_mas_pisos_en_PH (destino 001) se liquidan por modelo. "
+                    "El Comercio_en_PH (028) y las Oficinas_Consultorios_en_PH (034) se liquidan "
+                    "por tabla, con la regla de su uso sin PH: Comercio (025) y "
+                    "Oficinas_Consultorios (032). En lo urbano los tres siguen por modelo.")
             st.dataframe(reg, width="stretch", hide_index=True,
                          column_config={
                              "USO_LADM": st.column_config.TextColumn(width="medium"),
