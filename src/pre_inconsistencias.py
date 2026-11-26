@@ -38,6 +38,9 @@ EXCEL_REPORTE = True
 VALIDAR_ZHF = False
 
 
+# Anexos cuyo TIPOANEXO 50 no existe en la T10: van a pre y sale solo el anexo.
+USOS_ANEXO_TIPO_50 = {'Cerramiento', 'Canchas'}
+
 # Como se llama cada tipo en el RESUMEN.
 NOMBRE_MOTIVO = {
     'PREDIO': 'CONSTRUCCIÓN SIN PREDIO',
@@ -46,6 +49,7 @@ NOMBRE_MOTIVO = {
     'PUNTAJE': 'SIN PUNTAJE',
     'AREA_CONSTRUIDA': 'SIN ÁREA',
     'SIN_ESTRATO': 'SIN ESTRATO',
+    'ANEXO_TIPO_SIN_TABLA': 'ANEXO CON TIPO SIN TABLA',
     'SIN_ZHF': 'SIN ZHF',
     'SIN_LONGITUD': 'SIN LONGITUD',
     'SIN_LATITUD': 'SIN LATITUD',
@@ -415,6 +419,24 @@ def generar_reporte_inconsistencias(
             'detalle': sin_estrato
         }
 
+        # ANEXO TIPO SIN TABLA: Cerramiento y Canchas con TIPOANEXO 50. La T10
+        # no trae ese tipo para esos anexos y quedaban en $ 0 (sin regla). Se
+        # reportan aqui y sale SOLO el anexo: el resto del predio se liquida.
+        uso_anx = df['USO_LADM'].astype(str).str.strip() if 'USO_LADM' in df.columns \
+            else pd.Series('', index=df.index)
+        anexo_t50 = (df['DESTANEX'].fillna(0) > 0) & uso_anx.isin(USOS_ANEXO_TIPO_50) & \
+            (pd.to_numeric(df['TIPOANEXO'], errors='coerce') == 50)
+        anexo_sin_tabla = df[anexo_t50].copy()
+        anexo_sin_tabla['MOTIVO_INCONSISTENCIA'] = 'Cerramiento o Canchas con TIPOANEXO 50: la T10 no tiene ese tipo'
+        filas_a_quitar = anexo_sin_tabla.index
+
+        inconsistencias['ANEXO_TIPO_SIN_TABLA'] = {
+            'total': len(anexo_sin_tabla),
+            'zona': _por_zona(anexo_sin_tabla),
+            'predios_unicos': anexo_sin_tabla['ID_PREDIO'].nunique(),
+            'detalle': anexo_sin_tabla
+        }
+
     # ------------------------------------------------------------------
     # 5️⃣ DATAFRAME LIMPIO
     # ------------------------------------------------------------------
@@ -422,6 +444,10 @@ def generar_reporte_inconsistencias(
                    if any(m in MOTIVOS_QUE_DESCUENTAN for m in motivos)]
     solo_reporte = len(predios_con_inconsistencias) - len(a_descontar)
     df_limpio = df[~df['ID_PREDIO'].isin(a_descontar)].copy()
+    # Lo que sale fila a fila (sin descontar el predio): los anexos tipo 50.
+    if validar_construcciones and len(filas_a_quitar):
+        df_limpio = df_limpio.drop(index=filas_a_quitar, errors='ignore')
+        print(f"   Anexos quitados (Cerramiento/Canchas tipo 50): {len(filas_a_quitar):,}")
     print("")
     print(f"   Predios con alguna inconsistencia : {len(predios_con_inconsistencias):,}")
     print(f"   De esos, se descuentan            : {len(a_descontar):,}")

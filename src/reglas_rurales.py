@@ -39,6 +39,13 @@ SIN_ZHF = "SIN ZHF"
 # En lo rural, comercio y oficinas en PH van por TABLA, no por modelo: toman
 # la regla de su uso sin PH (con el mismo uso de la ZHF rural). Solo los
 # apartamentos en PH (001) siguen por modelo. En lo urbano no cambia nada.
+#
+# ESTA REGLA NO VIENE EN EL EXCEL DE LA ENTREGA RURAL: el Excel no dice que
+# el 028 y el 034 dejan el modelo y toman la regla de su uso sin PH. La definio el
+# equipo de tablas aparte (noviembre 2026) y vive solo aqui. asignar() cambia
+# el destino ANTES de buscar en la entrega, asi que las filas propias del 028
+# y del 034 en el Excel no se usan nunca. Si una entrega nueva la incluye,
+# este diccionario se puede quitar.
 RURAL_PH_COMO_NO_PH = {"028": "025",   # Comercio_en_PH -> Comercio
                        "034": "032"}   # Oficinas_Consultorios_en_PH -> Oficinas_Consultorios
 
@@ -308,6 +315,23 @@ def asignar(df: pd.DataFrame, reglas: pd.DataFrame) -> pd.DataFrame:
     falta = pd.isna(estado)
     uso_entero = por_uso.reindex(destino)["ESTADO"].to_numpy(dtype=object)
     estado = np.where(falta & pd.notna(uso_entero), uso_entero, estado)
+
+    # Un uso al que la entrega le da la MISMA columna en todas sus ZHF (al menos
+    # dos) no depende de la ZHF: esa columna vale tambien para una ZHF que la
+    # entrega no lista. La entrega se armo con las ZHF que habia en la base, y
+    # un predio que despues recibe ZHF nueva (Unidad_Deportiva en uso 13) se
+    # quedaba sin regla teniendo una sola tabla posible (T13).
+    con_zhf = conv[conv["USO_ZHF"] != SIN_ZHF]
+    g = con_zhf.groupby("DESTINOCONS")
+    unica = g.filter(lambda x: len(x) >= 2 and (x["ESTADO"] == TABLA).all()
+                     and x["COLUMNA"].nunique() == 1)
+    por_uso_tabla = unica.drop_duplicates("DESTINOCONS").set_index("DESTINOCONS")
+    ut = por_uso_tabla.reindex(destino)
+    usa_unica = pd.isna(estado) & ut["ESTADO"].notna().to_numpy() & \
+        (clave.get_level_values(1) != SIN_ZHF)
+    estado = np.where(usa_unica, TABLA, estado)
+    columna = np.where(usa_unica, ut["COLUMNA"].fillna("").to_numpy(dtype=object), columna)
+    origen = np.where(usa_unica, ut["TABLA_ORIGEN"].fillna("").to_numpy(dtype=object), origen)
     sin_zhf = clave.get_level_values(1) == SIN_ZHF
 
     nuevo = np.select([estado == TABLA, estado == MODELO, estado == T12],
