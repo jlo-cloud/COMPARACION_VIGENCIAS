@@ -2039,19 +2039,33 @@ NOMBRES_INST = {"T5_INSTITUCIONAL_ED": "T5 Educativo", "T6_INSTITUCIONAL_SA": "T
 with hoja_ejercicio:
     st.subheader("Institucionales en zona residencial con la tabla residencial")
     ruta_ej = ruta_version(sel_versiones[-1], NOMBRE_EJERCICIO)
-    if ZONA_SEL == "RURAL":
-        st.info("El ejercicio es solo urbano: la tipología 011 a 016 es de la ZHF urbana.")
-    elif not ruta_ej.exists():
+    ej = pd.read_parquet(ruta_ej) if ruta_ej.exists() else None
+    if ej is not None and "ZONA" not in ej.columns:
+        ej["ZONA"] = "URBANO"                 # versiones de antes de incluir lo rural
+    if ej is not None:
+        ej = ej[ej["ZONA"].astype(str) == ZONA_SEL]
+    if ej is None:
         st.info("Esta versión no trae el ejercicio: sale de correr "
                 "`python src/ejercicio_institucional.py`.")
+    elif ej.empty:
+        st.info("Esta versión no trae el ejercicio para esta zona.")
     else:
-        st.caption("Construcciones urbanas que se liquidan con una tabla institucional (T5, T6, T7, T8) "
-                   "y cuya ZHF es de tipología residencial (011 a 016). Se comparan tres VM2 comerciales: "
-                   f"el vigente {V_BASE}, el de su tabla institucional {V_LIQ} y el que les daría la "
-                   "tabla residencial que les toca, con la misma regla de las residenciales y su mismo "
-                   "puntaje: T1_RESIDENCIAL_7C en las 7 comunas; en las 10, T1_RESIDENCIAL_10C_COND_9 "
-                   "si la condición es 9 y COND_0 si no. Es un ejercicio: no cambia la liquidación.")
-        ej = pd.read_parquet(ruta_ej)
+        if ZONA_SEL == "RURAL":
+            st.caption("Construcciones rurales que se liquidan con una tabla institucional (T5, T6, T7, T8) "
+                       "y cuya ZHF rural tiene uso residencial (11 a 16, Residencial_tipo1 a tipo6; la "
+                       "tipología 0XX es ese uso). Se comparan tres VM2 comerciales: "
+                       f"el vigente {V_BASE}, el de su tabla institucional {V_LIQ} y el que les daría la "
+                       "columna que la entrega rural le da a la Vivienda_Hasta_3_Pisos en esa ZHF "
+                       "(T1_RESIDENCIAL_10C_COND_9), con su mismo puntaje. Es un ejercicio: no cambia la "
+                       "liquidación.")
+        else:
+            st.caption("Construcciones urbanas que se liquidan con una tabla institucional (T5, T6, T7, T8) "
+                       "y cuya ZHF es de tipología residencial (011 a 016). Se comparan tres VM2 comerciales: "
+                       f"el vigente {V_BASE}, el de su tabla institucional {V_LIQ} y el que les daría la "
+                       "tabla residencial que les toca, con la misma regla de las residenciales y su mismo "
+                       "puntaje: T1_RESIDENCIAL_7C en las 7 comunas; en las 10, T1_RESIDENCIAL_10C_COND_9 "
+                       "si la condición es 9 y COND_0 si no. Es un ejercicio: no cambia la liquidación.")
+        ej = ej.copy()
         ej["COMUNA"] = ej["COMUNA"].astype(str).str.zfill(2)
         ej["TABLA"] = ej["TABLA_INSTITUCIONAL"].map(NOMBRES_INST)
         if sel_comuna:

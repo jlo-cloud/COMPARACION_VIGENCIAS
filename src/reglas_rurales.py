@@ -36,6 +36,19 @@ FACTOR_COMERCIAL_RURAL = 0.6
 
 SIN_ZHF = "SIN ZHF"
 
+# Nombre de cada corregimiento (ARCHIVOS BASE/ZHF_RURAL/ACT_RURAL2023_MODELOS_CE.pdf).
+CORREGIMIENTOS = {
+    "51": "Navarro", "52": "El Hormiguero", "53": "Pance", "54": "La Buitrera",
+    "55": "Villacarmelo", "56": "Los Andes", "57": "Pichinde", "58": "La Leonera",
+    "59": "Felidia", "60": "El Saladito", "61": "La Elvira", "62": "La Castilla",
+    "63": "La Paz", "64": "Montebello", "65": "Golondrinas",
+}
+
+
+def corregimiento(comuna: pd.Series) -> pd.Series:
+    """El nombre del corregimiento en lo rural; vacio en lo urbano."""
+    return comuna.astype(str).str.strip().str.zfill(2).map(CORREGIMIENTOS).fillna("")
+
 # En lo rural, comercio y oficinas en PH van por TABLA, no por modelo: toman
 # la regla de su uso sin PH (con el mismo uso de la ZHF rural). Solo los
 # apartamentos en PH (001) siguen por modelo. En lo urbano no cambia nada.

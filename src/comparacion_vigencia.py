@@ -841,6 +841,11 @@ def filtrar_comparables(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         por_modelo = pd.Series(False, index=d.index)
         for nombre, condicion_tabla in CONFIG["usos_por_modelo"].items():
             por_modelo |= (uso == nombre) & (cond != condicion_tabla)
+        # Lo que de verdad quedo por tabla no se descarta por su uso: en lo
+        # rural Comercio_en_PH y Oficinas_Consultorios_en_PH van por tabla
+        # (reglas_rurales.RURAL_PH_COMO_NO_PH) y se perdian 151 comparables.
+        if "TABLA_ORIGEN" in d.columns:
+            por_modelo &= d["TABLA_ORIGEN"].astype(str).eq("MODELO")
         reglas.append(("se liquida por modelo, no por tabla ("
                        + ", ".join(f"{u} salvo CONDICION {c}"
                                    for u, c in CONFIG["usos_por_modelo"].items())
@@ -1423,6 +1428,8 @@ DICCIONARIO_DETALLE = [
      "comunas urbanas; 51 a 65 son rurales (corregimientos): se liquidan "
      "con la entrega rural (reglas_rurales.py) cuando LIQUIDAR_RURAL esta "
      "prendido en Liquidacion_tablas.py; su vigencia comercial es catastral / 0,6"),
+    ("CORREGIMIENTO", "Solo rural: nombre del corregimiento",
+     "51 Navarro ... 65 Golondrinas (reglas_rurales.CORREGIMIENTOS). Vacia en lo urbano"),
     ("ZONA", "URBANO (comunas 01 a 22) o RURAL (corregimientos 51 a 65)",
      "de la comuna. Lo rural se liquida con la entrega rural y su vigencia "
      "comercial es catastral / 0,6"),
@@ -1620,7 +1627,7 @@ DICCIONARIO_DETALLE = [
 
 COLUMNAS_EXCEL_DETALLE = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
-    "COMUNA", "ZONA", "ESTRPRED", "USO_LADM", "CONDICION",
+    "COMUNA", "CORREGIMIENTO", "ZONA", "ESTRPRED", "USO_LADM", "CONDICION",
     "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
     # Lo que quedo en $ 0 tambien va al Excel, marcado: no entra a la app ni a
     # los resumenes (el R lo excluye), pero el detalle queda completo.

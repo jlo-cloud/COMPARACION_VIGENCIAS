@@ -36,23 +36,60 @@ TABLAS_INSTITUCIONALES = {"T5_INSTITUCIONAL_ED": "T5 Educativo", "T6_INSTITUCION
                           "T7_INSTITUCIONAL_SER": "T7 Servicios", "T8_INSTITUCIONAL_IG": "T8 Culto"}
 TIPOLOGIAS = ["011", "012", "013", "014", "015", "016"]
 
+# RURAL: la ZHF rural (12 digitos) dice el uso en sus 2 ultimos digitos; los
+# residenciales son 11 a 16 (Residencial_tipo1 a tipo6). La columna residencial
+# es la que la entrega rural le da a la Vivienda_Hasta_3_Pisos (012) en ese
+# mismo uso de la ZHF: T1_RESIDENCIAL_10C_COND_9_0<uso>.
+USOS_RES_RURAL = ["11", "12", "13", "14", "15", "16"]
+DESTINO_RES_RURAL = "012"
 
-def columna_residencial(comuna: pd.Series, condicion: pd.Series, tipologia: pd.Series) -> pd.Series:
+
+def _es_rural(comuna: pd.Series) -> pd.Series:
+    return pd.to_numeric(comuna, errors="coerce") > 22
+
+
+def _uso_rural(zhf: pd.Series) -> pd.Series:
+    import reglas_rurales
+    return reglas_rurales.uso_zhf(zhf.astype(str))
+
+
+def tipologia_ejercicio(d: pd.DataFrame) -> pd.Series:
+    """La tipologia residencial del ejercicio: la urbana (011-016) o, en lo
+    rural, '0' + el uso residencial de la ZHF rural (11-16 -> 011-016)."""
+    urb = d["TIPOLOGIA_ZHF"].astype(str)
+    rur = "0" + _uso_rural(d["ZHF"])
+    return urb.where(~_es_rural(d["COMUNA"]), rur)
+
+
+def _columnas_rurales() -> pd.Series:
+    """USO_ZHF -> columna que la entrega rural le da a la vivienda 012."""
+    import reglas_rurales as rr
+    r = rr.cargar_reglas()
+    r = r[(r["DESTINOCONS"] == DESTINO_RES_RURAL) & (r["ESTADO"] == rr.TABLA)]
+    return r.set_index("USO_ZHF")["COLUMNA"]
+
+
+def columna_residencial(comuna: pd.Series, condicion: pd.Series, tipologia: pd.Series,
+                        zhf: pd.Series | None = None) -> pd.Series:
     """La columna residencial que le toca, con la regla de las residenciales
     urbanas: 7C en las 7 comunas; en las 10, COND_9 si la condicion es 9 y
-    COND_0 si no."""
+    COND_0 si no. En lo rural, la de la vivienda 012 en su uso de la ZHF."""
     c = comuna.astype(str).str.strip().str.zfill(2)
     t = tipologia.astype(str).str.strip()
     cond9 = pd.to_numeric(condicion, errors="coerce").fillna(0).astype(int) == 9
     grupo = np.where(c.isin(CONFIG["comunas_7"]), "7C",
                      np.where(cond9, "10C_COND_9", "10C_COND_0"))
-    return pd.Series("T1_RESIDENCIAL_" + pd.Series(grupo, index=c.index) + "_" + t, index=c.index)
+    out = pd.Series("T1_RESIDENCIAL_" + pd.Series(grupo, index=c.index) + "_" + t, index=c.index)
+    rural = _es_rural(c)
+    if zhf is not None and rural.any():
+        out[rural] = _uso_rural(zhf[rural]).map(_columnas_rurales()).to_numpy()
+    return out
 
 PARQUET_APP = Path(CONFIG["parquet_publico"]).parent / "EJERCICIO_INSTITUCIONAL_RESIDENCIAL.parquet"
 
 # La informacion de la construccion que va al Excel, en este orden.
 COLUMNAS_EXCEL = [
-    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA", "DIREPRED",
+    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA", "ZONA", "DIREPRED",
     "ESTRPRED", "CONDICION", "USO_LADM", "DESTINOCONS", "ZHF", "TIPOLOGIA_ZHF",
     "PUNTCONS", "ACONCONS", "AREA_CONST", "TPISCONS", "ANOCONST",
     "TABLA_INSTITUCIONAL", "GRUPO_RESIDENCIAL", "COLUMNA_RESIDENCIAL",
@@ -95,10 +132,13 @@ def vm2_residencial(puntcons: pd.Series, columnas: pd.Series) -> pd.Series:
 
 
 def en_ejercicio(d: pd.DataFrame) -> pd.Series:
-    """Las filas del ejercicio: urbanas, con tabla T5 a T8 y ZHF 011 a 016."""
-    return ((pd.to_numeric(d["COMUNA"], errors="coerce") <= 22)
-            & d["TABLA_ORIGEN"].astype(str).isin(TABLAS_INSTITUCIONALES)
-            & d["TIPOLOGIA_ZHF"].astype(str).isin(TIPOLOGIAS))
+    """Las filas del ejercicio: tabla T5 a T8 y ZHF residencial (urbana 011 a
+    016; rural con uso de la ZHF 11 a 16)."""
+    rural = _es_rural(d["COMUNA"])
+    inst = d["TABLA_ORIGEN"].astype(str).isin(TABLAS_INSTITUCIONALES)
+    urb = ~rural & d["TIPOLOGIA_ZHF"].astype(str).isin(TIPOLOGIAS)
+    rur = rural & _uso_rural(d["ZHF"]).isin(USOS_RES_RURAL)
+    return inst & (urb | rur)
 
 
 # Las columnas que el ejercicio agrega al Excel de detalle (vacias fuera de el).
@@ -115,7 +155,7 @@ def columnas_inst_res(det: pd.DataFrame) -> pd.DataFrame:
     if not m.any():
         return out
     d = det.loc[m]
-    col = columna_residencial(d["COMUNA"], d["CONDICION"], d["TIPOLOGIA_ZHF"])
+    col = columna_residencial(d["COMUNA"], d["CONDICION"], d["TIPOLOGIA_ZHF"], d["ZHF"])
     vm2 = vm2_residencial(d["PUNTCONS"], col)
     area = pd.to_numeric(d["AREA_CONST"], errors="coerce")
     factor = CONFIG["factor_catastral"]
@@ -155,7 +195,7 @@ def filas_no_comparadas(det: pd.DataFrame) -> pd.DataFrame:
     for c in ("ESTRPRED", "CONDICION", "PUNTCONS", "ACONCONS", "AREA_CONST"):
         if c in out.columns:
             out[c] = pd.to_numeric(e[c], errors="coerce")
-    out["ZONA"] = "URBANO"
+    out["ZONA"] = e["ZONA"]
     out["GRUPO_COMUNAS"] = grupo_comunas(e)
     out["TABLA_ORIGEN"] = e["TABLA_INSTITUCIONAL"]
     out["TABLA_VALOR"] = e["TABLA_INSTITUCIONAL"] + "_17C"
@@ -189,12 +229,14 @@ def armar(liq: pd.DataFrame | None = None) -> pd.DataFrame:
         hay = set(pq.ParquetFile(ruta).schema_arrow.names)
         usar = [c for c in COLUMNAS_EXCEL + ["TABLA_ORIGEN", "VM2", "VALORCONS"] if c in hay]
         liq = pd.read_parquet(ruta, columns=usar)
-    d = liq[(pd.to_numeric(liq["COMUNA"], errors="coerce") <= 22)
-            & liq["TABLA_ORIGEN"].astype(str).isin(TABLAS_INSTITUCIONALES)
-            & liq["TIPOLOGIA_ZHF"].astype(str).isin(TIPOLOGIAS)].copy()
+    d = liq[en_ejercicio(liq)].copy()
     d["COMUNA"] = d["COMUNA"].astype(str).str.zfill(2)
+    d["ZONA"] = np.where(_es_rural(d["COMUNA"]), "RURAL", "URBANO")
     d["TABLA_INSTITUCIONAL"] = d["TABLA_ORIGEN"].astype(str)
-    d["COLUMNA_RESIDENCIAL"] = columna_residencial(d["COMUNA"], d["CONDICION"], d["TIPOLOGIA_ZHF"])
+    d["COLUMNA_RESIDENCIAL"] = columna_residencial(d["COMUNA"], d["CONDICION"],
+                                                   d["TIPOLOGIA_ZHF"], d["ZHF"])
+    # En lo rural la tipologia del ejercicio es el uso residencial de la ZHF
+    d["TIPOLOGIA_ZHF"] = tipologia_ejercicio(d)
     d["GRUPO_RESIDENCIAL"] = d["COLUMNA_RESIDENCIAL"].str.extract(r"T1_RESIDENCIAL_(.+)_\d{3}$")[0] \
         .str.replace("_", " ")
 
@@ -231,15 +273,19 @@ def resumen(d: pd.DataFrame) -> pd.DataFrame:
                 "VAR. RESIDENCIAL VS 2026 % (mediana)": s["VAR_RESIDENCIAL_VS_VIGENCIA_PCT"].median(),
                 "% RESIDENCIAL MAYOR": (s["DIF_RESIDENCIAL_VS_INSTITUCIONAL"] > 0).mean() * 100}
     filas = []
-    for tabla, nombre in TABLAS_INSTITUCIONALES.items():
-        s_t = d[d["TABLA_INSTITUCIONAL"] == tabla]
-        for tip in TIPOLOGIAS:
-            s = s_t[s_t["TIPOLOGIA_ZHF"].astype(str) == tip]
-            if len(s):
-                filas.append({"TABLA": nombre, "TIPOLOGIA": tip, **fila(s)})
-        if len(s_t):
-            filas.append({"TABLA": f"TOTAL {nombre}", "TIPOLOGIA": "", **fila(s_t)})
-    filas.append({"TABLA": "TOTAL", "TIPOLOGIA": "", **fila(d)})
+    for zona in ("URBANO", "RURAL"):
+        d_z = d[d["ZONA"] == zona]
+        for tabla, nombre in TABLAS_INSTITUCIONALES.items():
+            s_t = d_z[d_z["TABLA_INSTITUCIONAL"] == tabla]
+            for tip in TIPOLOGIAS:
+                s = s_t[s_t["TIPOLOGIA_ZHF"].astype(str) == tip]
+                if len(s):
+                    filas.append({"ZONA": zona, "TABLA": nombre, "TIPOLOGIA": tip, **fila(s)})
+            if len(s_t):
+                filas.append({"ZONA": zona, "TABLA": f"TOTAL {nombre}", "TIPOLOGIA": "", **fila(s_t)})
+        if len(d_z):
+            filas.append({"ZONA": zona, "TABLA": f"TOTAL {zona}", "TIPOLOGIA": "", **fila(d_z)})
+    filas.append({"ZONA": "", "TABLA": "TOTAL", "TIPOLOGIA": "", **fila(d)})
     return pd.DataFrame(filas)
 
 
@@ -259,6 +305,8 @@ def generar() -> tuple[str, str]:
         "Ejercicio: el VM2 que les daria la columna residencial que les toca, con la regla de las residenciales",
         "urbanas: T1_RESIDENCIAL_7C_<tipologia> en las 7 comunas (02, 03, 04, 08, 17, 19, 22); en las 10 comunas,",
         "T1_RESIDENCIAL_10C_COND_9_<tipologia> si la condicion es 9 (PH) y T1_RESIDENCIAL_10C_COND_0_<tipologia> si no.",
+        "RURAL: institucionales cuya ZHF rural tiene uso residencial (11 a 16, Residencial_tipo1 a tipo6), con la",
+        "columna que la entrega rural le da a la Vivienda_Hasta_3_Pisos (012) en ese uso: T1_RESIDENCIAL_10C_COND_9_0<uso>.",
         "Se busca en la fila de su puntaje y se compara con el VM2 de su tabla institucional y con el vigente 2026.",
         "Todo en valores comerciales.",
         "No cambia la liquidacion. ARCHIVO CON IDENTIFICADORES: uso interno.",
@@ -274,10 +322,11 @@ def generar() -> tuple[str, str]:
         pct = libro.add_format({"num_format": '+0.00"%";-0.00"%"'})
         w.sheets["LEEME"].set_column(0, 0, 110)
         r = w.sheets["RESUMEN"]
-        r.set_column(0, 0, 22); r.set_column(1, 1, 10); r.set_column(2, 3, 16, miles)
-        r.set_column(4, 4, 16, libro.add_format({"num_format": "#,##0.0"}))
-        r.set_column(5, 7, 18, miles)
-        r.set_column(8, 10, 18, pct); r.set_column(11, 11, 14, libro.add_format({"num_format": "0.0"}))
+        r.set_column(0, 0, 10); r.set_column(1, 1, 22); r.set_column(2, 2, 10)
+        r.set_column(3, 4, 16, miles)
+        r.set_column(5, 5, 16, libro.add_format({"num_format": "#,##0.0"}))
+        r.set_column(6, 8, 18, miles)
+        r.set_column(9, 11, 18, pct); r.set_column(12, 12, 14, libro.add_format({"num_format": "0.0"}))
         c = w.sheets["CONSTRUCCIONES"]
         cols = [x for x in COLUMNAS_EXCEL if x in d.columns]
         for j, col in enumerate(cols):
@@ -293,7 +342,7 @@ def generar() -> tuple[str, str]:
         w.sheets["DICCIONARIO"].set_column(1, 1, 110)
 
     # Para la app: sin identificadores y redondeado, como los demas recortes
-    app = d[["COMUNA", "TABLA_INSTITUCIONAL", "TIPOLOGIA_ZHF", "GRUPO_RESIDENCIAL", "USO_LADM",
+    app = d[["COMUNA", "ZONA", "TABLA_INSTITUCIONAL", "TIPOLOGIA_ZHF", "GRUPO_RESIDENCIAL", "USO_LADM",
              "PUNTCONS", "AREA_CONST",
              "VM2_COM_VIGENCIA", "VM2_COM_INSTITUCIONAL", "VM2_COM_RESIDENCIAL"]].copy()
     for col in ("VM2_COM_VIGENCIA", "VM2_COM_INSTITUCIONAL", "VM2_COM_RESIDENCIAL"):

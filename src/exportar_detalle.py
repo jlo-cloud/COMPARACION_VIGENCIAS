@@ -169,6 +169,7 @@ def main():
     cols_det = [c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]
     det = pd.concat([det[cols_det], inst_no_comp.reindex(columns=cols_det),
                      filas[cols_det], cero[cols_det]], ignore_index=True)
+    det["CORREGIMIENTO"] = reglas_rurales.corregimiento(det["COMUNA"]).to_numpy()
     print(f"   + {len(inst_no_comp):,} institucionales del ejercicio que no se comparan "
           f"(COMPARADA_INST_RES = 0)")
     print(f"   + {len(cero):,} construcciones en $ 0 (EN_CERO = 1), como en "
