@@ -1948,17 +1948,6 @@ with hoja_reglas:
         if ruta_reg.exists():
             reg = pd.read_parquet(ruta_reg)
             st.subheader("Asignación de tablas de valor")
-            st.info("**Por modelo solo se liquidan los apartamentos.** En lo rural, únicamente los "
-                    "Apartamentos_4_y_mas_pisos_en_PH (destino 001) van por modelo; todo lo demás "
-                    "va por tabla. "
-                    "El Comercio_en_PH (028) y las Oficinas_Consultorios_en_PH (034) se liquidan "
-                    "por tabla, con la regla de su uso sin PH:\n\n"
-                    "- **Comercio_en_PH (028)** → regla de Comercio (025): **T3_COMERCIAL_10C_023**; "
-                    "en uso de la ZHF 17 Comercial_Local, T3_COMERCIAL_10C_021, y en 18 "
-                    "Comercial_Zonal, T3_COMERCIAL_10C_022.\n"
-                    "- **Oficinas_Consultorios_en_PH (034)** → regla de Oficinas_Consultorios (032): "
-                    "**T7_INSTITUCIONAL_SER_17C**, en cualquier uso de la ZHF.\n\n"
-                    "En lo urbano los tres siguen por modelo.")
             # Resumida: una fila por uso y tabla. En cada uso la tabla que mas
             # se repite es "los demas usos de la ZHF" y solo se listan las
             # excepciones; si el uso tiene una sola tabla, "cualquier uso".
@@ -2000,6 +1989,9 @@ with hoja_reglas:
                              "TABLA": st.column_config.TextColumn(width="medium")})
             st.caption(f"{len(resumen_r)} reglas resumidas de las {len(reg)} filas de la entrega rural. "
                        "Lo que no tiene ZHF no se liquida (sale en post-inconsistencias).")
+            st.info("**Por modelo solo se liquidan los apartamentos.** En lo rural, únicamente los "
+                    "Apartamentos_4_y_mas_pisos_en_PH (destino 001) van por modelo; todo lo demás "
+                    "va por tabla.")
             st.info("**Institucionales en zona residencial.** Las institucionales (T5 a T8) cuya ZHF "
                     "rural tiene uso residencial (11 a 16) se liquidan con la tabla residencial: la "
                     "columna que la entrega le da a la Vivienda_Hasta_3_Pisos (012) en ese uso. La "
