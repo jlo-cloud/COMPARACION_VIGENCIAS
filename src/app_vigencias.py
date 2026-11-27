@@ -738,11 +738,16 @@ with st.sidebar:
         "Versión de tablas", versiones_zona, default=[versiones_zona[-1]],
         key=f"versiones_{ZONA_SEL}",
         disabled=len(versiones_zona) == 1,
+        # Lo rural tiene una sola version: se muestra como V1 (sus datos son
+        # los de la carpeta V2, la primera liquidacion que trajo lo rural).
+        format_func=(lambda v: "V1") if ZONA_SEL == "RURAL" else str,
         help="Con qué versión de las tablas de valor se liquida 2027. Con una "
              "sola, la app se ve como siempre. Con dos o más, cada tabla sale "
              "una vez por versión (por ejemplo T3_COMERCIAL · V1 y "
              "T3_COMERCIAL · V2) para compararlas lado a lado. Vacío = la más "
-             "reciente. Lo rural solo existe desde la V2.")
+             "reciente. Lo rural tiene una sola versión.")
+    if ZONA_SEL == "RURAL":
+        st.caption("Lo rural tiene una sola versión (V1).")
     sel_versiones = ([v for v in versiones_zona if v in sel_versiones]
                      or [versiones_zona[-1]])
     varias_versiones = len(sel_versiones) > 1
@@ -2208,7 +2213,7 @@ with hoja_ejercicio:
 
 st.caption(
     f"Fuente: output/versiones/<versión>/{NOMBRE_DATOS} · versión "
-    f"{sel_versiones[-1]} generada por comparacion_vigencia.py el "
+    f"{'V1' if ZONA_SEL == 'RURAL' else sel_versiones[-1]} generada por comparacion_vigencia.py el "
     f"{pd.Timestamp(os.path.getmtime(ruta_version(sel_versiones[-1], NOMBRE_DATOS)), unit='s'):%Y-%m-%d %H:%M}. "
     f"predial: el VM2 viene redondeado a \\$100 y el avalúo a \\$100.000, así que "
     f"puede haber diferencias de centésimas contra el reporte en Excel, que "
