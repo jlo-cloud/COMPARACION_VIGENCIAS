@@ -315,6 +315,10 @@ def tabla_valor_usada(d: pd.DataFrame) -> pd.Series:
     # Lo rural trae la columna exacta que le asigno la entrega rural.
     rural = (d["TABLA_RURAL"].fillna("").astype(str) if "TABLA_RURAL" in d.columns
              else pd.Series("", index=d.index))
+    # Institucionales liquidadas con la residencial: esa es su columna.
+    if "TABLA_VALOR_RESIDENCIAL" in d.columns:
+        res = d["TABLA_VALOR_RESIDENCIAL"].fillna("").astype(str)
+        rural = res.where(res != "", rural)
     valores = []
     for tabla, c, col_rural in zip(d["TABLA_ORIGEN"], comuna, rural):
         if col_rural:
@@ -362,7 +366,9 @@ COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM
             # dejan fuera lo que no sale de la tabla (ver preparar()).
             "ESPECIAL", "INTEGRAL", "METODO_LIQUIDACION", "CONDICION",
             # Lo rural: la columna exacta que le asigno la entrega rural.
-            "TABLA_RURAL"]
+            "TABLA_RURAL",
+            # Institucionales liquidadas con la tabla residencial (5C nuevas y rural)
+            "TABLA_VALOR_RESIDENCIAL", "VM2_INSTITUCIONAL"]
 
 # Actividad economica de la ZHF, por los ultimos tres digitos del codigo.
 ACTIVIDAD_ZHF = {
@@ -796,6 +802,8 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     d["AREA_MANEJO"] = reglas_rurales.area_manejo(zhf).where(rural, "")
     d["CLAVE"] = d["TABLA_ORIGEN"] + "_" + d["ACTIVIDAD_ECONOMICA"]
     d["TABLA_VALOR"] = tabla_valor_usada(d)
+    d["INST_LIQ_RESIDENCIAL"] = (d["TABLA_VALOR_RESIDENCIAL"].fillna("").astype(str).ne("").astype(int)
+                                 if "TABLA_VALOR_RESIDENCIAL" in d.columns else 0)
     print(f"   Bloques (tabla x actividad): {d['CLAVE'].nunique()}")
     return d
 
@@ -1428,6 +1436,10 @@ DICCIONARIO_DETALLE = [
      "comunas urbanas; 51 a 65 son rurales (corregimientos): se liquidan "
      "con la entrega rural (reglas_rurales.py) cuando LIQUIDAR_RURAL esta "
      "prendido en Liquidacion_tablas.py; su vigencia comercial es catastral / 0,6"),
+    ("INST_LIQ_RESIDENCIAL", "1 si es institucional (T5 a T8) liquidada con la tabla residencial",
+     "regla aprobada el 27/11/2026: institucionales en ZHF residencial de las 5C nuevas "
+     "(07, 14, 15, 20, 21; tipologia 011-016) y de lo rural (uso de la ZHF 11-16). "
+     "TABLA_ORIGEN sigue institucional y TABLA_VALOR es la columna residencial"),
     ("CORREGIMIENTO", "Solo rural: nombre del corregimiento",
      "51 Navarro ... 65 Golondrinas (reglas_rurales.CORREGIMIENTOS). Vacia en lo urbano"),
     ("ZONA", "URBANO (comunas 01 a 22) o RURAL (corregimientos 51 a 65)",
@@ -1459,24 +1471,6 @@ DICCIONARIO_DETALLE = [
      "pasan por la comparacion de construcciones, solo entran las que tienen "
      "valor en la tabla, y lo que no les aplica (puntaje, ZHF, terreno, "
      "avaluo, rangos) va en 0 o vacio"),
-    ("COMPARADA_INST_RES", "Ejercicio institucional: 1 si la construccion se compara con la vigencia, "
-     "0 si no", "0 = su predio tiene anexo o quedo incompleto: va con su valor 2026 y 2027 y el "
-     "ejercicio, sin avaluo del predio, y no entra a los resumenes ni a la app. Vacia fuera del ejercicio"),
-    ("COLUMNA_INST_RES", "Ejercicio institucional con tabla residencial: la columna usada",
-     "la de las residenciales urbanas: T1_RESIDENCIAL_7C_<tipologia> en las 7 comunas; "
-     "en las 10, T1_RESIDENCIAL_10C_COND_9_<tipologia> si la condicion es 9 y COND_0 si no. "
-     "Solo en construcciones urbanas con tabla T5 a T8 y ZHF 011 a 016; vacia en las demas"),
-    ("VM2_COM_INST_RES", "VM2 comercial 2027 si el institucional se liquidara con la residencial",
-     "la columna de COLUMNA_INST_RES en la fila de su puntaje (PUNTCONS)"),
-    ("VM2_CAT_INST_RES", "VM2 catastral 2027 con la residencial", "VM2_COM_INST_RES x 0,7"),
-    ("VALORCONS_COM_INST_RES", "Valor total comercial 2027 con la residencial",
-     "VM2_COM_INST_RES x AREA_CONST"),
-    ("VALORCONS_CAT_INST_RES", "Valor total catastral 2027 con la residencial",
-     "VALORCONS_COM_INST_RES x 0,7"),
-    ("DIF_VM2_COM_INST_RES", "VM2 residencial menos VM2 institucional (comercial)",
-     "VM2_COM_INST_RES - VM2_COM_LIQ: negativo = la residencial da menos"),
-    ("VARIACION_COM_INST_RES_PCT", "Variacion del VM2 residencial frente al vigente 2026 (comercial)",
-     "VM2_COM_INST_RES / VM2_COM_VIGENCIA - 1, en %"),
     ("EN_CERO", "1 si la construccion quedo en $ 0 en la liquidacion 2027, 0 si tomo valor",
      "las de $ 0 no se comparan: van solo con sus datos de identificacion y el "
      "valor vigente, y no entran a la app ni a los resumenes. Las mismas del "
@@ -1513,7 +1507,10 @@ DICCIONARIO_DETALLE = [
      "un cambio, es que antes o ahora no habia dato"),
     ("ACTIVIDAD_ECONOMICA", "Actividad de la ZHF donde esta la construccion",
      "residencial 011-016, comercial 021-023, industrial 031-033, el resto "
-     "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF"),
+     "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF. En lo rural "
+     "es el uso de la ZHF rural (2 ultimos digitos con su nombre, p. ej. 12 "
+     "Residencial_tipo2) y va en TODAS las filas rurales, tambien anexos, parqueaderos "
+     "y las de $ 0 (con la ZHF del predio)"),
     ("CLASIFICACION_SUELO", "Solo rural: clasificacion del suelo de la ZHF rural",
      "1er digito de la ZHF de 12 digitos: 1 Rural, 2 Expansion urbana "
      "(ESTRUCTURA_ZHF_RURAL_2026_Ajust_V5). Vacia en lo urbano"),
@@ -1628,7 +1625,7 @@ DICCIONARIO_DETALLE = [
 COLUMNAS_EXCEL_DETALLE = [
     "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "N_CONST_PREDIO",
     "COMUNA", "CORREGIMIENTO", "ZONA", "ESTRPRED", "USO_LADM", "CONDICION",
-    "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR",
+    "GRUPO_COMUNAS", "TABLA_ORIGEN", "TABLA_VALOR", "INST_LIQ_RESIDENCIAL",
     # Lo que quedo en $ 0 tambien va al Excel, marcado: no entra a la app ni a
     # los resumenes (el R lo excluye), pero el detalle queda completo.
     "EN_CERO", "MOTIVO_CERO",
@@ -1649,11 +1646,6 @@ COLUMNAS_EXCEL_DETALLE = [
     "VM2_CAT_VIGENCIA", "VM2_CAT_LIQ", "DIF_CAT_ABS", "VARIACION_CAT_PCT",
     "RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_TERR", "RANGO_AVALUO",
     "VM2_COM_VIGENCIA", "VM2_COM_LIQ", "DIF_COM_ABS", "VARIACION_COM_PCT",
-    # Ejercicio: institucionales (T5-T8) en ZHF residencial 011-016 liquidados
-    # con la residencial que les toca (7C, o 10C COND_9/COND_0). Vacias en las demas.
-    "COMPARADA_INST_RES", "COLUMNA_INST_RES", "VM2_COM_INST_RES", "VM2_CAT_INST_RES",
-    "VALORCONS_COM_INST_RES", "VALORCONS_CAT_INST_RES",
-    "DIF_VM2_COM_INST_RES", "VARIACION_COM_INST_RES_PCT",
     "AVALUO_CAT_VIGENCIA", "AVALUO_CAT_LIQ",
     "DIF_AVALUO_CAT", "VARIACION_AVALUO_CAT_PCT",
     "AVALUO_COM_VIGENCIA", "AVALUO_COM_LIQ",
@@ -2166,7 +2158,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "COMUNA", "ZONA", "GRUPO_COMUNAS", "ESTRPRED",
                 "ACTUALIZACION",
                 "F_COMERCIAL", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
-                "TABLA_VALOR", "ZHF", "TIPOLOGIA_ZHF",
+                "TABLA_VALOR", "INST_LIQ_RESIDENCIAL", "ZHF", "TIPOLOGIA_ZHF",
                 "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
                 "ESPECIAL", "PREDIO_ESPECIAL",
                 "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
@@ -2225,7 +2217,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
 
         # --- Recorte anonimo: es lo unico que sube al repositorio publico ---
         publicas = ["COMUNA", "ZONA", "ACTUALIZACION", "TABLA_ORIGEN",
-                    "TABLA_VALOR", "USO_LADM",
+                    "TABLA_VALOR", "INST_LIQ_RESIDENCIAL", "USO_LADM",
                     "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
                     # Cuantas construcciones tiene el predio de esta fila. Va
                     # en el recorte publico porque la app filtra por el; no

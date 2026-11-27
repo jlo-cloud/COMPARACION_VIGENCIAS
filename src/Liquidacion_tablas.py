@@ -61,6 +61,15 @@ def tablas_liquidacion(df_const):
     # y parqueaderos van con la misma regla de lo urbano. Con False lo rural
     # queda en 0, como estaba antes de la entrega.
     LIQUIDAR_RURAL = True
+
+    # Institucionales (T5 a T8) en ZHF residencial con la TABLA RESIDENCIAL que
+    # les tocaria. Aprobado el 27/11/2026 solo para las 5C nuevas (07, 14, 15,
+    # 20, 21) y para todo lo rural (uso de la ZHF rural 11 a 16). La regla y la
+    # columna que le toca a cada una salen de ejercicio_institucional.py.
+    # TABLA_ORIGEN sigue siendo la institucional; la columna residencial queda
+    # en TABLA_VALOR_RESIDENCIAL y el VM2 institucional en VM2_INSTITUCIONAL.
+    INSTITUCIONAL_COMO_RESIDENCIAL = True
+    COMUNAS_INST_RESIDENCIAL = ['07', '14', '15', '20', '21']
     if LIQUIDAR_RURAL:
         REGLAS_RURALES = reglas_rurales.cargar_reglas()
         print(f"Reglas rurales: {REGLAS_RURALES.attrs['archivo']}")
@@ -1514,6 +1523,30 @@ def tablas_liquidacion(df_const):
         print(f"   RURALES CON TABLA: {int((df_const.loc[m_rural, 'VM2_FINAL_V3'] > 0).sum()):,} "
               f"de {int(m_rural.sum()):,} con valor")
     
+    # Institucionales en ZHF residencial con la tabla residencial (ver arriba)
+    df_const['VM2_INSTITUCIONAL'] = np.nan
+    df_const['TABLA_VALOR_RESIDENCIAL'] = ''
+    if INSTITUCIONAL_COMO_RESIDENCIAL:
+        import ejercicio_institucional as ej_inst
+        com = df_const['COMUNA'].astype(str).str.strip().str.zfill(2)
+        m_ir = ej_inst.en_ejercicio(df_const.assign(COMUNA=com)) & (
+            com.isin(COMUNAS_INST_RESIDENCIAL) | (pd.to_numeric(com, errors='coerce') > 22))
+        if m_ir.any():
+            d_ir = df_const.loc[m_ir]
+            col_ir = ej_inst.columna_residencial(com[m_ir], d_ir['CONDICION'],
+                                                 d_ir['TIPOLOGIA_ZHF'], d_ir['ZHF'])
+            vm2_ir = pd.to_numeric(ej_inst.vm2_residencial(d_ir['PUNTCONS'], col_ir), errors='coerce')
+            ok = (vm2_ir > 0).to_numpy()
+            idx = d_ir.index[ok]
+            df_const.loc[idx, 'VM2_INSTITUCIONAL'] = df_const.loc[idx, 'VM2_FINAL_V3']
+            df_const.loc[idx, 'VM2_FINAL_V3'] = vm2_ir[ok].to_numpy()
+            df_const.loc[idx, 'TABLA_VALOR_RESIDENCIAL'] = col_ir[ok].to_numpy()
+            rural_ir = pd.to_numeric(com[idx], errors='coerce') > 22
+            print(f"   INSTITUCIONALES CON TABLA RESIDENCIAL: {len(idx):,} "
+                  f"({int((~rural_ir).sum()):,} urbanas en 07/14/15/20/21 y {int(rural_ir.sum()):,} rurales)"
+                  + (f"; {int((~ok).sum()):,} sin valor residencial siguen con la institucional"
+                     if (~ok).any() else ""))
+
     def actualizar_valores(df_const):
         """
         Aplica factor de área y calcula LIQ_PARQUEADERO solo para códigos 007, 008, 036, 037

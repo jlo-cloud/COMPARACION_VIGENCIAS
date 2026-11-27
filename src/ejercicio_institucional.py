@@ -227,11 +227,29 @@ def armar(liq: pd.DataFrame | None = None) -> pd.DataFrame:
         import pyarrow.parquet as pq
         ruta = CONFIG["parquet_liquidacion"]
         hay = set(pq.ParquetFile(ruta).schema_arrow.names)
-        usar = [c for c in COLUMNAS_EXCEL + ["TABLA_ORIGEN", "VM2", "VALORCONS"] if c in hay]
+        usar = [c for c in COLUMNAS_EXCEL + ["TABLA_ORIGEN", "VM2", "VM2_INSTITUCIONAL", "VALORCONS", "CAMBIO_TIPOLOGIA",
+                                         "ESPECIAL"] if c in hay]
         liq = pd.read_parquet(ruta, columns=usar)
+    # Construcciones del predio (sobre toda la liquidacion, antes de filtrar)
+    # Misma regla que comparacion_vigencia.preparar: sin contar los anexos (T10)
+    n_const = None
+    if "ID_PREDIO" in liq.columns:
+        no_anexo = liq["TABLA_ORIGEN"].astype(str) != "T10_ANEXOS"
+        conteo = liq[no_anexo].groupby("ID_PREDIO").size()
+        n_const = liq["ID_PREDIO"].map(conteo).fillna(0).astype(int)
     d = liq[en_ejercicio(liq)].copy()
+    if n_const is not None:
+        d["N_CONST_PREDIO"] = n_const.loc[d.index].to_numpy()
     d["COMUNA"] = d["COMUNA"].astype(str).str.zfill(2)
     d["ZONA"] = np.where(_es_rural(d["COMUNA"]), "RURAL", "URBANO")
+    # Las variables con que filtra la barra lateral de la app
+    import reglas_rurales
+    from comparacion_vigencia import actividad_economica
+    rural = _es_rural(d["COMUNA"])
+    d["ACTIVIDAD_ECONOMICA"] = actividad_economica(d).to_numpy()
+    zhf = d["ZHF"].astype(str)
+    d["CLASIFICACION_SUELO"] = reglas_rurales.clasificacion_suelo(zhf).where(rural, "")
+    d["AREA_MANEJO"] = reglas_rurales.area_manejo(zhf).where(rural, "")
     d["TABLA_INSTITUCIONAL"] = d["TABLA_ORIGEN"].astype(str)
     d["COLUMNA_RESIDENCIAL"] = columna_residencial(d["COMUNA"], d["CONDICION"],
                                                    d["TIPOLOGIA_ZHF"], d["ZHF"])
@@ -242,7 +260,11 @@ def armar(liq: pd.DataFrame | None = None) -> pd.DataFrame:
 
     # VM2 residencial: la columna que le toca, en la fila de su puntaje
     d["VM2_COM_RESIDENCIAL"] = vm2_residencial(d["PUNTCONS"], d["COLUMNA_RESIDENCIAL"])
+    # El VM2 de la tabla institucional; donde ya se liquida con la residencial
+    # (5C nuevas y rural) la liquidacion guarda el institucional en VM2_INSTITUCIONAL.
     d["VM2_COM_INSTITUCIONAL"] = pd.to_numeric(d["VM2"], errors="coerce")
+    if "VM2_INSTITUCIONAL" in d.columns:
+        d["VM2_COM_INSTITUCIONAL"] = pd.to_numeric(d["VM2_INSTITUCIONAL"], errors="coerce")             .fillna(d["VM2_COM_INSTITUCIONAL"])
 
     area = pd.to_numeric(d["AREA_CONST"], errors="coerce")
     d["VALORCONS_COM_VIGENCIA"] = pd.to_numeric(d["VALORCONS"], errors="coerce") / factor_comercial(d).to_numpy()
@@ -342,9 +364,13 @@ def generar() -> tuple[str, str]:
         w.sheets["DICCIONARIO"].set_column(1, 1, 110)
 
     # Para la app: sin identificadores y redondeado, como los demas recortes
-    app = d[["COMUNA", "ZONA", "TABLA_INSTITUCIONAL", "TIPOLOGIA_ZHF", "GRUPO_RESIDENCIAL", "USO_LADM",
-             "PUNTCONS", "AREA_CONST",
-             "VM2_COM_VIGENCIA", "VM2_COM_INSTITUCIONAL", "VM2_COM_RESIDENCIAL"]].copy()
+    app = d[[c for c in ["COMUNA", "ZONA", "TABLA_INSTITUCIONAL", "TIPOLOGIA_ZHF", "GRUPO_RESIDENCIAL",
+             "USO_LADM", "PUNTCONS", "AREA_CONST", "CONDICION", "CAMBIO_TIPOLOGIA", "ESPECIAL",
+             "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "N_CONST_PREDIO",
+             "VM2_COM_VIGENCIA", "VM2_COM_INSTITUCIONAL", "VM2_COM_RESIDENCIAL"] if c in d.columns]].copy()
+    for col in ("CAMBIO_TIPOLOGIA", "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO"):
+        if col in app.columns:
+            app[col] = app[col].astype(str)
     for col in ("VM2_COM_VIGENCIA", "VM2_COM_INSTITUCIONAL", "VM2_COM_RESIDENCIAL"):
         app[col] = (app[col] / 100).round() * 100
     app = app.sort_values(["TABLA_INSTITUCIONAL", "TIPOLOGIA_ZHF", "VM2_COM_INSTITUCIONAL"],

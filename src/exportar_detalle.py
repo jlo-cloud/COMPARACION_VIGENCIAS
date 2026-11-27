@@ -94,15 +94,6 @@ def main():
     print(f"Leyendo {origen}")
     print(f"   (lo dejo la corrida del {hecho:%Y-%m-%d %H:%M})")
     det = pd.read_parquet(origen)
-    # Ejercicio institucional con la tabla residencial que le toca (columnas *_INST_RES)
-    from ejercicio_institucional import (COLUMNAS_INST_RES, columnas_inst_res,
-                                         filas_no_comparadas)
-    det = det.join(columnas_inst_res(det))
-    # 1 en las del ejercicio que se comparan; vacia en las demas
-    det["COMPARADA_INST_RES"] = det["VM2_COM_INST_RES"].notna().map({True: 1, False: None})
-    inst_no_comp = filas_no_comparadas(det)
-    print(f"   Ejercicio institucional con tabla residencial: "
-          f"{int(det['VM2_COM_INST_RES'].notna().sum()):,} construcciones")
 
     # El mismo nombre que le ponia el main.
     sufijo = "" if CONFIG["base_valor"] == "CATASTRAL" else "_COMERCIAL"
@@ -157,21 +148,31 @@ def main():
     for c in ("RANGO_TERR", "RANGO_AVALUO"):
         filas[c] = sin_comparacion
     filas = filas.fillna(0)
-    for c in COLUMNAS_INST_RES + ["COMPARADA_INST_RES"]:   # no aplican a anexos ni parqueaderos
-        filas[c] = "" if c == "COLUMNA_INST_RES" else float("nan")
     filas["EN_CERO"], filas["MOTIVO_CERO"] = 0, ""
     n_anx = int((filas["TABLA_ORIGEN"] == "T10_ANEXOS").sum())
     n_parq = len(filas) - n_anx
     det["EN_CERO"], det["MOTIVO_CERO"] = 0, ""
     cero = filas_en_cero(det.columns)
-    for c in COLUMNAS_INST_RES + ["COMPARADA_INST_RES"]:
-        cero[c] = "" if c == "COLUMNA_INST_RES" else float("nan")
     cols_det = [c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]
-    det = pd.concat([det[cols_det], inst_no_comp.reindex(columns=cols_det),
-                     filas[cols_det], cero[cols_det]], ignore_index=True)
+    det = pd.concat([det[cols_det], filas[cols_det], cero[cols_det]], ignore_index=True)
     det["CORREGIMIENTO"] = reglas_rurales.corregimiento(det["COMUNA"]).to_numpy()
-    print(f"   + {len(inst_no_comp):,} institucionales del ejercicio que no se comparan "
-          f"(COMPARADA_INST_RES = 0)")
+
+    # Lo rural con su ZHF en TODAS las filas: los anexos y parqueaderos llegan
+    # sin ZHF (se arman desde su propia comparacion) y las filas en $ 0 sin
+    # uso. La ZHF es la del predio; de ella salen el uso de la ZHF rural, la
+    # clasificacion del suelo y el area de manejo.
+    rural = det["ZONA"].astype(str).eq("RURAL")
+    zhf_txt = det["ZHF"].astype(str).str.strip()
+    falta = rural & ~zhf_txt.str.fullmatch(r"\d{12}")
+    if falta.any():
+        zhf_predio = (pd.read_parquet(CONFIG["parquet_liquidacion"], columns=["ID_PREDIO", "ZHF"])
+                      .astype(str).drop_duplicates("ID_PREDIO").set_index("ID_PREDIO")["ZHF"])
+        det.loc[falta, "ZHF"] = det.loc[falta, "ID_PREDIO"].astype(str).map(zhf_predio).fillna("").to_numpy()
+    zhf_r = det.loc[rural, "ZHF"].astype(str)
+    # En lo rural ACTIVIDAD_ECONOMICA es el uso de la ZHF rural ('12 Residencial_tipo2')
+    det.loc[rural, "ACTIVIDAD_ECONOMICA"] = reglas_rurales.actividad_rural(zhf_r).to_numpy()
+    det.loc[rural, "CLASIFICACION_SUELO"] = reglas_rurales.clasificacion_suelo(zhf_r).to_numpy()
+    det.loc[rural, "AREA_MANEJO"] = reglas_rurales.area_manejo(zhf_r).to_numpy()
     print(f"   + {len(cero):,} construcciones en $ 0 (EN_CERO = 1), como en "
           f"post-inconsistencias")
 
