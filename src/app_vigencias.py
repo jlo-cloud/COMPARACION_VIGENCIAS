@@ -728,15 +728,23 @@ with st.sidebar:
     df_construccion = cargar_versiones(NOMBRE_DATOS, "construccion",
                                        marcas_de(NOMBRE_DATOS), ZONA_SEL)
 
+    # Solo las versiones que traen datos de la zona elegida: lo rural se
+    # liquido desde la V2, y ofrecer la V1 en Rural dejaba elegir una version
+    # vacia.
+    con_datos = set(df_construccion["VERSION"].dropna().astype(str)) \
+        if "VERSION" in df_construccion.columns else set(VERSIONES)
+    versiones_zona = [v for v in VERSIONES if v in con_datos] or [VERSIONES[-1]]
     sel_versiones = st.multiselect(
-        "Versión de tablas", VERSIONES, default=[VERSIONES[-1]],
+        "Versión de tablas", versiones_zona, default=[versiones_zona[-1]],
+        key=f"versiones_{ZONA_SEL}",
+        disabled=len(versiones_zona) == 1,
         help="Con qué versión de las tablas de valor se liquida 2027. Con una "
              "sola, la app se ve como siempre. Con dos o más, cada tabla sale "
              "una vez por versión (por ejemplo T3_COMERCIAL · V1 y "
              "T3_COMERCIAL · V2) para compararlas lado a lado. Vacío = la más "
-             "reciente.")
-    sel_versiones = ([v for v in VERSIONES if v in sel_versiones]
-                     or [VERSIONES[-1]])
+             "reciente. Lo rural solo existe desde la V2.")
+    sel_versiones = ([v for v in versiones_zona if v in sel_versiones]
+                     or [versiones_zona[-1]])
     varias_versiones = len(sel_versiones) > 1
 
     excluir_predios_especiales = st.checkbox(
@@ -2034,6 +2042,11 @@ Sin área, sin valor, sin puntaje o sin VM2 de tabla: no hay con qué comparar.
 # tienen ZHF residencial (011 a 016): su VM2 con la tabla institucional frente
 # al que les daria la residencial que les toca (7C en las 7 comunas; en las 10,
 # COND_9 o COND_0 segun la condicion), y frente al vigente 2026.
+CORREGIMIENTOS = {   # igual que reglas_rurales.CORREGIMIENTOS (la app no lo importa)
+    "51": "Navarro", "52": "El Hormiguero", "53": "Pance", "54": "La Buitrera",
+    "55": "Villacarmelo", "56": "Los Andes", "57": "Pichinde", "58": "La Leonera",
+    "59": "Felidia", "60": "El Saladito", "61": "La Elvira", "62": "La Castilla",
+    "63": "La Paz", "64": "Montebello", "65": "Golondrinas"}
 NOMBRES_INST = {"T5_INSTITUCIONAL_ED": "T5 Educativo", "T6_INSTITUCIONAL_SA": "T6 Salud",
                 "T7_INSTITUCIONAL_SER": "T7 Servicios", "T8_INSTITUCIONAL_IG": "T8 Culto"}
 with hoja_ejercicio:
@@ -2072,7 +2085,13 @@ with hoja_ejercicio:
             ej = ej[ej["COMUNA"].isin(sel_comuna)]
         if sel_grupo:
             ej = ej[ej["COMUNA"].isin(comunas_de_grupos(sel_grupo))]
-        e1, e2, e3 = st.columns(3)
+        e0, e1, e2, e3 = st.columns(4)
+        sel_com_ej = e0.multiselect(
+            "Comuna" if ZONA_SEL == "URBANO" else "Corregimiento",
+            sorted(ej["COMUNA"].unique()), key=f"ej_comuna_{ZONA_SEL}",
+            format_func=lambda c: f"{c} · {CORREGIMIENTOS[c]}" if c in CORREGIMIENTOS else c)
+        if sel_com_ej:
+            ej = ej[ej["COMUNA"].isin(sel_com_ej)]
         sel_tabla_ej = e1.multiselect("Tabla institucional", list(NOMBRES_INST.values()), key="ej_tabla")
         sel_tip_ej = e2.multiselect("Tipología ZHF", ["011", "012", "013", "014", "015", "016"], key="ej_tip")
         sel_grp_ej = (e3.multiselect("Tabla residencial", sorted(ej["GRUPO_RESIDENCIAL"].dropna().unique()),
