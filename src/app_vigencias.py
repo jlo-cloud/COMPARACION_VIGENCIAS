@@ -1996,12 +1996,10 @@ with hoja_reglas:
                     "rural tiene uso residencial (11 a 16) se liquidan con la tabla residencial: la "
                     "columna que la entrega le da a la Vivienda_Hasta_3_Pisos (012) en ese uso. La "
                     "tabla de origen sigue siendo la institucional. Aprobado el 27/11/2026.")
-            with st.expander("Ver la entrega rural completa (una fila por uso y uso de la ZHF)"):
-                st.dataframe(reg, width="stretch", hide_index=True,
-                             column_config={
-                                 "USO_LADM": st.column_config.TextColumn(width="medium"),
-                                 "TIPOLOGIA_RURAL": st.column_config.TextColumn(width="medium"),
-                                 "TABLA_RURAL_ENTREGA": st.column_config.TextColumn(width="medium")})
+            # La entrega completa (una fila por uso y uso de la ZHF) esta en el
+            # Drive, en la misma carpeta del detalle.
+            st.link_button("📂 REGLAS_RURALES_20261119 · entrega rural completa (Drive)",
+                           ENLACE_DETALLE_DRIVE, type="primary")
         else:
             st.info("Esta versión no trae las reglas rurales.")
     else:
