@@ -626,7 +626,7 @@ def cargar_detalles(fuentes: tuple, zona: str = "URBANO") -> pd.DataFrame:
 
 # Las columnas del detalle que se muestran en la vista corta.
 COLUMNAS_DETALLE_FIJAS = [
-    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA",
+    "ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "COMUNA", "CORREGIMIENTO",
     "GRUPO_COMUNAS", "ESTRPRED", "USO_LADM", "CONDICION", "TABLA_ORIGEN",
     "TABLA_VALOR", "ZHF", "ACTIVIDAD_ECONOMICA", "PUNTCONS", "AREA_CONST",
 ]
@@ -917,8 +917,9 @@ with st.sidebar:
         "Separar los resultados por", list(aperturas), index=0,
         help="Con lo que se elija aquí se parten las tablas y los gráficos: "
              "una fila del resumen y un gráfico por cada valor de esa "
-             "columna. Con «Comuna» (en rural, «Corregimiento»), por ejemplo, sale "
-             "una fila y un gráfico por cada una.")
+             "columna. Con «" + ("Comuna" if ZONA_SEL == "URBANO" else "Corregimiento")
+             + "», por ejemplo, sale una fila y un gráfico por cada "
+             + ("comuna." if ZONA_SEL == "URBANO" else "corregimiento."))
     col_apertura = aperturas[etiqueta_apertura]
     min_predios = st.number_input(
         f"Mínimo de {unidades} por grupo", 1, 5000, 5,
@@ -1583,6 +1584,13 @@ with hoja_detalle:
         if detf.empty:
             st.warning("Ninguna construcción cumple lo pedido.")
         else:
+            # En rural no hay comunas: la columna es el corregimiento (con su
+            # nombre) y los grupos de comunas no aplican.
+            if ZONA_SEL == "RURAL" and "COMUNA" in detf.columns:
+                detf = detf.drop(columns=["GRUPO_COMUNAS"], errors="ignore").rename(
+                    columns={"COMUNA": "CORREGIMIENTO"})
+                detf["CORREGIMIENTO"] = detf["CORREGIMIENTO"].astype(str).map(
+                    lambda c: f"{c} {CORREGIMIENTOS[c]}" if c in CORREGIMIENTOS else c)
             # Columnas: las fijas mas las cuatro de la medida elegida.
             cols_medida = [c for c in (medida["vig"], medida["liq"],
                                        medida.get("dif"), medida["var"])
@@ -1606,8 +1614,17 @@ with hoja_detalle:
             cols = cortas if vista.startswith("Las") else list(detf.columns)
             st.caption(f"**{entero(len(detf))} construcciones** cumplen la "
                        f"selección · se muestran las primeras {entero(n_ver)}")
-            st.dataframe(con_formato(detf[cols].head(int(n_ver))),
-                         width="stretch", hide_index=True)
+            vista_det = detf[cols].head(int(n_ver))
+            if ZONA_SEL == "RURAL":
+                # En lo rural no hay comunas: la columna es el corregimiento,
+                # con su nombre, y los grupos de comunas no aplican.
+                vista_det = vista_det.drop(columns=["GRUPO_COMUNAS"], errors="ignore")
+                if "COMUNA" in vista_det.columns:
+                    cod = vista_det["COMUNA"].astype(str).str.zfill(2)
+                    vista_det = vista_det.assign(COMUNA=cod.map(
+                        lambda c: f"{c} · {CORREGIMIENTOS[c]}" if c in CORREGIMIENTOS else c)
+                    ).rename(columns={"COMUNA": "CORREGIMIENTO"})
+            st.dataframe(con_formato(vista_det), width="stretch", hide_index=True)
 
             st.divider()
             st.markdown("**Bajar esta selección**")
@@ -1927,29 +1944,61 @@ with hoja_reglas:
                     "- **Oficinas_Consultorios_en_PH (034)** → regla de Oficinas_Consultorios (032): "
                     "**T7_INSTITUCIONAL_SER_17C**, en cualquier uso de la ZHF.\n\n"
                     "En lo urbano los tres siguen por modelo.")
+            # Resumida: una fila por uso y tabla. En cada uso la tabla que mas
+            # se repite es "los demas usos de la ZHF" y solo se listan las
+            # excepciones; si el uso tiene una sola tabla, "cualquier uso".
+            r = reg.fillna("").copy()
+            r = r[r["USO_ZHF"].astype(str) != "SIN ZHF"]
+            r["TABLA"] = r["TABLA_RURAL_ENTREGA"].astype(str).replace("", "Sin tabla")
+            filas_r = []
+            for (tipo, dest, uso), s in r.groupby(["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM"],
+                                                  sort=False):
+                cuenta = s["TABLA"].value_counts()
+                principal = cuenta.index[0]
+                for tabla, st_ in s.groupby("TABLA", sort=False):
+                    if len(cuenta) == 1:
+                        zhf_txt = "Cualquier uso de la ZHF"
+                    elif tabla == principal:
+                        zhf_txt = "Los demás usos de la ZHF"
+                    else:
+                        zhf_txt = ", ".join(f"{u} {t}".strip() for u, t in
+                                            zip(st_["USO_ZHF"], st_["TIPOLOGIA_RURAL"]))
+                    filas_r.append({"TIPO": tipo, "DESTINO": dest, "USO_LADM": uso,
+                                    "USO DE LA ZHF RURAL": zhf_txt, "TABLA": tabla,
+                                    "_o": 0 if tabla == principal else 1})
+            resumen_r = (pd.DataFrame(filas_r).sort_values(["TIPO", "DESTINO", "_o"], kind="stable")
+                         .drop(columns="_o"))
+            st.dataframe(resumen_r, width="stretch", hide_index=True,
+                         column_config={
+                             "USO_LADM": st.column_config.TextColumn(width="medium"),
+                             "USO DE LA ZHF RURAL": st.column_config.TextColumn(width="large"),
+                             "TABLA": st.column_config.TextColumn(width="medium")})
+            st.caption(f"{len(resumen_r)} reglas resumidas de las {len(reg)} filas de la entrega rural. "
+                       "Lo que no tiene ZHF no se liquida (sale en post-inconsistencias).")
             st.info("**Institucionales en zona residencial.** Las institucionales (T5 a T8) cuya ZHF "
                     "rural tiene uso residencial (11 a 16) se liquidan con la tabla residencial: la "
                     "columna que la entrega le da a la Vivienda_Hasta_3_Pisos (012) en ese uso. La "
                     "tabla de origen sigue siendo la institucional. Aprobado el 27/11/2026.")
-            st.dataframe(reg, width="stretch", hide_index=True,
-                         column_config={
-                             "USO_LADM": st.column_config.TextColumn(width="medium"),
-                             "TIPOLOGIA_RURAL": st.column_config.TextColumn(width="medium"),
-                             "TABLA_RURAL_ENTREGA": st.column_config.TextColumn(width="medium")})
+            with st.expander("Ver la entrega rural completa (una fila por uso y uso de la ZHF)"):
+                st.dataframe(reg, width="stretch", hide_index=True,
+                             column_config={
+                                 "USO_LADM": st.column_config.TextColumn(width="medium"),
+                                 "TIPOLOGIA_RURAL": st.column_config.TextColumn(width="medium"),
+                                 "TABLA_RURAL_ENTREGA": st.column_config.TextColumn(width="medium")})
         else:
             st.info("Esta versión no trae las reglas rurales.")
     else:
         st.subheader("Asignación de tablas de valor")
-        st.info("**Institucionales en zona residencial (5C nuevas).** En las comunas 07, 14, 15, 20 "
-                "y 21, las institucionales (T5 a T8) en ZHF de tipología residencial (011 a 016) se "
-                "liquidan con la tabla residencial que les toca (T1_RESIDENCIAL_10C, COND_9 si la "
-                "condición es 9 y COND_0 si no). La tabla de origen sigue siendo la institucional. "
-                "En las demás comunas siguen con su tabla institucional. Aprobado el 27/11/2026.")
         st.dataframe(reglas, width="stretch", hide_index=True,
                      column_config={
                          "COMUNAS": st.column_config.TextColumn(width="medium"),
                          "EXCEPCIONES": st.column_config.TextColumn(width="large")})
         st.caption( "Se identifica el uso de la construcción, la condición jurídica, la tipología y la ZHF. " "Con esta información se determina la tabla de valor correspondiente a la comuna y se " "selecciona la columna asociada en el archivo de tablas de valor. Posteriormente, el VM² " "se obtiene de la intersección entre dicha columna y la fila correspondiente al puntaje " "de construcción (PUNTCONS), cuyo rango va de 1 a 100." )
+        st.info("**Institucionales en zona residencial (5C nuevas).** En las comunas 07, 14, 15, 20 "
+                "y 21, las institucionales (T5 a T8) en ZHF de tipología residencial (011 a 016) se "
+                "liquidan con la tabla residencial que les toca (T1_RESIDENCIAL_10C, COND_9 si la "
+                "condición es 9 y COND_0 si no). La tabla de origen sigue siendo la institucional. "
+                "En las demás comunas siguen con su tabla institucional. Aprobado el 27/11/2026.")
 
         st.divider()
         st.markdown("**Tablas de valor por versión**")

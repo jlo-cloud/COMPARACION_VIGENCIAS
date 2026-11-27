@@ -358,7 +358,7 @@ COLUMNAS = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "CONSTRUCCION_ID", "USO_LADM
             # ESPECIAL ya viene mas abajo en esta misma lista: la leia la regla
             # de exclusion que se retiro. Se conserva ahi y ahora se usa solo
             # para subirla a nivel predio y mostrarla en el detalle.
-            "PUNTCONS",
+            "PUNTCONS", "ANOCONST",
             "ACONCONS", "AREA_CONST", "VALORCONS", "VM2", "VM2_MOD",
             "VM2_ESP_2026", "ESPECIAL_2026", "VTER", "VALOANEX", "VANEXO",
             "AVALPRED",
@@ -1505,7 +1505,7 @@ DICCIONARIO_DETALLE = [
      "1 y 0 solo cuando las DOS tipologias existen. Si a alguna le falta "
      "-vacia o en cero- no hay con que comparar y dice SIN COMPARACION: no es "
      "un cambio, es que antes o ahora no habia dato"),
-    ("ACTIVIDAD_ECONOMICA", "Actividad de la ZHF donde esta la construccion",
+    ("USO_ZHF", "Uso de la ZHF donde esta la construccion (en la app: actividad economica de la ZHF)",
      "residencial 011-016, comercial 021-023, industrial 031-033, el resto "
      "OTRAS; se lee de los ultimos 3 digitos del ZHF, no de TIPOLOGIA_ZHF. En lo rural "
      "es el uso de la ZHF rural (2 ultimos digitos con su nombre, p. ej. 12 "
@@ -1524,6 +1524,8 @@ DICCIONARIO_DETALLE = [
     ("PUNTCONS", "Puntaje de la construccion",
      "de la base; con el se busca en la tabla. 0 en anexos y parqueaderos, "
      "que no se liquidan por puntaje"),
+    ("ANOCONST", "Año de construcción", "de la base de construcciones, tal como llega"),
+    ("EDAD", "Edad de la construcción en años, a 2027 (2027 - ANOCONST); vacía si no hay año válido", ""),
     ("ACONCONS", "Area construida segun la base",
      "0 en anexos y parqueaderos: su area va en AREA_CONST"),
     ("AREA_CONST", "Area construida con que liquida 2026",
@@ -1634,8 +1636,8 @@ COLUMNAS_EXCEL_DETALLE = [
     # completo no se puede verificar de donde salio TIPOLOGIA_ZHF_ANTERIOR.
     "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
     "ESPECIAL", "PREDIO_ESPECIAL",
-    "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
-    "PUNTCONS", "ACONCONS", "AREA_CONST",
+    "USO_ZHF", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
+    "PUNTCONS", "ANOCONST", "EDAD", "ACONCONS", "AREA_CONST",
     "VTER_CAT_BASE", "VTER_CAT_PROYECTADO", "VTER_COM_BASE", "VTER_COM_PROYECTADO",
     "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT",
     "VANEXO",
@@ -1720,9 +1722,8 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
         # en su mismo orden: si listara las que no estan, mandaria a buscar
         # columnas que el archivo no trae.
         desc = {c: (q, n) for c, q, n in DICCIONARIO_DETALLE}
-        dic = pd.DataFrame([(c, *desc.get(c, ("", ""))) for c in d.columns],
-                           columns=["VARIABLE", "DESCRIPCIÓN",
-                                    "DE DÓNDE SALE / NOTA"])
+        dic = pd.DataFrame([(c, desc.get(c, ("", ""))[0]) for c in d.columns],
+                           columns=["VARIABLE", "DESCRIPCIÓN"])
         hojas_extra = []
         for nombre_x, tabla_x in (extras or {}).items():
             tabla_x = tabla_x.copy()
@@ -1731,7 +1732,7 @@ def exportar_detalle_excel(det: pd.DataFrame, ruta: str,
                     tabla_x[c] = tabla_x[c].astype(str)
             hojas_extra.append((nombre_x[:31], tabla_x, None))
         for nombre, tabla, anchos in ([("Detalle", d, None)] + hojas_extra
-                                      + [("Diccionario", dic, (34, 60, 110))]):
+                                      + [("Diccionario", dic, (34, 90))]):
             hoja = libro.add_worksheet(nombre)
             for i, col in enumerate(tabla.columns):
                 fmt, ancho = (_formato_col(col) if anchos is None
@@ -2162,7 +2163,7 @@ def comparacion_vigencia(df_liq: pd.DataFrame | None = None,
                 "ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
                 "ESPECIAL", "PREDIO_ESPECIAL",
                 "ACTIVIDAD_ECONOMICA", "CLASIFICACION_SUELO", "AREA_MANEJO", "CLAVE",
-                "PUNTCONS", "ACONCONS", "AREA_CONST",
+                "PUNTCONS", "ANOCONST", "ACONCONS", "AREA_CONST",
                 "VTER_CAT_BASE", "VTER_CAT_PROYECTADO",
                 "VTER_COM_BASE", "VTER_COM_PROYECTADO",
                 "ORIGEN_TERRENO_LIQ", "INCREMENTO_TERRENO_PCT", "VANEXO",

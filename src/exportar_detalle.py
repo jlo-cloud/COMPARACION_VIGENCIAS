@@ -33,7 +33,7 @@ def filas_en_cero(columnas) -> pd.DataFrame:
     hay = set(pq.ParquetFile(ruta).schema_arrow.names)
     usar = [c for c in ("ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "COMUNA", "ESTRPRED",
                         "USO_LADM", "CONDICION", "TABLA_ORIGEN", "TABLA_RURAL", "MOTIVO_RURAL",
-                        "ZHF", "TIPOLOGIA_ZHF", "ESPECIAL", "PUNTCONS", "ACONCONS",
+                        "ZHF", "TIPOLOGIA_ZHF", "ESPECIAL", "PUNTCONS", "ANOCONST", "ACONCONS",
                         "AREA_CONST", "VALORCONS", "VALOANEX", "VM2", "LIQ_PARQUEADERO")
             if c in hay]
     liq = pd.read_parquet(ruta, columns=usar)
@@ -50,7 +50,7 @@ def filas_en_cero(columnas) -> pd.DataFrame:
               "TABLA_ORIGEN", "ZHF", "TIPOLOGIA_ZHF"):
         if c in z.columns:
             out[c] = z[c].astype(str).replace({"nan": "", "None": "", "<NA>": ""})
-    for c in ("ESTRPRED", "CONDICION", "ESPECIAL", "PUNTCONS", "ACONCONS", "AREA_CONST"):
+    for c in ("ESTRPRED", "CONDICION", "ESPECIAL", "PUNTCONS", "ANOCONST", "ACONCONS", "AREA_CONST"):
         if c in z.columns:
             out[c] = pd.to_numeric(z[c], errors="coerce").fillna(0)
     out["ZONA"] = (pd.to_numeric(z["COMUNA"], errors="coerce") > 22).map(
@@ -72,7 +72,7 @@ def filas_en_cero(columnas) -> pd.DataFrame:
     for c in ("RANGO_VM2", "RANGO_ANEXO", "RANGO_CONS_TOTAL", "RANGO_TERR", "RANGO_AVALUO"):
         out[c] = sin_comp
     for c in ("ZHF_ANTERIOR", "TIPOLOGIA_ZHF_ANTERIOR", "CAMBIO_TIPOLOGIA",
-              "ACTIVIDAD_ECONOMICA", "CLAVE", "ORIGEN_TERRENO_LIQ"):
+              "USO_ZHF", "CLAVE", "ORIGEN_TERRENO_LIQ"):
         out[c] = ""
     out["EN_CERO"] = 1
     out["MOTIVO_CERO"] = motivo(z).to_numpy()
@@ -94,6 +94,8 @@ def main():
     print(f"Leyendo {origen}")
     print(f"   (lo dejo la corrida del {hecho:%Y-%m-%d %H:%M})")
     det = pd.read_parquet(origen)
+    # En el Excel la actividad de la ZHF se llama USO_ZHF
+    det = det.rename(columns={"ACTIVIDAD_ECONOMICA": "USO_ZHF"})
 
     # El mismo nombre que le ponia el main.
     sufijo = "" if CONFIG["base_valor"] == "CATASTRAL" else "_COMERCIAL"
@@ -156,6 +158,9 @@ def main():
     cols_det = [c for c in COLUMNAS_EXCEL_DETALLE if c in det.columns]
     det = pd.concat([det[cols_det], filas[cols_det], cero[cols_det]], ignore_index=True)
     det["CORREGIMIENTO"] = reglas_rurales.corregimiento(det["COMUNA"]).to_numpy()
+    # Edad de la construccion en 2027 (anio de construccion valido: 1800 a 2027)
+    anio = pd.to_numeric(det.get("ANOCONST"), errors="coerce")
+    det["EDAD"] = (2027 - anio).where(anio.between(1800, 2027))
 
     # Lo rural con su ZHF en TODAS las filas: los anexos y parqueaderos llegan
     # sin ZHF (se arman desde su propia comparacion) y las filas en $ 0 sin
@@ -169,8 +174,8 @@ def main():
                       .astype(str).drop_duplicates("ID_PREDIO").set_index("ID_PREDIO")["ZHF"])
         det.loc[falta, "ZHF"] = det.loc[falta, "ID_PREDIO"].astype(str).map(zhf_predio).fillna("").to_numpy()
     zhf_r = det.loc[rural, "ZHF"].astype(str)
-    # En lo rural ACTIVIDAD_ECONOMICA es el uso de la ZHF rural ('12 Residencial_tipo2')
-    det.loc[rural, "ACTIVIDAD_ECONOMICA"] = reglas_rurales.actividad_rural(zhf_r).to_numpy()
+    # En lo rural USO_ZHF es el uso de la ZHF rural ('12 Residencial_tipo2')
+    det.loc[rural, "USO_ZHF"] = reglas_rurales.actividad_rural(zhf_r).to_numpy()
     det.loc[rural, "CLASIFICACION_SUELO"] = reglas_rurales.clasificacion_suelo(zhf_r).to_numpy()
     det.loc[rural, "AREA_MANEJO"] = reglas_rurales.area_manejo(zhf_r).to_numpy()
     print(f"   + {len(cero):,} construcciones en $ 0 (EN_CERO = 1), como en "
@@ -180,11 +185,7 @@ def main():
     # (el R de resumenes filtra ZONA = URBANO). Aparte solo va la cobertura
     # rural, que es un conteo y no filas de construccion.
     rural = det["ZONA"].astype(str).eq("RURAL")
-    extras = {}
-    if rural.any():
-        liq = pd.read_parquet(CONFIG["parquet_liquidacion"],
-                              columns=reglas_rurales.COLUMNAS_COBERTURA)
-        extras["Cobertura_Rural"] = reglas_rurales.cobertura(liq)
+    extras = {}       # sin hoja de cobertura rural: solo Detalle y Diccionario
 
     print(f"Escribiendo {len(det):,} filas a Excel ({int((~rural).sum()):,} urbanas y "
           f"{int(rural.sum()):,} rurales, columna ZONA; tarda unos minutos)...")

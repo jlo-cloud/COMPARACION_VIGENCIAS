@@ -44,6 +44,8 @@ COLUMNAS = {
     "TIPOANEXO": "Tipo del anexo",
     "TIPO_PARQ": "Parqueadero Sencillo (<= 50 m2) o Doble",
     "PUNTCONS": "Puntaje de la construccion",
+    "ANOCONST": "Año de construcción",
+    "EDAD": "Edad de la construcción en años, a 2027 (2027 - ANOCONST); vacía si no hay año válido",
     "AREA_CONST": "Area construida (m2)",
     "TABLA_ORIGEN": "Tabla o metodo asignado",
     "TABLA_VALOR": "Columna exacta del Excel de tablas (rural)",
@@ -60,7 +62,7 @@ COLUMNAS = {
 
 LEER = ["ID_PREDIO", "NUMERO_PREDIAL_NACIONAL", "COMUNA", "ZHF", "TIPOLOGIA_ZHF",
         "ESTRPRED", "CONDICION", "DESTINOCONS", "DESTANEX", "USO_LADM", "TIPOANEXO",
-        "TIPO_PARQ", "PUNTCONS", "AREA_CONST", "TABLA_ORIGEN", "TABLA_RURAL",
+        "TIPO_PARQ", "PUNTCONS", "ANOCONST", "AREA_CONST", "TABLA_ORIGEN", "TABLA_RURAL",
         "MOTIVO_RURAL", "METODO_LIQUIDACION", "VM2", "FACTOR_AREA",
         "LIQ_PARQUEADERO", "VALORCONS", "VALOANEX"]
 
@@ -77,6 +79,8 @@ def armar() -> pd.DataFrame:
     rural = pd.to_numeric(d["COMUNA"], errors="coerce") > 22
     d["ZONA"] = np.where(rural, "RURAL", "URBANO")
     d["CORREGIMIENTO"] = reglas_rurales.corregimiento(d["COMUNA"])
+    anio = num("ANOCONST")
+    d["EDAD"] = (2027 - anio).where(anio.between(1800, 2027))
     d["GRUPO_COMUNAS"] = grupo_comunas(d)
     zhf = d["ZHF"].astype(str)
     d["CLASIFICACION_SUELO"] = reglas_rurales.clasificacion_suelo(zhf).where(rural, "")
