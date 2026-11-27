@@ -349,6 +349,17 @@ EXC_T7 = ("Se liquida con T7_INSTITUCIONAL_SER_17C en el grupo 17C; no depende "
           "de la ZHF ni del estrato.")
 EXC_T8 = ("Se liquida con T8_INSTITUCIONAL_IG_17C en el grupo 17C; no depende "
           "de la ZHF ni del estrato.")
+# Regla aprobada el 27/11/2026: en las 5C nuevas, ZHF residencial -> tabla residencial
+_NOTA_INST_RES = (" Excepción: en las comunas 07, 14, 15, 20 y 21 con ZHF residencial "
+                  "(011 a 016) va con la tabla residencial 10C (ver filas de abajo).")
+EXC_T5 += _NOTA_INST_RES
+EXC_T6 += _NOTA_INST_RES
+EXC_T7 += _NOTA_INST_RES
+EXC_T8 += _NOTA_INST_RES
+USOS_INST = "Institucionales T5 a T8 (educación, salud, servicios y culto)"
+EXC_INST_RES = ("En las 5C nuevas (07, 14, 15, 20, 21) y con ZHF residencial (011 a 016) la "
+                "institucional se liquida con la tabla residencial 10C: COND_9 si la condición es 9 "
+                "y COND_0 si no. La tabla de origen sigue siendo la institucional. Aprobado el 27/11/2026.")
 EXC_T9 = "Se liquida con T9_HOTELES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T11 = "Se liquida con T11_CCOMERCIALES_17C en el grupo 17C; no depende de la ZHF ni del estrato."
 EXC_T13 = "Se liquida con T13_UNIDAD_DEPORTIVA_17C en el grupo 17C; no depende de la ZHF ni del estrato."
@@ -414,6 +425,10 @@ REGLAS_TABLA = [
      "T7_INSTITUCIONAL_SER_17C", ["NA"], EXC_T7),
     (USOS_T8, "17C", "NA",
      "T8_INSTITUCIONAL_IG_17C", ["NA"], EXC_T8),
+    (USOS_INST, "5C_N", "9",
+     "T1_RESIDENCIAL_10C_COND_9_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_INST_RES),
+    (USOS_INST, "5C_N", "Diferente de 9",
+     "T1_RESIDENCIAL_10C_COND_0_{t}", TIPOLOGIAS_RESIDENCIAL, EXC_INST_RES),
     (USOS_T9, "17C", "NA",
      "T9_HOTELES_17C", ["NA"], EXC_T9),
     (USOS_T10, "17C", "NA",
@@ -1950,14 +1965,24 @@ with hoja_reglas:
             r = reg.fillna("").copy()
             r = r[r["USO_ZHF"].astype(str) != "SIN ZHF"]
             r["TABLA"] = r["TABLA_RURAL_ENTREGA"].astype(str).replace("", "Sin tabla")
+            # Regla aprobada: institucionales (T5 a T8) en ZHF de uso residencial
+            # (11 a 16) van con la columna de la Vivienda_Hasta_3_Pisos (012).
+            inst = r["TABLA"].str.match(r"T[5-8]_INSTITUCIONAL") & r["USO_ZHF"].isin(
+                ["11", "12", "13", "14", "15", "16"])
+            r.loc[inst, "TABLA"] = "T1_RESIDENCIAL_10C_COND_9_0XX (XX = uso de la ZHF, como la vivienda 012)"
+            r["_RES"] = inst
             filas_r = []
             for (tipo, dest, uso), s in r.groupby(["TIPO_CONSTRUCCION", "DESTINOCONS", "USO_LADM"],
                                                   sort=False):
                 cuenta = s["TABLA"].value_counts()
                 principal = cuenta.index[0]
                 for tabla, st_ in s.groupby("TABLA", sort=False):
-                    if len(cuenta) == 1:
+                    if st_["_RES"].all():
+                        zhf_txt = "ZHF residencial (11 a 16)"
+                    elif len(cuenta) == 1:
                         zhf_txt = "Cualquier uso de la ZHF"
+                    elif tabla == principal and s["_RES"].any():
+                        zhf_txt = "Diferente de 11 a 16 (no residencial)"
                     elif tabla == principal:
                         zhf_txt = "Los demás usos de la ZHF"
                     else:
